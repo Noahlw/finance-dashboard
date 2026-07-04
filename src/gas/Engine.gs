@@ -314,6 +314,7 @@ var Engine = {
 
     sheet.getRange(row.rowIndex, c.status).setValue(nextStatus);
     if (selfApproved) sheet.getRange(row.rowIndex, c.self_approved).setValue(true);
+    if (action === 'APPROVE_PAYOUT') Payouts.onClaimApprovedForPayout(claimId);
     return nextStatus;
   },
 
