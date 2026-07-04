@@ -378,7 +378,30 @@ function Setup_ensureTreasurerUserSeeded() {
   var userId = 'U-0001';
   var now = Utilities.formatDate(new Date(), 'Asia/Hong_Kong', "yyyy-MM-dd'T'HH:mm:ssXXX");
   sheet.appendRow([userId, 'Treasurer', ROLES.TREASURER, email, true, now]);
+  // U-0001 is seeded directly, bypassing Ids.nextId — register it in
+  // Counters so the next real nextId('User') call starts at 2, not 1.
+  Setup_registerCounter('User', 1);
   return { created: true, userId: userId };
+}
+
+/**
+ * Ensure the Counters tab records at least `n` for entityType. Used
+ * when a row is seeded directly (bypassing Ids.nextId) so future
+ * nextId() calls never collide with the seeded ID.
+ * @param {string} entityType
+ * @param {number} n
+ */
+function Setup_registerCounter(entityType, n) {
+  var sheet = getSheet_(TABS.COUNTERS);
+  var values = sheet.getDataRange().getValues();
+  for (var i = 1; i < values.length; i++) {
+    if (values[i][COLS.Counters.entity - 1] === entityType) {
+      var current = Number(values[i][COLS.Counters.last_n - 1]) || 0;
+      if (current < n) sheet.getRange(i + 1, COLS.Counters.last_n).setValue(n);
+      return;
+    }
+  }
+  sheet.appendRow([entityType, n]);
 }
 
 /**
