@@ -102,9 +102,7 @@ function Jobs_lockClaims(now) {
       var hoursPaid = (now.getTime() - paidTs.getTime()) / (1000 * 60 * 60);
       if (hoursPaid > lockHours) {
          var claimId = values[i][c.claim_id - 1];
-         sheet.getRange(i + 1, c.status).setValue(STATUS.ExpenseClaim.LOCKED);
-         sheet.getRange(i + 1, c.locked_at).setValue(Audit._nowIso());
-         Audit.append('SYSTEM', 'ExpenseClaim', claimId, 'TRANSITION', { from: STATUS.ExpenseClaim.PAID, to: STATUS.ExpenseClaim.LOCKED });
+         Engine.transition('ExpenseClaim', claimId, 'LOCK', 'SYSTEM', {});
       }
     }
   }

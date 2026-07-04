@@ -13,7 +13,7 @@ The committee originally planned for all members to share one Google account, si
 
 ## Consequences
 
-- Every ledger action is signed by a real human (`USEREMAIL()` → `intent_actor_email` → U-id).
+- Every ledger action is signed by a real human (`USEREMAIL()` → `intent_actor_email` → USER-id).
 - Handover = swap AppSheet user list + rotate owner-account password (see `docs/handover.md`).
 - Mid-year departures are revoked individually without rotating a shared secret.
 - Cost: exco must each have a Google account and be added/removed at rotation (~10 min/year).

@@ -9,6 +9,14 @@
  * @param {Object} e form submit event
  */
 function onFormSubmitRequest(e) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000);
+  } catch (err) {
+    Discord.postTreasury('🚨 CRITICAL: Script lock timeout in onFormSubmitRequest');
+    throw err;
+  }
+  try {
   var responseId = e.response.getId();
   if (IntakeForms_alreadyProcessed(TABS.BUDGET_REQUESTS, COLS.BudgetRequests.processed_response_id, responseId)) return;
 
@@ -34,7 +42,7 @@ function onFormSubmitRequest(e) {
     var amount = Number(answers['Line ' + n + ' — Amount (HKD)']);
     if (!category || !desc || !amount) continue;
     lineCount++;
-    var lineId = Ids.childId(requestId, lineCount, 'BRL');
+    var lineId = Ids.childId(requestId, lineCount, 'BUDGETLINE');
     getSheet_(TABS.BUDGET_REQUEST_LINES).appendRow([
       lineId, requestId, IntakeForms_categoryIdByName(category), desc, amount, 0, STATUS.BudgetRequestLine.PENDING, 0, 0
     ]);
@@ -46,6 +54,9 @@ function onFormSubmitRequest(e) {
   Discord.postTreasury('**' + requestId + '** — ' + title + ' — new PENDING request from ' + user.userId +
     (user.isUnknown ? ' (⚠️ unrecognized email: ' + email + ')' : ''));
   Discord.postStatus(requestId, title, STATUS.BudgetRequest.PENDING, null);
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /**
@@ -53,6 +64,14 @@ function onFormSubmitRequest(e) {
  * @param {Object} e form submit event
  */
 function onFormSubmitClaim(e) {
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000);
+  } catch (err) {
+    Discord.postTreasury('🚨 CRITICAL: Script lock timeout in onFormSubmitClaim');
+    throw err;
+  }
+  try {
   var responseId = e.response.getId();
   if (IntakeForms_alreadyProcessed(TABS.EXPENSE_CLAIMS, COLS.ExpenseClaims.processed_response_id, responseId)) return;
 
@@ -95,7 +114,7 @@ function onFormSubmitClaim(e) {
       var excessAmount = amount - check.remaining;
       
       var topUpRequestId = Ids.nextId('BudgetRequest');
-      var topUpLineId = Ids.childId(topUpRequestId, 1, 'BRL');
+      var topUpLineId = Ids.childId(topUpRequestId, 1, 'BUDGETLINE');
       
       var bLineSheet = getSheet_(TABS.BUDGET_REQUEST_LINES);
       var bLineRows = bLineSheet.getDataRange().getValues();
@@ -133,14 +152,14 @@ function onFormSubmitClaim(e) {
 
       if (check.remaining > 0) {
         lineCount++;
-        var cliId1 = Ids.childId(claimId, lineCount, 'CLI');
+        var cliId1 = Ids.childId(claimId, lineCount, 'CLAIMLINE');
         getSheet_(TABS.CLAIM_LINE_ITEMS).appendRow([
           cliId1, claimId, budgetLineId, receipt ? receipt.receiptId : '', check.remaining, notes, missingReceiptFlag
         ]);
       }
       
       lineCount++;
-      var cliId2 = Ids.childId(claimId, lineCount, 'CLI');
+      var cliId2 = Ids.childId(claimId, lineCount, 'CLAIMLINE');
       getSheet_(TABS.CLAIM_LINE_ITEMS).appendRow([
         cliId2, claimId, topUpLineId, receipt ? receipt.receiptId : '', excessAmount, notes + ' (Top-Up)', missingReceiptFlag
       ]);
@@ -150,7 +169,7 @@ function onFormSubmitClaim(e) {
     }
     
     lineCount++;
-    var cliId = Ids.childId(claimId, lineCount, 'CLI');
+    var cliId = Ids.childId(claimId, lineCount, 'CLAIMLINE');
     getSheet_(TABS.CLAIM_LINE_ITEMS).appendRow([
       cliId, claimId, budgetLineId, receipt ? receipt.receiptId : '', amount, notes, missingReceiptFlag
     ]);
@@ -164,6 +183,9 @@ function onFormSubmitClaim(e) {
     (user.isUnknown ? ' (⚠️ unrecognized email: ' + email + ')' : '') +
     (rejectedLines.length ? ' (⚠️ lines skipped, over remaining: ' + rejectedLines.join('; ') + ')' : ''));
   Discord.postStatus(claimId, notes, STATUS.ExpenseClaim.SUBMITTED, null);
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /**
@@ -198,13 +220,13 @@ function IntakeForms_answersByTitle(response) {
 
 /**
  * Resolve a respondent email to a Users row. Unknown emails still
- * produce a usable actor id ('U-UNKNOWN') so the row is created and
+ * produce a usable actor id ('USER-UNKNOWN') so the row is created and
  * flagged for treasurer follow-up, rather than silently dropped.
  * @param {string} email
  * @return {{userId: string, isUnknown: boolean}}
  */
 function IntakeForms_resolveUser(email) {
-  if (!email) return { userId: 'U-UNKNOWN', isUnknown: true };
+  if (!email) return { userId: 'USER-UNKNOWN', isUnknown: true };
   var sheet = getSheet_(TABS.USERS);
   var values = sheet.getDataRange().getValues();
   var c = COLS.Users;
@@ -213,7 +235,7 @@ function IntakeForms_resolveUser(email) {
       return { userId: values[i][c.user_id - 1], isUnknown: false };
     }
   }
-  return { userId: 'U-UNKNOWN', isUnknown: true };
+  return { userId: 'USER-UNKNOWN', isUnknown: true };
 }
 
 /**
@@ -231,8 +253,8 @@ function IntakeForms_categoryIdByName(categoryName) {
 }
 
 /**
- * @param {string} choiceText e.g. 'BRL-26A-001-01 — BBQ food — remaining HK$300.00'
- * @return {string} the leading BRL id
+ * @param {string} choiceText e.g. 'BUDGETLINE-26A-001-01 — BBQ food — remaining HK$300.00'
+ * @return {string} the leading BudgetRequestLine id
  */
 function IntakeForms_parseBudgetLineId(choiceText) {
   return String(choiceText).split(' — ')[0].trim();
@@ -301,9 +323,16 @@ function IntakeForms_storeReceipt(file, uploaderUserId, answers) {
     var receiptSheet = getSheet_(TABS.RECEIPTS);
     var receiptData = receiptSheet.getDataRange().getValues();
     var hashCol = COLS.Receipts.sha256 - 1;
+    var vendorCol = COLS.Receipts.vendor - 1;
+    var dateCol = COLS.Receipts.date - 1;
+    var totalCol = COLS.Receipts.total_amount - 1;
+    var idCol = COLS.Receipts.receipt_id - 1;
     for (var i = 1; i < receiptData.length; i++) {
       if (receiptData[i][hashCol] === sha256) {
         throw new Error('Duplicate receipt detected. This exact file was already uploaded.');
+      }
+      if (vendor && receiptDate && receiptTotal > 0 && receiptData[i][vendorCol] === vendor && receiptData[i][dateCol] === receiptDate && Number(receiptData[i][totalCol]) === receiptTotal) {
+        Discord.postTreasury('⚠️ Soft Warning: Receipt matches existing receipt **' + receiptData[i][idCol] + '** on Vendor, Date, and Total. Possible duplicate claim.');
       }
     }
 

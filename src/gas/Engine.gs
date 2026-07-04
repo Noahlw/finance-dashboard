@@ -9,50 +9,15 @@
  */
 
 /**
- * Declarative transition tables. Each entry:
- *   from            current status this transition applies to
- *   action          one of the action strings used by Approvals.gs /
- *                   IntakeForms.gs / Jobs.gs
- *   to              next status, or 'DERIVED' to call
- *                   Engine_deriveRequestStatus after line effects run
- *   allowedRoles    array of ROLES.* the actor's role must be in, or
- *                   null to mean "self-only" (actor must be the
- *                   requester/claimant of the entity)
- *   requiresNote    if true, payload.decision_note must be non-empty
- *   requiresAmount  if true, payload.amount_override must be a valid number
- *
+ * The declarative transition table (which (entityType, from, action) tuples
+ * are legal, who may perform them, and what they require) lives in
+ * CoreDecisions.TRANSITIONS so it can be exercised under Jest without a
+ * GAS runtime. See CoreDecisions.js for the table and its documentation.
  * This table is exhaustive for FINANCE-SYSTEM-DESIGN.md §1.5 — no
  * transition exists outside it, so any (from, action) pair not listed
- * here is automatically illegal (see the five illegal cases in
+ * there is automatically illegal (see the five illegal cases in
  * BUILD-PLAN.md §4.1, cases 1 and 4 are denied purely by table lookup).
  */
-var TRANSITIONS = {
-  BudgetRequest: [
-    { from: STATUS.BudgetRequest.DRAFT, action: 'SUBMIT', to: STATUS.BudgetRequest.PENDING, allowedRoles: null },
-    { from: STATUS.BudgetRequest.DRAFT, action: 'WITHDRAW', to: STATUS.BudgetRequest.WITHDRAWN, allowedRoles: null },
-    { from: STATUS.BudgetRequest.PENDING, action: 'WITHDRAW', to: STATUS.BudgetRequest.WITHDRAWN, allowedRoles: null },
-    { from: STATUS.BudgetRequest.PENDING, action: 'REQUEST_INFO', to: STATUS.BudgetRequest.NEEDS_INFO, allowedRoles: [ROLES.TREASURER], requiresNote: true },
-    { from: STATUS.BudgetRequest.NEEDS_INFO, action: 'RESUBMIT', to: STATUS.BudgetRequest.PENDING, allowedRoles: null },
-    { from: STATUS.BudgetRequest.PENDING, action: 'APPROVE', to: 'DERIVED', allowedRoles: [ROLES.TREASURER] },
-    { from: STATUS.BudgetRequest.PENDING, action: 'REDUCE', to: 'DERIVED', allowedRoles: [ROLES.TREASURER], requiresNote: true, requiresAmount: true },
-    { from: STATUS.BudgetRequest.PENDING, action: 'REJECT', to: 'DERIVED', allowedRoles: [ROLES.TREASURER], requiresNote: true },
-    { from: STATUS.BudgetRequest.APPROVED, action: 'CLOSE', to: STATUS.BudgetRequest.CLOSED, allowedRoles: [ROLES.TREASURER] },
-    { from: STATUS.BudgetRequest.PARTIALLY_APPROVED, action: 'CLOSE', to: STATUS.BudgetRequest.CLOSED, allowedRoles: [ROLES.TREASURER] }
-  ],
-  ExpenseClaim: [
-    { from: STATUS.ExpenseClaim.SUBMITTED, action: 'REQUEST_INFO', to: STATUS.ExpenseClaim.NEEDS_INFO, allowedRoles: [ROLES.COMMITTEE, ROLES.TREASURER], requiresNote: true },
-    { from: STATUS.ExpenseClaim.NEEDS_INFO, action: 'RESUBMIT', to: STATUS.ExpenseClaim.SUBMITTED, allowedRoles: null },
-    { from: STATUS.ExpenseClaim.SUBMITTED, action: 'VERIFY', to: STATUS.ExpenseClaim.VERIFIED, allowedRoles: [ROLES.COMMITTEE, ROLES.TREASURER] },
-    { from: STATUS.ExpenseClaim.VERIFIED, action: 'REJECT', to: STATUS.ExpenseClaim.REJECTED, allowedRoles: [ROLES.COMMITTEE, ROLES.TREASURER], requiresNote: true },
-    { from: STATUS.ExpenseClaim.VERIFIED, action: 'APPROVE_PAYOUT', to: STATUS.ExpenseClaim.APPROVED_FOR_PAYOUT, allowedRoles: [ROLES.TREASURER] }
-    // APPROVED_FOR_PAYOUT -> PAID happens automatically in Payouts.gs when
-    // every Payout row for the claim reaches CONFIRMED (not a human action).
-    // PAID -> LOCKED happens automatically in Jobs.dailyJob (Phase 2).
-  ]
-};
-
-/** Actions where the actor being the entity's own requester/claimant triggers D5 self-approval flagging. */
-var SELF_APPROVAL_ACTIONS = ['APPROVE', 'REDUCE', 'VERIFY', 'APPROVE_PAYOUT'];
 
 var Engine = {
   /**
@@ -68,9 +33,14 @@ var Engine = {
   transition: function (entityType, entityId, action, actorUserId, payload) {
     payload = payload || {};
     var lock = LockService.getScriptLock();
-    lock.waitLock(30000);
     try {
-      var actor = Engine._loadActor(actorUserId);
+      lock.waitLock(30000);
+    } catch (e) {
+      Discord.postTreasury('🚨 CRITICAL: Script lock timeout in Engine.transition');
+      throw e;
+    }
+    try {
+      var actor = actorUserId === 'SYSTEM' ? { role: ROLES.TREASURER, displayName: 'System' } : Engine._loadActor(actorUserId);
       if (!actor) return Engine._deny(entityType, entityId, action, actorUserId, 'ACTOR_NOT_FOUND', null);
 
       var row = Engine._loadRow(entityType, entityId);
@@ -84,25 +54,12 @@ var Engine = {
       var ownerId = Engine._ownerId(entityType, row.values);
       var isSelf = (actorUserId === ownerId);
 
-      if (def.allowedRoles === null) {
-        if (!isSelf) return Engine._deny(entityType, entityId, action, actorUserId, 'NOT_OWNER', currentStatus);
-      } else {
-        if (def.allowedRoles.indexOf(actor.role) === -1) {
-          return Engine._deny(entityType, entityId, action, actorUserId, 'ROLE_NOT_ALLOWED', currentStatus);
-        }
+      var authCheck = CoreDecisions.authorize(def, isSelf, actor.role, payload);
+      if (!authCheck.ok) {
+        return Engine._deny(entityType, entityId, action, actorUserId, authCheck.reason, currentStatus);
       }
 
-      if (def.requiresNote && !(payload.decision_note && String(payload.decision_note).trim())) {
-        return Engine._deny(entityType, entityId, action, actorUserId, 'NOTE_REQUIRED', currentStatus);
-      }
-      if (def.requiresAmount) {
-        var amt = Number(payload.amount_override);
-        if (isNaN(amt) || amt < 0) {
-          return Engine._deny(entityType, entityId, action, actorUserId, 'INVALID_AMOUNT_OVERRIDE', currentStatus);
-        }
-      }
-
-      var selfApproved = isSelf && SELF_APPROVAL_ACTIONS.indexOf(action) !== -1;
+      var selfApproved = CoreDecisions.isSelfApproval(isSelf, action);
 
       if (entityType === 'ExpenseClaim' && action === 'VERIFY') {
         var verifyCheck = Engine._validateClaimVerification(entityId, actorUserId, payload);
@@ -122,6 +79,9 @@ var Engine = {
       Engine._notify(entityType, entityId, action, currentStatus, nextStatus, actorUserId, selfApproved);
 
       return { ok: true, reason: null, from: currentStatus, to: nextStatus, selfApproved: selfApproved };
+    } finally {
+      lock.releaseLock();
+    }
   },
 
   /**
@@ -130,7 +90,12 @@ var Engine = {
    */
   recordIncome: function (date, categoryId, amount, sourceRef, eventId, notes, actorUserId) {
     var lock = LockService.getScriptLock();
-    lock.waitLock(30000);
+    try {
+      lock.waitLock(30000);
+    } catch (e) {
+      Discord.postTreasury('🚨 CRITICAL: Script lock timeout in Engine.recordIncome');
+      throw e;
+    }
     try {
       var incomeId = Ids.nextId('Income');
       var sheet = getSheet_(TABS.INCOME);
@@ -167,13 +132,23 @@ var Engine = {
     var c = COLS.BudgetRequestLines;
     var approved = Number(line.values[c.approved_amount - 1]) || 0;
     var claimed = Engine._sumClaimedAgainstLine(budgetLineId);
-    var remaining = approved - claimed;
-    return { ok: Number(amount) <= remaining, remaining: remaining };
+    return CoreDecisions.checkClaimLineAmount(amount, approved, claimed);
   },
 
   /**
    * P2 Engine completeness checks for VERIFY on ExpenseClaims.
    * Checks budget remaining, missing receipt caps, and roles.
+   *
+   * TODO(known gap, FINANCE-SYSTEM-DESIGN.md §3.2): this only implements the
+   * over-claim guard and the missing-receipt cap/role/per-semester rules.
+   * Still missing, of the four documented VERIFY invariants:
+   *   1. every claim line has a valid receipt_id (or an approved
+   *      missing-receipt declaration) — not currently checked at all.
+   *   2. Σ ClaimLineItems.amount per receipt_id ≤ Receipt.receipt_total —
+   *      not implemented anywhere in the codebase.
+   *   3. late_flag is only computed once at claim intake (IntakeForms.gs);
+   *      it's never re-checked here at verify time.
+   * Deliberately deferred, not fixed as part of the CoreDecisions extraction.
    */
   _validateClaimVerification: function (claimId, actorUserId, payload) {
     var cliSheet = getSheet_(TABS.CLAIM_LINE_ITEMS);
@@ -237,7 +212,7 @@ var Engine = {
           if (cid === claimId) continue;
           var cInfo = claimCache[cid];
           if (!cInfo) continue;
-          if (cInfo.claimant === claimantId && cInfo.status !== STATUS.ExpenseClaim.REJECTED && cInfo.status !== STATUS.ExpenseClaim.WITHDRAWN) {
+          if (cInfo.claimant === claimantId && cInfo.status !== STATUS.ExpenseClaim.REJECTED) {
             if (allCliData[k][c.missing_receipt_flag - 1] === true) {
               count++;
             }
@@ -301,18 +276,12 @@ var Engine = {
 
   /** @private */
   _findTransition: function (entityType, fromStatus, action) {
-    var table = TRANSITIONS[entityType] || [];
-    for (var i = 0; i < table.length; i++) {
-      if (table[i].from === fromStatus && table[i].action === action) return table[i];
-    }
-    return null;
+    return CoreDecisions.findTransition(entityType, fromStatus, action);
   },
 
   /** @private */
   _ownerId: function (entityType, values) {
-    if (entityType === 'BudgetRequest') return values[COLS.BudgetRequests.requester_id - 1];
-    if (entityType === 'ExpenseClaim') return values[COLS.ExpenseClaims.claimant_id - 1];
-    return null;
+    return CoreDecisions.ownerId(entityType, values);
   },
 
   /**
@@ -389,16 +358,11 @@ var Engine = {
       return;
     }
     // REDUCE: proportional split
-    var totalRequested = lines.reduce(function (sum, l) { return sum + (Number(l.values[c.requested_amount - 1]) || 0); }, 0);
-    var override = Number(payload.amount_override);
-    var ratio = totalRequested > 0 ? Math.min(override / totalRequested, 1) : 0;
-    lines.forEach(function (line) {
-      var requested = Number(line.values[c.requested_amount - 1]) || 0;
-      var approved = Math.round(requested * ratio * 100) / 100;
-      var lineStatus = approved <= 0 ? STATUS.BudgetRequestLine.REJECTED :
-        (approved >= requested ? STATUS.BudgetRequestLine.APPROVED : STATUS.BudgetRequestLine.REDUCED);
-      sheet.getRange(line.rowIndex, c.approved_amount).setValue(approved);
-      sheet.getRange(line.rowIndex, c.line_status).setValue(lineStatus);
+    var requestedAmounts = lines.map(function (l) { return Number(l.values[c.requested_amount - 1]) || 0; });
+    var outcomes = CoreDecisions.computeReduceSplit(requestedAmounts, payload.amount_override);
+    lines.forEach(function (line, i) {
+      sheet.getRange(line.rowIndex, c.approved_amount).setValue(outcomes[i].approved_amount);
+      sheet.getRange(line.rowIndex, c.line_status).setValue(outcomes[i].line_status);
     });
   },
 
@@ -425,6 +389,16 @@ var Engine = {
       Engine._appendNote(sheet, row.rowIndex, c.notes, action + ' by ' + actorUserId + ': ' + (payload.decision_note || ''));
     } else if (action === 'RESUBMIT') {
       sheet.getRange(row.rowIndex, c.submitted_at).setValue(now);
+    } else if (action === 'LOCK') {
+      sheet.getRange(row.rowIndex, c.locked_at).setValue(now);
+      var protection = sheet.getRange(row.rowIndex, 1, 1, sheet.getMaxColumns()).protect().setDescription('LOCKED: ' + claimId);
+      protection.setWarningOnly(false);
+      var me = Session.getEffectiveUser();
+      var editors = protection.getEditors();
+      for (var e = 0; e < editors.length; e++) {
+        if (editors[e].getEmail() !== me.getEmail()) protection.removeEditor(editors[e]);
+      }
+      if (protection.canDomainEdit()) protection.setDomainEdit(false);
     }
 
     sheet.getRange(row.rowIndex, c.status).setValue(nextStatus);
@@ -520,18 +494,16 @@ var Engine = {
 };
 
 /**
- * Derive a BudgetRequest's status from its lines: all APPROVED -> APPROVED,
- * all REJECTED -> REJECTED, anything mixed -> PARTIALLY_APPROVED.
+ * Derive a BudgetRequest's status from its lines. Loads the line rows
+ * (I/O) then delegates the pure branching to
+ * CoreDecisions.deriveRequestStatusFromLineStatuses.
  * @param {string} requestId
  * @return {string}
  */
 function Engine_deriveRequestStatus(requestId) {
   var sheet = getSheet_(TABS.BUDGET_REQUEST_LINES);
   var rows = Engine._findRowsByColumn(sheet, COLS.BudgetRequestLines.request_id, requestId);
-  if (rows.length === 0) return STATUS.BudgetRequest.PENDING;
   var c = COLS.BudgetRequestLines;
   var statuses = rows.map(function (r) { return r.values[c.line_status - 1]; });
-  if (statuses.every(function (s) { return s === STATUS.BudgetRequestLine.APPROVED; })) return STATUS.BudgetRequest.APPROVED;
-  if (statuses.every(function (s) { return s === STATUS.BudgetRequestLine.REJECTED; })) return STATUS.BudgetRequest.REJECTED;
-  return STATUS.BudgetRequest.PARTIALLY_APPROVED;
+  return CoreDecisions.deriveRequestStatusFromLineStatuses(statuses);
 }

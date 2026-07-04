@@ -9,7 +9,7 @@ var Audit = {
    * Append one audit row, chaining its hash to the previous row's hash.
    * @param {string} actorUserId a User.user_id, or 'SYSTEM' for automated actions
    * @param {string} entityType e.g. 'ExpenseClaim'
-   * @param {string} entityId e.g. 'EC-26A-014'
+   * @param {string} entityId e.g. 'CLAIM-26A-014'
    * @param {string} action e.g. 'CREATE'|'TRANSITION'|'FIELD_SET'|'LOCK'|'SNAPSHOT'|'TRANSITION_DENIED'|'NOTIFY_FAIL'
    * @param {Object} detailObj JSON-serializable detail, e.g. {from:'SUBMITTED', to:'VERIFIED'}
    * @return {{seq:number, rowHash:string}}
@@ -32,6 +32,7 @@ var Audit = {
       var detail = JSON.stringify(detailObj || {});
       var rowHash = Audit._hashRow(seq, ts, actorUserId, entityType, entityId, action, detail, prevHash);
       sheet.appendRow([seq, ts, actorUserId, entityType, entityId, action, detail, prevHash, rowHash]);
+      SpreadsheetApp.flush(); // Crucial for rapid consecutive appends so getLastRow() isn't stale
       return { seq: seq, rowHash: rowHash };
     } finally {
       lock.releaseLock();

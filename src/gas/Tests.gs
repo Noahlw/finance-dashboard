@@ -79,7 +79,7 @@ function Tests_testFullWalkthrough() {
     requestId, memberId, '', 'Test event supplies', 'Needed for the test walkthrough', '2026-08-01',
     STATUS.BudgetRequest.PENDING, now, '', '', '', false, 'TEST-' + requestId
   ]);
-  var lineId = Ids.childId(requestId, 1, 'BRL');
+  var lineId = Ids.childId(requestId, 1, 'BUDGETLINE');
   getSheet_(TABS.BUDGET_REQUEST_LINES).appendRow([lineId, requestId, 'CAT-ACT', 'Test supplies', 100, 0, STATUS.BudgetRequestLine.PENDING, 0, 0]);
   Audit.append(memberId, 'BudgetRequest', requestId, 'CREATE', { note: 'test_phase1 fixture' });
 
@@ -100,7 +100,7 @@ function Tests_testFullWalkthrough() {
   ]);
   var receiptId = Ids.nextId('Receipt');
   getSheet_(TABS.RECEIPTS).appendRow([receiptId, '', 'testhash0000', memberId, now, 'Test Vendor', '2026-07-01', 100, '']);
-  var cliId = Ids.childId(claimId, 1, 'CLI');
+  var cliId = Ids.childId(claimId, 1, 'CLAIMLINE');
   getSheet_(TABS.CLAIM_LINE_ITEMS).appendRow([cliId, claimId, lineId, receiptId, 100, 'Test claim line', false]);
   Audit.append(memberId, 'ExpenseClaim', claimId, 'CREATE', { note: 'test_phase1 fixture' });
 
@@ -148,4 +148,130 @@ function Tests_readCounters() {
     out[values[i][COLS.Counters.entity - 1]] = Number(values[i][COLS.Counters.last_n - 1]) || 0;
   }
   return out;
+}
+
+/**
+ * Utility to clean up test fixtures and reset the spreadsheet to a blank state
+ * (keeping only headers and Config). Run this from the editor if a test fails midway.
+ */
+function cleanupTestPhase1() {
+  var ledger = getLedger_();
+  var tabsToClear = [
+    TABS.USERS, TABS.CATEGORIES, TABS.EVENTS, TABS.BUDGET_REQUESTS,
+    TABS.BUDGET_REQUEST_LINES, TABS.EXPENSE_CLAIMS, TABS.CLAIM_LINE_ITEMS,
+    TABS.RECEIPTS, TABS.INCOME, TABS.PAYOUTS, TABS.AUDIT_LOG,
+    TABS.APPROVALS, TABS.COUNTERS
+  ];
+  tabsToClear.forEach(function (tabName) {
+    var sheet = ledger.getSheetByName(tabName);
+    if (sheet && sheet.getMaxRows() > 1) {
+      sheet.getRange(2, 1, sheet.getMaxRows() - 1, sheet.getMaxColumns()).clearContent();
+    }
+  });
+  
+  try {
+    var vaultSheet = getVaultSheet_();
+    if (vaultSheet.getMaxRows() > 1) {
+      vaultSheet.getRange(2, 1, vaultSheet.getMaxRows() - 1, vaultSheet.getMaxColumns()).clearContent();
+    }
+  } catch (e) {
+    // ignore if vault not found
+  }
+  
+  Logger.log('Cleanup complete. You can now re-run setupAll() then test_phase1().');
+}
+
+/**
+ * Run the full Phase 2 acceptance test. Logs PHASE2 PASS and returns
+ * the created fixture IDs, or throws with the first failing assertion.
+ * @return {string}
+ */
+function test_phase2() {
+  try {
+    var ids = Tests_testPhase2Walkthrough();
+    var chain = Audit.verifyChain();
+    Tests_assert(chain.ok === true, 'Audit.verifyChain() failed at seq ' + chain.badSeq);
+    Logger.log('PHASE2 PASS — ' + JSON.stringify(ids));
+    return 'PHASE2 PASS';
+  } catch (e) {
+    Logger.log('PHASE2 FAIL: ' + e.message + '\n' + e.stack);
+    throw e;
+  }
+}
+
+function Tests_testPhase2Walkthrough() {
+  var treasurerId = Config.get('TREASURER_USER_ID');
+  var now = Audit._nowIso();
+
+  var memberId = Ids.nextId('User');
+  getSheet_(TABS.USERS).appendRow([memberId, 'Test Member 2', ROLES.MEMBER, 'test-member2@example.com', true, now]);
+  
+  var committeeId = Ids.nextId('User');
+  getSheet_(TABS.USERS).appendRow([committeeId, 'Test Committee', ROLES.COMMITTEE, 'test-com@example.com', true, now]);
+
+  // 1. Approving a WITHDRAWN request is DENIED.
+  var req1Id = Ids.nextId('BudgetRequest');
+  getSheet_(TABS.BUDGET_REQUESTS).appendRow([
+    req1Id, memberId, '', 'Test request 1', 'Just', '2026-08-01',
+    STATUS.BudgetRequest.WITHDRAWN, now, '', '', '', false, 'TEST-' + req1Id
+  ]);
+  var illegal1 = Engine.transition('BudgetRequest', req1Id, 'APPROVE', treasurerId, {});
+  Tests_assert(illegal1.ok === false, 'Illegal transition 1: Approving a WITHDRAWN request must fail');
+
+  // Create a valid request and approve it
+  var req2Id = Ids.nextId('BudgetRequest');
+  getSheet_(TABS.BUDGET_REQUESTS).appendRow([
+    req2Id, memberId, '', 'Test request 2', 'Just', '2026-08-01',
+    STATUS.BudgetRequest.PENDING, now, '', '', '', false, 'TEST-' + req2Id
+  ]);
+  var lineId = Ids.childId(req2Id, 1, 'BUDGETLINE');
+  getSheet_(TABS.BUDGET_REQUEST_LINES).appendRow([lineId, req2Id, 'CAT-ACT', 'Test', 100, 0, STATUS.BudgetRequestLine.PENDING, 0, 0]);
+  
+  Engine.transition('BudgetRequest', req2Id, 'APPROVE', treasurerId, {});
+
+  // 5. Submitting a claim that exceeds remaining budget line amount is handled at Forms intake, 
+  // but let's test Engine validateClaimLineAmount
+  var lineCheckOver = Engine.validateClaimLineAmount(lineId, 999);
+  Tests_assert(lineCheckOver.ok === false, 'Illegal transition 5: Claim amount exceeding remaining must be rejected');
+
+  // Create a valid claim
+  var claimId = Ids.nextId('ExpenseClaim');
+  getSheet_(TABS.EXPENSE_CLAIMS).appendRow([
+    claimId, memberId, STATUS.ExpenseClaim.SUBMITTED, now, '', '', '', '',
+    '', '', 0, false, false, 'Test claim', 'TEST-' + claimId
+  ]);
+  var receiptId = Ids.nextId('Receipt');
+  getSheet_(TABS.RECEIPTS).appendRow([receiptId, '', 'testhash123', memberId, now, 'Vendor', '2026-07-01', 50, '']);
+  var cliId = Ids.childId(claimId, 1, 'CLAIMLINE');
+  getSheet_(TABS.CLAIM_LINE_ITEMS).appendRow([cliId, claimId, lineId, receiptId, 50, 'Line', false]);
+
+  // 2. Verifying a claim by a MEMBER is DENIED
+  var illegal2 = Engine.transition('ExpenseClaim', claimId, 'VERIFY', memberId, {});
+  Tests_assert(illegal2.ok === false, 'Illegal transition 2: Verifying a claim by a MEMBER must fail');
+
+  // Verify by Committee
+  var verifyOk = Engine.transition('ExpenseClaim', claimId, 'VERIFY', committeeId, {});
+  Tests_assert(verifyOk.ok === true, 'Committee should be able to verify');
+
+  // 3. Approving a payout by a COMMITTEE member is DENIED
+  var illegal3 = Engine.transition('ExpenseClaim', claimId, 'APPROVE_PAYOUT', committeeId, {});
+  Tests_assert(illegal3.ok === false, 'Illegal transition 3: Approving payout by COMMITTEE must fail');
+
+  // Approve payout by Treasurer
+  Engine.transition('ExpenseClaim', claimId, 'APPROVE_PAYOUT', treasurerId, {});
+  
+  var payoutRows = Engine._findRowsByColumn(getSheet_(TABS.PAYOUTS), COLS.Payouts.claim_id, claimId);
+  var payoutId = payoutRows[0].values[COLS.Payouts.payout_id - 1];
+  Payouts.markPayoutSent(payoutId, 'FPS', 'REF-001', treasurerId);
+  Payouts.confirmPayout(payoutId);
+
+  // Lock the claim
+  var lockRes = Engine.transition('ExpenseClaim', claimId, 'LOCK', 'SYSTEM', {});
+  Tests_assert(lockRes.ok === true, 'Should lock claim');
+
+  // 4. Mutating a LOCKED claim is DENIED
+  var illegal4 = Engine.transition('ExpenseClaim', claimId, 'REJECT', treasurerId, {decision_note: 'test'});
+  Tests_assert(illegal4.ok === false, 'Illegal transition 4: Mutating a LOCKED claim must fail');
+
+  return { req1Id: req1Id, req2Id: req2Id, claimId: claimId };
 }

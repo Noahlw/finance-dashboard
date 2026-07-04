@@ -31,11 +31,12 @@ var FormSetup = {
   /** @private */
   _buildRequestForm: function () {
     var form = FormApp.create('CF Budget Request');
+    form.setDescription('Submit a budget request for an upcoming event or expense. The treasurer will review and approve it. You will be notified in Discord when approved.');
     form.setCollectEmail(true);
-    form.setRequireLogin(true);
-    form.addTextItem().setTitle('Title').setRequired(true);
-    form.addParagraphTextItem().setTitle('Justification').setRequired(true);
-    form.addDateItem().setTitle('Needed by').setRequired(true);
+    try { form.setRequireLogin(true); } catch (e) { /* ponytail: ignore if not on Workspace */ }
+    form.addTextItem().setTitle('Title').setHelpText('e.g., Summer Camp Supplies').setRequired(true);
+    form.addParagraphTextItem().setTitle('Justification').setHelpText('Why is this budget needed? Provide enough detail for the treasurer to approve.').setRequired(true);
+    form.addDateItem().setTitle('Needed by').setHelpText('When do you need to spend this money?').setRequired(true);
     FormSetup._addRequestLineQuestions(form, 1, true);
     FormSetup._addRequestLineQuestions(form, 2, false);
     FormSetup._addRequestLineQuestions(form, 3, false);
@@ -51,19 +52,20 @@ var FormSetup = {
   _addRequestLineQuestions: function (form, n, required) {
     var categories = FormSetup._expenseCategoryNames();
     form.addListItem().setTitle('Line ' + n + ' — Category').setChoiceValues(categories).setRequired(required);
-    form.addTextItem().setTitle('Line ' + n + ' — Description').setRequired(required);
-    form.addTextItem().setTitle('Line ' + n + ' — Amount (HKD)').setRequired(required);
+    form.addTextItem().setTitle('Line ' + n + ' — Description').setHelpText('Specific item or group of items for this line.').setRequired(required);
+    form.addTextItem().setTitle('Line ' + n + ' — Amount (HKD)').setHelpText('Enter numbers only, e.g. 150.50').setRequired(required);
   },
 
   /** @private */
   _buildClaimForm: function () {
     var form = FormApp.create('CF Expense Claim');
+    form.setDescription('Submit a claim for reimbursement. Ensure you upload a clear photo of the receipt matching the exact amount claimed.');
     form.setCollectEmail(true);
-    form.setRequireLogin(true);
-    form.addTextItem().setTitle('What is this claim for? (short description)').setRequired(true);
-    form.addTextItem().setTitle('Receipt vendor').setRequired(false);
-    form.addDateItem().setTitle('Receipt date').setRequired(true);
-    form.addTextItem().setTitle('Receipt total (HKD)').setRequired(true);
+    try { form.setRequireLogin(true); } catch (e) { /* ponytail: ignore if not on Workspace */ }
+    form.addTextItem().setTitle('What is this claim for? (short description)').setHelpText('e.g., Drinks for Summer Camp').setRequired(true);
+    form.addTextItem().setTitle('Receipt vendor').setHelpText('Name of the store or vendor').setRequired(false);
+    form.addDateItem().setTitle('Receipt date').setHelpText('The date printed on the receipt').setRequired(true);
+    form.addTextItem().setTitle('Receipt total (HKD)').setHelpText('Must match the receipt exactly. Numbers only.').setRequired(true);
     // "Receipt photo" file-upload question: ADD MANUALLY, see CP-C.
     FormSetup._addClaimLineQuestions(form, 1, true);
     FormSetup._addClaimLineQuestions(form, 2, false);
@@ -79,8 +81,9 @@ var FormSetup = {
    */
   _addClaimLineQuestions: function (form, n, required) {
     form.addListItem().setTitle('Line ' + n + ' — Budget line')
+      .setHelpText('Select the approved budget line to deduct from.')
       .setChoiceValues(FormSetup._budgetLineChoices()).setRequired(required);
-    form.addTextItem().setTitle('Line ' + n + ' — Amount (HKD)').setRequired(required);
+    form.addTextItem().setTitle('Line ' + n + ' — Amount (HKD)').setHelpText('Amount from this receipt to charge to this budget line.').setRequired(required);
   },
 
   /**
@@ -102,7 +105,7 @@ var FormSetup = {
   },
 
   /**
-   * @return {string[]} 'BRL-id — desc — remaining HK$x' for lines with remaining > 0
+   * @return {string[]} 'BUDGETLINE-id — desc — remaining HK$x' for lines with remaining > 0
    * @private
    */
   _budgetLineChoices: function () {

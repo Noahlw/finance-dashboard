@@ -1,5 +1,5 @@
 /**
- * Constants.gs — single source of truth for tab names, column layouts,
+ * Constants.js — single source of truth for tab names, column layouts,
  * status enums, roles, and ID prefixes. Every other file MUST reference
  * these maps instead of numeric column literals or string literals.
  *
@@ -122,15 +122,15 @@ var STATUS = Object.freeze({
 
 /** Entity name -> ID prefix, used by Ids.nextId(). */
 var ENTITY_PREFIX = Object.freeze({
-  User: 'U',
-  Event: 'EV',
-  BudgetRequest: 'BR',
-  BudgetRequestLine: 'BRL',
-  ExpenseClaim: 'EC',
-  ClaimLineItem: 'CLI',
-  Receipt: 'RC',
-  Income: 'IN',
-  Payout: 'PO'
+  User: 'USER',
+  Event: 'EVENT',
+  BudgetRequest: 'BUDGET',
+  BudgetRequestLine: 'BUDGETLINE',
+  ExpenseClaim: 'CLAIM',
+  ClaimLineItem: 'CLAIMLINE',
+  Receipt: 'RECEIPT',
+  Income: 'INCOME',
+  Payout: 'PAYOUT'
 });
 
 /** Approval actions accepted on the Approvals tab intent columns. */
@@ -142,3 +142,7 @@ var ACTIONS = Object.freeze({
   VERIFY: 'VERIFY',
   APPROVE_PAYOUT: 'APPROVE_PAYOUT'
 });
+
+if (typeof module !== 'undefined') {
+  module.exports = { TABS, COLS, ROLES, STATUS, ENTITY_PREFIX, ACTIONS };
+}

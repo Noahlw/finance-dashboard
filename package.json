@@ -9,6 +9,9 @@
   "scripts": {
     "test": "jest"
   },
+  "jest": {
+    "setupFiles": ["<rootDir>/jest.setup.js"]
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",

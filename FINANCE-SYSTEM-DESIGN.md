@@ -36,36 +36,36 @@
 ```
                             ┌─────────────┐
                             │   User      │  (ledger: opaque ID + role only;
-                            │ U-0001 ...  │   PII in separate vault, §4.2)
+                            │ USER-0001 ...  │   PII in separate vault, §4.2)
                             └──┬───┬───┬──┘
               requester_id ────┘   │   └──── payee_user_id
                                    │ claimant_id / approved_by / paid_by
                                    ▼
 ┌──────────────┐  1:N  ┌───────────────────┐
 │ BudgetRequest│──────▶│ BudgetRequestLine │◀──────────────┐
-│  BR-26A-001  │       │  BRL-26A-001-01   │               │
+│  BUDGET-26A-001  │       │  BUDGETLINE-26A-001-01   │               │
 └──────┬───────┘       │ (approved lines    │               │ budget_line_id
        │               │  ARE the budget)   │               │ (immutable FK)
        │ event_id      └─────────┬─────────┘               │
        ▼                         │ category_id             │
 ┌──────────────┐                 ▼                         │
 │   Event      │        ┌──────────────┐        ┌──────────┴─────┐
-│  EV-26A-003  │        │  Category    │        │ ClaimLineItem  │
-└──────────────┘        │  CAT-ACT ... │        │ CLI-26A-014-01 │
+│  EVENT-26A-003  │        │  Category    │        │ ClaimLineItem  │
+└──────────────┘        │  CAT-ACT ... │        │ CLAIMLINE-26A-014-01 │
                         └──────────────┘        └───┬───────┬────┘
                                                     │       │ receipt_id
                                        claim_id     │       ▼
                                                     │   ┌──────────┐
                                                     ▼   │ Receipt  │
-                                          ┌──────────────┤ RC-0231 │
+                                          ┌──────────────┤ RECEIPT-0231 │
                                           │ ExpenseClaim │└─────────┘
-                                          │  EC-26A-014  │   (Drive file ID
+                                          │  CLAIM-26A-014  │   (Drive file ID
                                           └──────┬───────┘    + SHA-256)
                                                  │ 1:N (multi-payee)
                                                  ▼
 ┌──────────────┐                          ┌──────────────┐
 │   Income     │   (independent inflow)   │   Payout     │
-│  IN-26A-042  │                          │  PO-26A-019  │
+│  INCOME-26A-042  │                          │  PAYOUT-26A-019  │
 └──────────────┘                          └──────────────┘
 
 ┌───────────────────────────────────────────────────────────────┐
@@ -84,7 +84,7 @@ Types below use Sheets-pragmatic types: `ID` (string, generated), `enum` (data-v
 
 | Field | Type | Notes |
 |---|---|---|
-| `user_id` | ID `U-####` | PK. Never reused. |
+| `user_id` | ID `USER-####` | PK. Never reused. |
 | `display_name` | string | e.g. "Noah L." — shown in app/notifications |
 | `role` | enum | `MEMBER` \| `COMMITTEE` \| `TREASURER` \| `ADVISOR_AUDITOR` |
 | `email` | string | Google identity used for form/app login (needed for auth; treat as low-sensitivity PII) |
@@ -115,7 +115,7 @@ Types below use Sheets-pragmatic types: `ID` (string, generated), `enum` (data-v
 
 | Field | Type | Notes |
 |---|---|---|
-| `event_id` | ID `EV-<sem>-###` | PK, e.g. `EV-26A-003` |
+| `event_id` | ID `EVENT-<sem>-###` | PK, e.g. `EVENT-26A-003` |
 | `name` | string | "Winter Camp", "Reg Day", "Week 4 Worship" |
 | `semester` | enum | `26A`, `26B`, … |
 | `owner_user_id` | FK→User | the person accountable for the event's budget |
@@ -124,7 +124,7 @@ Types below use Sheets-pragmatic types: `ID` (string, generated), `enum` (data-v
 
 | Field | Type | Notes |
 |---|---|---|
-| `request_id` | ID `BR-<sem>-###` | PK |
+| `request_id` | ID `BUDGET-<sem>-###` | PK |
 | `requester_id` | FK→User | |
 | `event_id` | FK→Event | nullable for non-event spend (e.g. admin supplies) |
 | `title` | string | |
@@ -140,7 +140,7 @@ Types below use Sheets-pragmatic types: `ID` (string, generated), `enum` (data-v
 
 | Field | Type | Notes |
 |---|---|---|
-| `line_id` | ID `BRL-<sem>-###-##` | PK (`request_id` + 2-digit seq) |
+| `line_id` | ID `BUDGETLINE-<sem>-###-##` | PK (`request_id` + 2-digit seq) |
 | `request_id` | FK→BudgetRequest | |
 | `category_id` | FK→Category | |
 | `description` | string | "BBQ food for 40 pax" |
@@ -154,7 +154,7 @@ Types below use Sheets-pragmatic types: `ID` (string, generated), `enum` (data-v
 
 | Field | Type | Notes |
 |---|---|---|
-| `claim_id` | ID `EC-<sem>-###` | PK |
+| `claim_id` | ID `CLAIM-<sem>-###` | PK |
 | `claimant_id` | FK→User | who fronted the money |
 | `status` | enum | see state machine §1.5 |
 | `submitted_at` / `verified_at` / `approved_at` / `paid_at` / `locked_at` | ts | each stamped by the transition engine |
@@ -167,7 +167,7 @@ Types below use Sheets-pragmatic types: `ID` (string, generated), `enum` (data-v
 
 | Field | Type | Notes |
 |---|---|---|
-| `claim_line_id` | ID `CLI-<sem>-###-##` | PK |
+| `claim_line_id` | ID `CLAIMLINE-<sem>-###-##` | PK |
 | `claim_id` | FK→ExpenseClaim | |
 | `budget_line_id` | FK→BudgetRequestLine | **immutable after claim leaves SUBMITTED** — this is the money-to-approval chain |
 | `receipt_id` | FK→Receipt | nullable *only* if `missing_receipt_flag` (§5.3) |
@@ -179,7 +179,7 @@ Types below use Sheets-pragmatic types: `ID` (string, generated), `enum` (data-v
 
 | Field | Type | Notes |
 |---|---|---|
-| `receipt_id` | ID `RC-####` | PK |
+| `receipt_id` | ID `RECEIPT-####` | PK |
 | `drive_file_id` | string | Google Drive file ID in the restricted Receipts folder — the binary never lives in the sheet |
 | `sha256` | string | hash of file bytes at upload; proves the image wasn't swapped later (§4.4) |
 | `uploaded_by` | FK→User | |
@@ -193,7 +193,7 @@ Types below use Sheets-pragmatic types: `ID` (string, generated), `enum` (data-v
 
 | Field | Type | Notes |
 |---|---|---|
-| `income_id` | ID `IN-<sem>-###` | PK |
+| `income_id` | ID `INCOME-<sem>-###` | PK |
 | `date` | date | |
 | `category_id` | FK→Category | reuse Category with `kind=INCOME` rows: Donations, Camp Fees, Retained Earnings, Other |
 | `amount` | money | |
@@ -206,12 +206,12 @@ Types below use Sheets-pragmatic types: `ID` (string, generated), `enum` (data-v
 
 | Field | Type | Notes |
 |---|---|---|
-| `payout_id` | ID `PO-<sem>-###` | PK |
+| `payout_id` | ID `PAYOUT-<sem>-###` | PK |
 | `claim_id` | FK→ExpenseClaim | |
 | `payee_user_id` | FK→User | ≠ necessarily the claimant (multi-person events, §5.5) |
 | `amount` | money | Σ payouts per claim must equal claim.total_amount before claim can reach PAID |
 | `method` | enum | `FPS` \| `PAYME` \| `BANK` \| `CASH` |
-| `txn_reference` | string | FPS reference / PayMe screenshot Drive ID / "cash, witnessed by U-0007" |
+| `txn_reference` | string | FPS reference / PayMe screenshot Drive ID / "cash, witnessed by USER-0007" |
 | `paid_by` | FK→User | treasurer |
 | `status` | enum | `QUEUED` → `SENT` → `CONFIRMED` (payee acks) |
 | `paid_at` / `confirmed_at` | ts | |
@@ -223,7 +223,7 @@ Types below use Sheets-pragmatic types: `ID` (string, generated), `enum` (data-v
 | `seq` | int | monotonically increasing |
 | `ts` | ts | |
 | `actor_user_id` | FK→User | or `SYSTEM` |
-| `entity_type` / `entity_id` | string | e.g. `ExpenseClaim` / `EC-26A-014` |
+| `entity_type` / `entity_id` | string | e.g. `ExpenseClaim` / `CLAIM-26A-014` |
 | `action` | string | `CREATE` \| `TRANSITION` \| `FIELD_SET` \| `LOCK` \| `SNAPSHOT` |
 | `detail` | string | JSON: `{"from":"SUBMITTED","to":"VERIFIED","fields":{...}}` |
 | `prev_hash` | string | hash chain (§4.4) |
@@ -239,7 +239,7 @@ Types below use Sheets-pragmatic types: `ID` (string, generated), `enum` (data-v
 | **Dashboard** tab (hand-maintained, one aggregate row) | Stale, manual, single row for five months | Becomes a **pure formula/pivot layer** (Tier 1) or AppSheet views (Tier 2): per-month and per-category rollups computed from Income/ClaimLineItem/Payout. Nothing is ever typed into it again. |
 | (nowhere) | Requests & claims live in WhatsApp | **BudgetRequest, ExpenseClaim, AuditLog** — net-new tables |
 
-**Migration note:** existing SEM-A rows import as `ExpenseClaim`s in a terminal `LEGACY` status with `budget_line_id = BRL-LEGACY`, `missing_receipt_flag = TRUE` where no receipt exists. History is preserved and clearly fenced off from the new controls; opening balance = 10,167.35 imported as one `Income` row of category Retained Earnings.
+**Migration note:** existing SEM-A rows import as `ExpenseClaim`s in a terminal `LEGACY` status with `budget_line_id = BUDGETLINE-LEGACY`, `missing_receipt_flag = TRUE` where no receipt exists. History is preserved and clearly fenced off from the new controls; opening balance = 10,167.35 imported as one `Income` row of category Retained Earnings.
 
 ## 1.5 State machines
 
@@ -443,7 +443,7 @@ All three tiers share the **same CF-Ledger schema** — the tiers are *interacti
 
 ## 4.2 PII isolation (two-workbook split)
 
-- **CF-Ledger** never contains student IDs, FPS/bank handles, or full legal names — only `U-####` and display names. A leak of the ledger (the most-shared artifact) leaks money data but no identity/banking data.
+- **CF-Ledger** never contains student IDs, FPS/bank handles, or full legal names — only `USER-####` and display names. A leak of the ledger (the most-shared artifact) leaks money data but no identity/banking data.
 - **CF-Vault** (separate workbook, shared with treasurer only, never IMPORTRANGE'd into anything) holds the sensitive columns. The engine reads it only at payout time to show the treasurer the payee's handle.
 - Least-collection: don't store bank data for members who choose PayMe-on-request or cash; record donor identities never (offerings are anonymous by category).
 - Retention: at graduation/inactivity, blank the vault row's sensitive fields (keep `user_id` + display name so historical FKs still resolve).
@@ -453,8 +453,8 @@ All three tiers share the **same CF-Ledger schema** — the tiers are *interacti
 Every payout is traceable in both directions with immutable FKs:
 
 ```
-Payout PO-26A-019 ─▶ claim EC-26A-014 ─▶ CLI-26A-014-01 ─▶ Receipt RC-0231 (Drive file + SHA-256)
-                                     └────────────────▶ BRL-26A-003-02 ─▶ BR-26A-003 (approved by U-0004 on 2026-02-11)
+Payout PAYOUT-26A-019 ─▶ claim CLAIM-26A-014 ─▶ CLAIMLINE-26A-014-01 ─▶ Receipt RECEIPT-0231 (Drive file + SHA-256)
+                                     └────────────────▶ BUDGETLINE-26A-003-02 ─▶ BUDGET-26A-003 (approved by USER-0004 on 2026-02-11)
 ```
 
 Enforcement: (a) `budget_line_id` and `receipt_id` on a ClaimLineItem are frozen once the claim leaves SUBMITTED — the engine rejects writes; (b) after LOCKED, the engine refuses *all* writes to the claim's rows and a protected range is applied; (c) receipts folder allows no delete/overwrite (mover job owns the files; `sha256` in the ledger detects substitution); (d) referenced rows can never be deleted because *nothing* is ever deleted (corrections = reversing entries: a new ClaimLineItem with negative amount referencing the original, plus note).
@@ -483,7 +483,7 @@ Each case: **Before** (current sheet+WhatsApp reality) → **After** (system rul
 
 ### 5.2 Partial budget approvals
 - **Before:** WhatsApp: "ok but not $500, maybe $300" — untracked; nobody remembers the agreed number at claim time.
-- **After:** approver sets `approved_amount = 300` on the line → line `REDUCED`, request `PARTIALLY_APPROVED`, `decision_note` mandatory. Claim-time dropdown shows the line as "BBQ food — approved HK$300 (remaining HK$300)". A claim exceeding `remaining` is rejected at submit with an over-budget message and instruction to file a **top-up BudgetRequest** referencing the original line (new request, `justification` auto-prefixed `TOP-UP of BRL-…`) — over-spends become visible decisions, not surprises.
+- **After:** approver sets `approved_amount = 300` on the line → line `REDUCED`, request `PARTIALLY_APPROVED`, `decision_note` mandatory. Claim-time dropdown shows the line as "BBQ food — approved HK$300 (remaining HK$300)". A claim exceeding `remaining` is rejected at submit with an over-budget message and instruction to file a **top-up BudgetRequest** referencing the original line (new request, `justification` auto-prefixed `TOP-UP of BUDGETLINE-…`) — over-spends become visible decisions, not surprises.
 
 ### 5.3 Lost / missing receipts
 - **Before:** "I lost it la" → paid anyway or awkwardly refused; zero audit trail either way.
@@ -510,7 +510,7 @@ Each case: **Before** (current sheet+WhatsApp reality) → **After** (system rul
 
 ### P0 — Foundation & migration *(1 weekend, ~8–12 h)*
 1. Create CF-Ledger workbook: 10 tabs per §1.3, data validations, protected ranges; CF-Vault; Drive folder tree (`/Receipts`, `/Snapshots`, `/Statements`). (3 h)
-2. Python migration script: parse `SEM A Statement.xlsx` (openpyxl), normalize users ("noah"→U-0001), convert serial dates, emit LEGACY claims + income rows + opening balance. (3 h)
+2. Python migration script: parse `SEM A Statement.xlsx` (openpyxl), normalize users ("noah"→USER-0001), convert serial dates, emit LEGACY claims + income rows + opening balance. (3 h)
 3. Build the 3 Google Forms (request / claim with file-upload / income); wire dropdowns to Category/Event lists. (2 h)
 4. Onboarding + consent form; populate User + Vault. (1–2 h)
    **Go/no-go:** a real budget request and a real claim flow through on paper rules (manual status edits by you) with correct FKs.

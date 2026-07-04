@@ -41,7 +41,12 @@ var Payouts = {
    */
   markPayoutSent: function (payoutId, method, txnReference, actorUserId) {
     var lock = LockService.getScriptLock();
-    lock.waitLock(30000);
+    try {
+      lock.waitLock(30000);
+    } catch (e) {
+      Discord.postTreasury('🚨 CRITICAL: Script lock timeout in Payouts.markPayoutSent');
+      throw e;
+    }
     try {
       var actor = Engine._loadActor(actorUserId);
       if (!actor || actor.role !== ROLES.TREASURER) {
@@ -82,7 +87,12 @@ var Payouts = {
    */
   confirmPayout: function (payoutId) {
     var lock = LockService.getScriptLock();
-    lock.waitLock(30000);
+    try {
+      lock.waitLock(30000);
+    } catch (e) {
+      Discord.postTreasury('🚨 CRITICAL: Script lock timeout in Payouts.confirmPayout');
+      throw e;
+    }
     try {
       var row = Engine._loadRow('Payout', payoutId);
       if (!row) return { ok: false, reason: 'ENTITY_NOT_FOUND' };

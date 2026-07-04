@@ -8,11 +8,16 @@ var Ids = {
   /**
    * Allocate the next sequential ID for an entity type.
    * @param {string} entityType a key of ENTITY_PREFIX (e.g. 'BudgetRequest', 'User', 'Receipt')
-   * @return {string} formatted ID, e.g. 'BR-26A-001', 'U-0001', 'RC-0001'
+   * @return {string} formatted ID, e.g. 'BUDGET-26A-001', 'USER-0001', 'RECEIPT-0001'
    */
   nextId: function (entityType) {
     var lock = LockService.getScriptLock();
-    lock.waitLock(30000);
+    try {
+      lock.waitLock(30000);
+    } catch (e) {
+      Discord.postTreasury('🚨 CRITICAL: Script lock timeout in Ids.nextId (' + entityType + ')');
+      throw e;
+    }
     try {
       var sheet = getSheet_(TABS.COUNTERS);
       var values = sheet.getDataRange().getValues();
@@ -39,15 +44,15 @@ var Ids = {
 
   /**
    * Build a child ID from a parent ID's semester+sequence portion.
-   * e.g. childId('BR-26A-003', 1, 'BRL') -> 'BRL-26A-003-01'
-   *      childId('EC-26A-014', 2, 'CLI') -> 'CLI-26A-014-02'
+   * e.g. childId('BUDGET-26A-003', 1, 'BUDGETLINE') -> 'BUDGETLINE-26A-003-01'
+   *      childId('CLAIM-26A-014', 2, 'CLAIMLINE') -> 'CLAIMLINE-26A-014-02'
    * @param {string} parentId
    * @param {number} seq 1-based child sequence number
-   * @param {string} childPrefix 'BRL' or 'CLI'
+   * @param {string} childPrefix 'BUDGETLINE' or 'CLAIMLINE'
    * @return {string}
    */
   childId: function (parentId, seq, childPrefix) {
-    var parts = parentId.split('-'); // e.g. ['BR','26A','003']
+    var parts = parentId.split('-'); // e.g. ['BUDGET','26A','003']
     var semAndSeq = parts.slice(1).join('-'); // '26A-003'
     var seqStr = String(seq);
     while (seqStr.length < 2) seqStr = '0' + seqStr;

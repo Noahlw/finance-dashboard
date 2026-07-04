@@ -16,7 +16,7 @@ Canonical language for the CF fellowship finance system. Code identifiers, Disco
 | **Payout** | One transfer of money to one payee for one claim (FPS / PayMe / bank / cash). A claim may have several. |
 | **Self-approved item** | A request or claim where the approver/verifier is also the requester/claimant (in practice: the Treasurer). Permitted, but always flagged, announced in #treasury, and listed in the semester statement annex. Never silent. |
 | **Opening balance** | The single Income row (Retained Earnings, HK$10,167.35) that seeds the new ledger. The old `SEM A Statement.xlsx`, archived in Drive, remains the authority for everything before it. |
-| **Treasurer** | The single role with authority to approve budget requests and payouts (currently U-0001). |
+| **Treasurer** | The single role with authority to approve budget requests and payouts (currently USER-0001). |
 | **Semester** | The fiscal period (e.g. `26A`). IDs embed it; `closeSemester()` freezes it. |
 | **Locked** | Terminal claim state: rows are protected and the Engine refuses all writes. Corrections after lock are reversing entries, never edits. |
 | **AuditLog** | Append-only, hash-chained record of every mutation. Written only by the Engine; verified by `verifyChain()`. |

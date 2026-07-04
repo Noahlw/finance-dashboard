@@ -392,7 +392,7 @@ function Setup_ensureConfigSeeded() {
   var sheet = getSheet_(TABS.CONFIG);
   var defaults = {
     CURRENT_SEMESTER: '26A',
-    TREASURER_USER_ID: 'U-0001',
+    TREASURER_USER_ID: 'USER-0001',
     TREASURY_WEBHOOK_URL: 'PASTE_ME',
     STATUS_WEBHOOK_URL: 'PASTE_ME',
     PUBLIC_SHOW_AMOUNTS: 'FALSE',
@@ -453,7 +453,7 @@ function Setup_ensureCategoriesSeeded() {
 }
 
 /**
- * Seed the Treasurer's User row (U-0001) only if Users is currently empty.
+ * Seed the Treasurer's User row (USER-0001) only if Users is currently empty.
  * @return {{created: boolean, userId: ?string}}
  */
 function Setup_ensureTreasurerUserSeeded() {
@@ -461,9 +461,9 @@ function Setup_ensureTreasurerUserSeeded() {
   var values = sheet.getRange(2, 1, Math.max(1, sheet.getMaxRows() - 1), 1).getValues();
   var insertRow = 2;
   for (var i = 0; i < values.length; i++) {
-    if (values[i][0] === 'U-0001') {
+    if (values[i][0] === 'USER-0001') {
       Setup_registerCounter('User', 1);
-      return { created: false, userId: 'U-0001' };
+      return { created: false, userId: 'USER-0001' };
     }
     if (values[i][0]) insertRow = i + 3;
   }
@@ -473,10 +473,10 @@ function Setup_ensureTreasurerUserSeeded() {
   } catch (e) {
     email = '';
   }
-  var userId = 'U-0001';
+  var userId = 'USER-0001';
   var now = Utilities.formatDate(new Date(), 'Asia/Hong_Kong', "yyyy-MM-dd'T'HH:mm:ssXXX");
   sheet.getRange(insertRow, 1, 1, 6).setValues([[userId, 'Treasurer', ROLES.TREASURER, email, true, now]]);
-  // U-0001 is seeded directly, bypassing Ids.nextId — register it in
+  // USER-0001 is seeded directly, bypassing Ids.nextId — register it in
   // Counters so the next real nextId('User') call starts at 2, not 1.
   Setup_registerCounter('User', 1);
   return { created: true, userId: userId };
@@ -519,7 +519,7 @@ function Setup_ensureOpeningBalanceSeeded() {
   var today = Utilities.formatDate(new Date(), 'Asia/Hong_Kong', 'yyyy-MM-dd');
   var amount = 10167.35;
   sheet.getRange(insertRow, 1, 1, 8).setValues([[
-    incomeId, today, 'CAT-RET', amount, 'U-0001',
+    incomeId, today, 'CAT-RET', amount, 'USER-0001',
     'Opening balance import', '', 'Opening balance per SEM A Statement.xlsx'
   ]]);
   return { created: true, incomeId: incomeId, amount: amount };

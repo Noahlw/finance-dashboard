@@ -8,7 +8,7 @@ var Discord = {
   /**
    * Post full-detail text to the private #treasury channel.
    * Callers (Engine.gs) format the message, e.g.
-   * "**EC-26A-014** — Camp BBQ receipts — SUBMITTED → VERIFIED (by Noah)".
+   * "**CLAIM-26A-014** — Camp BBQ receipts — SUBMITTED → VERIFIED (by Noah)".
    * @param {string} text
    */
   postTreasury: function (text) {
