@@ -20,6 +20,7 @@ function setupAll() {
   PropertiesService.getScriptProperties().setProperty('LEDGER_ID', ledger.getId());
 
   var createdTabs = Setup_ensureAllTabsExist(ledger);
+  Setup_installArrayFormulas(ledger);
   Setup_applyValidationsAndProtections(ledger);
   Setup_hideCountersTab(ledger);
   Setup_cleanupDefaultSheet(ledger);
@@ -87,6 +88,25 @@ function Setup_ensureAllTabsExist(ledger) {
     }
   }
   return created;
+}
+
+/**
+ * Install ARRAYFORMULA logic for derived columns in BudgetRequestLines.
+ * claimed_amount uses MAP+SUMIF to dynamically sum ClaimLineItems.
+ * remaining uses ARRAYFORMULA to subtract claimed from approved.
+ * @param {Spreadsheet} ledger
+ */
+function Setup_installArrayFormulas(ledger) {
+  var sheet = ledger.getSheetByName(TABS.BUDGET_REQUEST_LINES);
+  if (!sheet) return;
+  var claimedCol = COLS.BudgetRequestLines.claimed_amount;
+  var remainingCol = COLS.BudgetRequestLines.remaining;
+  
+  var claimedFormula = '={"claimed_amount"; MAP(A2:A, LAMBDA(id, IF(ISBLANK(id), "", SUMIF(ClaimLineItems!C:C, id, ClaimLineItems!E:E))))}';
+  sheet.getRange(1, claimedCol).setFormula(claimedFormula);
+  
+  var remainingFormula = '={"remaining"; ARRAYFORMULA(IF(ISBLANK(A2:A), "", F2:F - H2:H))}';
+  sheet.getRange(1, remainingCol).setFormula(remainingFormula);
 }
 
 /** Remove the default 'Sheet1' left over from spreadsheet creation, if harmless to do so. */
@@ -346,7 +366,13 @@ function Setup_ensureConfigSeeded() {
  */
 function Setup_ensureCategoriesSeeded() {
   var sheet = getSheet_(TABS.CATEGORIES);
-  if (sheet.getLastRow() > 1) return { created: false, count: 0 };
+  var values = sheet.getRange(2, 1, Math.max(1, sheet.getMaxRows() - 1), 1).getValues();
+  var hasContent = false;
+  for (var i = 0; i < values.length; i++) {
+    if (values[i][0]) { hasContent = true; break; }
+  }
+  if (hasContent) return { created: false, count: 0 };
+
   var rows = [
     ['CAT-ACT', 'Activities', 'EXPENSE', '', true],
     ['CAT-FOOD', 'Food', 'EXPENSE', '', true],
@@ -368,7 +394,15 @@ function Setup_ensureCategoriesSeeded() {
  */
 function Setup_ensureTreasurerUserSeeded() {
   var sheet = getSheet_(TABS.USERS);
-  if (sheet.getLastRow() > 1) return { created: false, userId: null };
+  var values = sheet.getRange(2, 1, Math.max(1, sheet.getMaxRows() - 1), 1).getValues();
+  var insertRow = 2;
+  for (var i = 0; i < values.length; i++) {
+    if (values[i][0] === 'U-0001') {
+      Setup_registerCounter('User', 1);
+      return { created: false, userId: 'U-0001' };
+    }
+    if (values[i][0]) insertRow = i + 3;
+  }
   var email = '';
   try {
     email = Session.getActiveUser().getEmail() || '';
@@ -377,7 +411,7 @@ function Setup_ensureTreasurerUserSeeded() {
   }
   var userId = 'U-0001';
   var now = Utilities.formatDate(new Date(), 'Asia/Hong_Kong', "yyyy-MM-dd'T'HH:mm:ssXXX");
-  sheet.appendRow([userId, 'Treasurer', ROLES.TREASURER, email, true, now]);
+  sheet.getRange(insertRow, 1, 1, 6).setValues([[userId, 'Treasurer', ROLES.TREASURER, email, true, now]]);
   // U-0001 is seeded directly, bypassing Ids.nextId — register it in
   // Counters so the next real nextId('User') call starts at 2, not 1.
   Setup_registerCounter('User', 1);
@@ -411,13 +445,18 @@ function Setup_registerCounter(entityType, n) {
  */
 function Setup_ensureOpeningBalanceSeeded() {
   var sheet = getSheet_(TABS.INCOME);
-  if (sheet.getLastRow() > 1) return { created: false, incomeId: null, amount: null };
+  var values = sheet.getRange(2, 1, Math.max(1, sheet.getMaxRows() - 1), 1).getValues();
+  var insertRow = 2;
+  for (var i = 0; i < values.length; i++) {
+    if (values[i][0]) insertRow = i + 3;
+  }
+  if (insertRow > 2) return { created: false, incomeId: null, amount: null };
   var incomeId = Ids.nextId('Income');
   var today = Utilities.formatDate(new Date(), 'Asia/Hong_Kong', 'yyyy-MM-dd');
   var amount = 10167.35;
-  sheet.appendRow([
+  sheet.getRange(insertRow, 1, 1, 8).setValues([[
     incomeId, today, 'CAT-RET', amount, 'U-0001',
     'Opening balance import', '', 'Opening balance per SEM A Statement.xlsx'
-  ]);
+  ]]);
   return { created: true, incomeId: incomeId, amount: amount };
 }
