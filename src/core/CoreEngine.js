@@ -1,34 +1,28 @@
-let _STATUS, _ACTIONS, _CoreValidations, _CoreAudit;
-
-if (typeof module !== 'undefined') {
-  const Constants = require('./Constants');
-  const CoreValidations = require('./CoreValidations').CoreValidations;
-  const CoreAudit = require('./CoreAudit').CoreAudit;
-  
-  _STATUS = Constants.STATUS;
-  _ACTIONS = Constants.ACTIONS;
-  _CoreValidations = CoreValidations;
-  _CoreAudit = CoreAudit;
-} else {
-  _STATUS = STATUS;
-  _ACTIONS = ACTIONS;
-  _CoreValidations = CoreValidations;
-  _CoreAudit = CoreAudit;
-}
-
 var CoreEngine = {
+  getDeps: function() {
+    if (typeof module !== 'undefined') {
+      return {
+        STATUS: require('./Constants').STATUS,
+        ACTIONS: require('./Constants').ACTIONS,
+        CoreValidations: require('./CoreValidations').CoreValidations,
+        CoreAudit: require('./CoreAudit').CoreAudit
+      };
+    }
+    return { STATUS: STATUS, ACTIONS: ACTIONS, CoreValidations: CoreValidations, CoreAudit: CoreAudit };
+  },
   transition: function(entityType, id, action, payload, currentState, actorRole, prevHash) {
-    if (entityType === 'BudgetRequest' && action === _ACTIONS.APPROVE) {
-      if (!_CoreValidations.canApprove(currentState, actorRole)) {
+    var deps = this.getDeps();
+    if (entityType === 'BudgetRequest' && action === deps.ACTIONS.APPROVE) {
+      if (!deps.CoreValidations.canApprove(currentState, actorRole)) {
         return { success: false, error: 'Invalid' };
       }
       
-      var newHash = _CoreAudit.calculateHash(prevHash, id + '|' + _ACTIONS.APPROVE);
+      var newHash = deps.CoreAudit.calculateHash(prevHash, id + '|' + deps.ACTIONS.APPROVE);
       return {
         success: true,
         commands: [
-          { action: 'UPDATE', id: id, field: 'status', value: _STATUS.BudgetRequest.APPROVED },
-          { action: 'APPEND_AUDIT', row_hash: newHash, detail: _ACTIONS.APPROVE }
+          { action: 'UPDATE', id: id, field: 'status', value: deps.STATUS.BudgetRequest.APPROVED },
+          { action: 'APPEND_AUDIT', row_hash: newHash, detail: deps.ACTIONS.APPROVE }
         ]
       };
     }
