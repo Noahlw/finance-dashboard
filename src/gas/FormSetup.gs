@@ -163,3 +163,13 @@ var FormSetup = {
     }
   }
 };
+
+function runCreateForms() {
+  var urls = FormSetup.createForms();
+  Logger.log('Forms created/found: ' + JSON.stringify(urls));
+}
+
+function runInstallTriggers() {
+  FormSetup.installTriggers();
+  Logger.log('Triggers installed successfully.');
+}
