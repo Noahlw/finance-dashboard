@@ -14,12 +14,22 @@
  */
 function refreshApprovalsTab() {
   var sheet = getSheet_(TABS.APPROVALS);
-  var lastRow = sheet.getLastRow();
-  if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).clearContent();
+  var lastRow = Math.max(sheet.getLastRow(), 2);
+  var c = COLS.Approvals;
+
+  var confirmValidation = sheet.getRange(2, c.confirm).getDataValidation();
+  if (!confirmValidation || confirmValidation.getCriteriaType() !== SpreadsheetApp.DataValidationCriteria.CHECKBOX) {
+    sheet.getRange(2, 1, 1, sheet.getLastColumn()).clearContent();
+    sheet.getRange(2, c.confirm).insertCheckboxes();
+    sheet.getRange(2, c.action).setValue('INCOME INTAKE:');
+    sheet.setFrozenRows(2);
+  }
+
+  if (lastRow > 2) sheet.getRange(3, 1, lastRow - 2, sheet.getLastColumn()).clearContent();
 
   var rows = [].concat(Approvals_pendingRequestRows(), Approvals_claimRows());
   if (rows.length > 0) {
-    sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+    sheet.getRange(3, 1, rows.length, rows[0].length).setValues(rows);
   }
 }
 
@@ -81,6 +91,33 @@ function onEditApprovals(e) {
 
   var row = e.range.getRow();
   var c = COLS.Approvals;
+
+  if (row === 2) {
+    var date = sheet.getRange(2, c.entity_id).getValue();
+    var catId = sheet.getRange(2, c.entity_type).getValue();
+    var sourceRef = sheet.getRange(2, c.title).getValue();
+    var amount = sheet.getRange(2, c.amount).getValue();
+    var note = sheet.getRange(2, c.note).getValue();
+    
+    var actorInfo = Approvals_resolveActor(e);
+    
+    if (date && catId && amount) {
+      var dateStr = (date instanceof Date) ? Utilities.formatDate(date, 'Asia/Hong_Kong', 'yyyy-MM-dd') : date;
+      Engine.recordIncome(dateStr, catId, amount, sourceRef, '', note, actorInfo.userId);
+      SpreadsheetApp.getActive().toast('Income recorded successfully!', 'Success');
+      
+      sheet.getRange(2, c.entity_id).clearContent();
+      sheet.getRange(2, c.entity_type).clearContent();
+      sheet.getRange(2, c.title).clearContent();
+      sheet.getRange(2, c.amount).clearContent();
+      sheet.getRange(2, c.note).clearContent();
+    } else {
+      SpreadsheetApp.getActive().toast('Missing required fields (Date, Category, Amount)', 'Error');
+    }
+    sheet.getRange(2, c.confirm).setValue(false);
+    return;
+  }
+
   var numCols = Object.keys(c).length;
   var rowValues = sheet.getRange(row, 1, 1, numCols).getValues()[0];
 

@@ -76,7 +76,7 @@ var Engine = {
       var row = Engine._loadRow(entityType, entityId);
       if (!row) return Engine._deny(entityType, entityId, action, actorUserId, 'ENTITY_NOT_FOUND', null);
 
-      var cols = COLS[entityType];
+      var cols = COLS[entityType + 's'];
       var currentStatus = row.values[cols.status - 1];
       var def = Engine._findTransition(entityType, currentStatus, action);
       if (!def) return Engine._deny(entityType, entityId, action, actorUserId, 'ILLEGAL_TRANSITION', currentStatus);
@@ -115,6 +115,32 @@ var Engine = {
       Engine._notify(entityType, entityId, action, currentStatus, nextStatus, actorUserId, selfApproved);
 
       return { ok: true, reason: null, from: currentStatus, to: nextStatus, selfApproved: selfApproved };
+  },
+
+  /**
+   * Record new income. (P2-2 Income Intake)
+   * High Trust: Any committee member can trigger this via the Action Row, but actorUserId is audited.
+   */
+  recordIncome: function (date, categoryId, amount, sourceRef, eventId, notes, actorUserId) {
+    var lock = LockService.getScriptLock();
+    lock.waitLock(30000);
+    try {
+      var incomeId = Ids.nextId('Income');
+      var sheet = getSheet_(TABS.INCOME);
+      var row = [];
+      var cols = COLS.Income;
+      row[cols.income_id - 1] = incomeId;
+      row[cols.date - 1] = date;
+      row[cols.category_id - 1] = categoryId;
+      row[cols.amount - 1] = amount;
+      row[cols.received_by - 1] = actorUserId;
+      row[cols.source_ref - 1] = sourceRef;
+      row[cols.event_id - 1] = eventId || '';
+      row[cols.notes - 1] = notes || '';
+      
+      sheet.appendRow(row);
+      Audit.append(actorUserId, 'Income', incomeId, 'CREATE', { amount: amount, sourceRef: sourceRef });
+      return { ok: true, incomeId: incomeId };
     } finally {
       lock.releaseLock();
     }
@@ -158,7 +184,7 @@ var Engine = {
     var tabMap = {
       BudgetRequest: TABS.BUDGET_REQUESTS, ExpenseClaim: TABS.EXPENSE_CLAIMS,
       User: TABS.USERS, BudgetRequestLine: TABS.BUDGET_REQUEST_LINES,
-      ClaimLineItem: TABS.CLAIM_LINE_ITEMS
+      ClaimLineItem: TABS.CLAIM_LINE_ITEMS, Payout: TABS.PAYOUTS
     };
     var sheet = getSheet_(tabMap[entityType]);
     var values = sheet.getDataRange().getValues();
