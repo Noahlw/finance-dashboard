@@ -61,7 +61,14 @@ function onFormSubmitClaim(e) {
   var user = IntakeForms_resolveUser(email);
 
   var receiptFile = IntakeForms_extractUploadedFile(e.response);
-  var receipt = IntakeForms_storeReceipt(receiptFile, user.userId, answers);
+  var receipt = null;
+  try {
+    receipt = IntakeForms_storeReceipt(receiptFile, user.userId, answers);
+  } catch (err) {
+    Audit.append(user.userId, 'ExpenseClaim', 'NEW', 'CREATE_FAILED', { reason: err.message });
+    Discord.postTreasury('🚫 Rejected submission from ' + user.userId + ': ' + err.message);
+    return;
+  }
 
   var claimId = Ids.nextId('ExpenseClaim');
   var now = Audit._nowIso();
@@ -80,15 +87,72 @@ function onFormSubmitClaim(e) {
     var amount = Number(answers['Line ' + n + ' — Amount (HKD)']);
     if (!budgetLineChoice || !amount) continue;
     var budgetLineId = IntakeForms_parseBudgetLineId(budgetLineChoice);
+    var missingReceiptFlag = (answers['Missing receipt?'] === 'Yes');
+    
     var check = Engine.validateClaimLineAmount(budgetLineId, amount);
     if (!check.ok) {
-      rejectedLines.push(budgetLineId + ' (HK$' + amount + ' > remaining HK$' + check.remaining + ')');
+      if (check.remaining < 0) check.remaining = 0; // sanity
+      var excessAmount = amount - check.remaining;
+      
+      var topUpRequestId = Ids.nextId('BudgetRequest');
+      var topUpLineId = Ids.childId(topUpRequestId, 1, 'BRL');
+      
+      var bLineSheet = getSheet_(TABS.BUDGET_REQUEST_LINES);
+      var bLineRows = bLineSheet.getDataRange().getValues();
+      var categoryId = '';
+      var reqId = '';
+      for (var i=1; i<bLineRows.length; i++) {
+        if (bLineRows[i][0] === budgetLineId) {
+          reqId = bLineRows[i][COLS.BudgetRequestLines.request_id - 1];
+          categoryId = bLineRows[i][COLS.BudgetRequestLines.category_id - 1];
+          break;
+        }
+      }
+      var bReqSheet = getSheet_(TABS.BUDGET_REQUESTS);
+      var bReqRows = bReqSheet.getDataRange().getValues();
+      var eventId = '';
+      for (var i=1; i<bReqRows.length; i++) {
+        if (bReqRows[i][0] === reqId) {
+          eventId = bReqRows[i][COLS.BudgetRequests.event_id - 1];
+          break;
+        }
+      }
+      
+      var topUpTitle = '[OVERBUDGET TOP-UP] for ' + budgetLineId;
+      var topUpJustification = 'Auto-generated top-up. User claimed HK$' + amount + ' but remaining was HK$' + check.remaining + '.';
+      
+      bReqSheet.appendRow([
+        topUpRequestId, user.userId, eventId, topUpTitle, topUpJustification, '',
+        STATUS.BudgetRequest.PENDING, now, '', '', '', false, ''
+      ]);
+      bLineSheet.appendRow([
+        topUpLineId, topUpRequestId, categoryId, 'Excess cover for claim', excessAmount, 0, STATUS.BudgetRequestLine.PENDING, 0, 0
+      ]);
+      Audit.append('SYSTEM', 'BudgetRequest', topUpRequestId, 'CREATE', { autoTopUpFor: budgetLineId });
+      Discord.postTreasury('**' + topUpRequestId + '** — Auto-generated top-up for ' + budgetLineId + ' (HK$' + excessAmount + ')');
+
+      if (check.remaining > 0) {
+        lineCount++;
+        var cliId1 = Ids.childId(claimId, lineCount, 'CLI');
+        getSheet_(TABS.CLAIM_LINE_ITEMS).appendRow([
+          cliId1, claimId, budgetLineId, receipt ? receipt.receiptId : '', check.remaining, notes, missingReceiptFlag
+        ]);
+      }
+      
+      lineCount++;
+      var cliId2 = Ids.childId(claimId, lineCount, 'CLI');
+      getSheet_(TABS.CLAIM_LINE_ITEMS).appendRow([
+        cliId2, claimId, topUpLineId, receipt ? receipt.receiptId : '', excessAmount, notes + ' (Top-Up)', missingReceiptFlag
+      ]);
+      
+      rejectedLines.push(budgetLineId + ' (auto-created top-up ' + topUpRequestId + ' for excess HK$' + excessAmount + ')');
       continue;
     }
+    
     lineCount++;
     var cliId = Ids.childId(claimId, lineCount, 'CLI');
     getSheet_(TABS.CLAIM_LINE_ITEMS).appendRow([
-      cliId, claimId, budgetLineId, receipt ? receipt.receiptId : '', amount, notes, false
+      cliId, claimId, budgetLineId, receipt ? receipt.receiptId : '', amount, notes, missingReceiptFlag
     ]);
   }
 
@@ -233,6 +297,16 @@ function IntakeForms_storeReceipt(file, uploaderUserId, answers) {
     var folder = DriveApp.getFolderById(folderId);
     var bytes = file.getBlob().getBytes();
     sha256 = IntakeForms_sha256Hex(bytes);
+    
+    var receiptSheet = getSheet_(TABS.RECEIPTS);
+    var receiptData = receiptSheet.getDataRange().getValues();
+    var hashCol = COLS.Receipts.sha256 - 1;
+    for (var i = 1; i < receiptData.length; i++) {
+      if (receiptData[i][hashCol] === sha256) {
+        throw new Error('Duplicate receipt detected. This exact file was already uploaded.');
+      }
+    }
+
     var newName = receiptId + '_' + file.getName();
     file.moveTo(folder);
     file.setName(newName);

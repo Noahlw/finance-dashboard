@@ -104,6 +104,13 @@ var Engine = {
 
       var selfApproved = isSelf && SELF_APPROVAL_ACTIONS.indexOf(action) !== -1;
 
+      if (entityType === 'ExpenseClaim' && action === 'VERIFY') {
+        var verifyCheck = Engine._validateClaimVerification(entityId, actorUserId, payload);
+        if (!verifyCheck.ok) {
+           return Engine._deny(entityType, entityId, action, actorUserId, verifyCheck.reason, currentStatus);
+        }
+      }
+
       var nextStatus = (entityType === 'BudgetRequest')
         ? Engine._applyBudgetRequestEffect(entityId, row, action, def, actorUserId, payload, selfApproved)
         : Engine._applyExpenseClaimEffect(entityId, row, action, def, actorUserId, payload, selfApproved);
@@ -162,6 +169,88 @@ var Engine = {
     var claimed = Engine._sumClaimedAgainstLine(budgetLineId);
     var remaining = approved - claimed;
     return { ok: Number(amount) <= remaining, remaining: remaining };
+  },
+
+  /**
+   * P2 Engine completeness checks for VERIFY on ExpenseClaims.
+   * Checks budget remaining, missing receipt caps, and roles.
+   */
+  _validateClaimVerification: function (claimId, actorUserId, payload) {
+    var cliSheet = getSheet_(TABS.CLAIM_LINE_ITEMS);
+    var cliRows = Engine._findRowsByColumn(cliSheet, COLS.ClaimLineItems.claim_id, claimId);
+    var c = COLS.ClaimLineItems;
+    
+    var hasMissingReceipt = false;
+    var totalMissingAmount = 0;
+    
+    for (var i = 0; i < cliRows.length; i++) {
+      var bLineId = cliRows[i].values[c.budget_line_id - 1];
+      var amount = Number(cliRows[i].values[c.amount - 1]) || 0;
+      var isMissing = cliRows[i].values[c.missing_receipt_flag - 1] === true;
+      
+      var bLineRow = Engine._loadRow('BudgetRequestLine', bLineId);
+      if (bLineRow) {
+         var remaining = Number(bLineRow.values[COLS.BudgetRequestLines.remaining - 1]);
+         if (remaining < 0) {
+           return { ok: false, reason: 'Budget line ' + bLineId + ' over-claimed. Wait for top-up to be approved.' };
+         }
+      }
+      
+      if (isMissing) {
+        hasMissingReceipt = true;
+        totalMissingAmount += amount;
+      }
+    }
+    
+    if (hasMissingReceipt) {
+      var actor = Engine._loadActor(actorUserId);
+      if (actor.role !== ROLES.TREASURER) {
+        return { ok: false, reason: 'Missing receipt claims must be verified by the TREASURER.' };
+      }
+      
+      var note = payload.decision_note || '';
+      if (note.indexOf('EXCEPTION_GRANTED') === -1) {
+        var cap = Config.getNum('MISSING_RECEIPT_CAP');
+        if (totalMissingAmount > cap) {
+          return { ok: false, reason: 'Missing receipt amount (' + totalMissingAmount + ') exceeds cap (' + cap + '). To bypass, type EXCEPTION_GRANTED in note.' };
+        }
+        
+        var maxPerSem = Config.getNum('MISSING_RECEIPT_MAX_PER_SEM');
+        var claimRow = Engine._loadRow('ExpenseClaim', claimId);
+        var claimantId = claimRow.values[COLS.ExpenseClaims.claimant_id - 1];
+        
+        var allCliData = cliSheet.getDataRange().getValues();
+        var claimSheet = getSheet_(TABS.EXPENSE_CLAIMS);
+        var claimData = claimSheet.getDataRange().getValues();
+        
+        var count = 0;
+        var claimCache = {};
+        for (var j=1; j<claimData.length; j++) {
+           claimCache[claimData[j][0]] = {
+             status: claimData[j][COLS.ExpenseClaims.status - 1],
+             claimant: claimData[j][COLS.ExpenseClaims.claimant_id - 1]
+           };
+        }
+        
+        for (var k=1; k<allCliData.length; k++) {
+          var cid = allCliData[k][c.claim_id - 1];
+          if (cid === claimId) continue;
+          var cInfo = claimCache[cid];
+          if (!cInfo) continue;
+          if (cInfo.claimant === claimantId && cInfo.status !== STATUS.ExpenseClaim.REJECTED && cInfo.status !== STATUS.ExpenseClaim.WITHDRAWN) {
+            if (allCliData[k][c.missing_receipt_flag - 1] === true) {
+              count++;
+            }
+          }
+        }
+        
+        if (count >= maxPerSem) {
+          return { ok: false, reason: 'Claimant has exceeded missing receipt limit (' + maxPerSem + ' per sem). To bypass, type EXCEPTION_GRANTED in note.' };
+        }
+      }
+    }
+    
+    return { ok: true };
   },
 
   // ---- internal helpers ----
