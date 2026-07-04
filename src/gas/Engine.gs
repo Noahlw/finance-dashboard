@@ -217,6 +217,10 @@ var Engine = {
       sheet.getRange(row.rowIndex, c.decided_at).setValue(now);
       sheet.getRange(row.rowIndex, c.decided_by).setValue(actorUserId);
       sheet.getRange(row.rowIndex, c.decision_note).setValue(payload.decision_note || '');
+      // Approved-amount changes shift what's available to claim against;
+      // keep the Claim form's budget-line dropdown in sync (best-effort:
+      // forms may not exist yet, e.g. under Tests.gs).
+      try { FormSetup.refreshClaimFormChoices(); } catch (e) { /* forms not set up yet */ }
     } else if (action === 'REQUEST_INFO') {
       nextStatus = def.to;
       sheet.getRange(row.rowIndex, c.decided_at).setValue(now);
