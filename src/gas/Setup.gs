@@ -1,0 +1,400 @@
+/**
+ * Setup.gs — idempotent builder for the whole Google-side footprint:
+ * CF-Ledger tabs, CF-Vault, Drive folders, Config seed, Category seed,
+ * the Treasurer's User row, and the D8 opening-balance Income row.
+ *
+ * Safe to re-run at any time: every step checks for existing state
+ * before creating anything, and never overwrites data that already
+ * exists (e.g. re-running never clobbers a pasted-in webhook URL).
+ *
+ * Run this once, manually, from the Apps Script editor bound to the
+ * CF-Ledger container spreadsheet (see BUILD-PLAN.md checkpoint CP-B).
+ */
+
+/**
+ * Entry point. Run this manually from the script editor.
+ * @return {Object} summary of what was created vs. already present
+ */
+function setupAll() {
+  var ledger = SpreadsheetApp.getActive();
+  PropertiesService.getScriptProperties().setProperty('LEDGER_ID', ledger.getId());
+
+  var createdTabs = Setup_ensureAllTabsExist(ledger);
+  Setup_applyValidationsAndProtections(ledger);
+  Setup_hideCountersTab(ledger);
+  Setup_cleanupDefaultSheet(ledger);
+
+  var vaultInfo = Setup_ensureVaultSpreadsheet();
+  var folderInfo = Setup_ensureDriveFolders();
+
+  var configSeeded = Setup_ensureConfigSeeded();
+  if (configSeeded.created) {
+    Audit.append('SYSTEM', 'Config', 'CONFIG', 'CREATE', { keys: configSeeded.keys });
+  }
+
+  var categoriesSeeded = Setup_ensureCategoriesSeeded();
+  if (categoriesSeeded.created) {
+    Audit.append('SYSTEM', 'Category', 'CATEGORIES', 'CREATE', { count: categoriesSeeded.count });
+  }
+
+  var treasurerSeeded = Setup_ensureTreasurerUserSeeded();
+  if (treasurerSeeded.created) {
+    Audit.append('SYSTEM', 'User', treasurerSeeded.userId, 'CREATE', { role: ROLES.TREASURER });
+  }
+
+  var incomeSeeded = Setup_ensureOpeningBalanceSeeded();
+  if (incomeSeeded.created) {
+    Audit.append('SYSTEM', 'Income', incomeSeeded.incomeId, 'CREATE', {
+      amount: incomeSeeded.amount, notes: 'Opening balance per SEM A Statement.xlsx'
+    });
+  }
+
+  return {
+    ledgerId: ledger.getId(),
+    ledgerUrl: ledger.getUrl(),
+    vaultId: vaultInfo.id,
+    vaultUrl: vaultInfo.url,
+    tabsCreated: createdTabs,
+    folders: folderInfo,
+    configSeeded: configSeeded,
+    categoriesSeeded: categoriesSeeded,
+    treasurerSeeded: treasurerSeeded,
+    incomeSeeded: incomeSeeded
+  };
+}
+
+/**
+ * Create any CF-Ledger tabs that don't exist yet, with header rows from COLS.
+ * @param {Spreadsheet} ledger
+ * @return {string[]} names of tabs that were newly created
+ */
+function Setup_ensureAllTabsExist(ledger) {
+  var ledgerTabNames = [
+    TABS.USERS, TABS.CATEGORIES, TABS.EVENTS, TABS.BUDGET_REQUESTS,
+    TABS.BUDGET_REQUEST_LINES, TABS.EXPENSE_CLAIMS, TABS.CLAIM_LINE_ITEMS,
+    TABS.RECEIPTS, TABS.INCOME, TABS.PAYOUTS, TABS.AUDIT_LOG,
+    TABS.APPROVALS, TABS.CONFIG, TABS.COUNTERS
+  ];
+  var created = [];
+  for (var i = 0; i < ledgerTabNames.length; i++) {
+    var name = ledgerTabNames[i];
+    if (!ledger.getSheetByName(name)) {
+      var sheet = ledger.insertSheet(name);
+      var headers = Object.keys(COLS[name]);
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      sheet.setFrozenRows(1);
+      created.push(name);
+    }
+  }
+  return created;
+}
+
+/** Remove the default 'Sheet1' left over from spreadsheet creation, if harmless to do so. */
+function Setup_cleanupDefaultSheet(ledger) {
+  var sheet1 = ledger.getSheetByName('Sheet1');
+  if (sheet1 && ledger.getSheets().length > 1) {
+    try {
+      ledger.deleteSheet(sheet1);
+    } catch (e) {
+      // last sheet or otherwise undeletable; leave it, harmless
+    }
+  }
+}
+
+/** Hide the Counters tab — it's implementation detail, not for humans to edit. */
+function Setup_hideCountersTab(ledger) {
+  var sheet = ledger.getSheetByName(TABS.COUNTERS);
+  if (sheet && !sheet.isSheetHidden()) sheet.hideSheet();
+}
+
+/**
+ * Apply dropdown/checkbox data validation and protected ranges.
+ * Re-runnable: validation rules are simply reapplied; protections are
+ * only created if not already present (idempotency guard on protect()).
+ * @param {Spreadsheet} ledger
+ */
+function Setup_applyValidationsAndProtections(ledger) {
+  Setup_applyDropdown(ledger, TABS.BUDGET_REQUESTS, COLS.BudgetRequests.status, Object.keys(STATUS.BudgetRequest).map(function (k) { return STATUS.BudgetRequest[k]; }));
+  Setup_applyDropdown(ledger, TABS.BUDGET_REQUEST_LINES, COLS.BudgetRequestLines.line_status, Setup_values(STATUS.BudgetRequestLine));
+  Setup_applyDropdown(ledger, TABS.EXPENSE_CLAIMS, COLS.ExpenseClaims.status, Setup_values(STATUS.ExpenseClaim));
+  Setup_applyDropdown(ledger, TABS.PAYOUTS, COLS.Payouts.status, Setup_values(STATUS.Payout));
+  Setup_applyDropdown(ledger, TABS.USERS, COLS.Users.role, Setup_values(ROLES));
+  Setup_applyDropdown(ledger, TABS.CATEGORIES, COLS.Categories.kind, ['EXPENSE', 'INCOME']);
+  Setup_applyDropdown(ledger, TABS.APPROVALS, COLS.Approvals.action, Setup_values(ACTIONS));
+
+  Setup_applyCheckbox(ledger, TABS.USERS, COLS.Users.active);
+  Setup_applyCheckbox(ledger, TABS.CATEGORIES, COLS.Categories.active);
+  Setup_applyCheckbox(ledger, TABS.BUDGET_REQUESTS, COLS.BudgetRequests.self_approved);
+  Setup_applyCheckbox(ledger, TABS.EXPENSE_CLAIMS, COLS.ExpenseClaims.self_approved);
+  Setup_applyCheckbox(ledger, TABS.EXPENSE_CLAIMS, COLS.ExpenseClaims.late_flag);
+  Setup_applyCheckbox(ledger, TABS.CLAIM_LINE_ITEMS, COLS.ClaimLineItems.missing_receipt_flag);
+  Setup_applyCheckbox(ledger, TABS.APPROVALS, COLS.Approvals.confirm);
+
+  var ownerOnlyTabs = [TABS.AUDIT_LOG, TABS.CONFIG, TABS.COUNTERS];
+  for (var i = 0; i < ownerOnlyTabs.length; i++) {
+    Setup_protectOwnerOnly(ledger.getSheetByName(ownerOnlyTabs[i]));
+  }
+
+  var warnOnlyTabs = [
+    TABS.USERS, TABS.CATEGORIES, TABS.EVENTS, TABS.BUDGET_REQUESTS,
+    TABS.BUDGET_REQUEST_LINES, TABS.EXPENSE_CLAIMS, TABS.CLAIM_LINE_ITEMS,
+    TABS.RECEIPTS, TABS.INCOME, TABS.PAYOUTS
+  ];
+  for (var j = 0; j < warnOnlyTabs.length; j++) {
+    Setup_protectWarnOnly(ledger.getSheetByName(warnOnlyTabs[j]));
+  }
+
+  Setup_protectApprovalsIntentOnly(ledger.getSheetByName(TABS.APPROVALS));
+}
+
+/** @return {string[]} the values of an enum-like object, in declaration order */
+function Setup_values(obj) {
+  return Object.keys(obj).map(function (k) { return obj[k]; });
+}
+
+/**
+ * Apply a dropdown (requireValueInList) to rows 2-1000 of one column.
+ * @param {Spreadsheet} ledger
+ * @param {string} tabName
+ * @param {number} col1Indexed
+ * @param {string[]} values
+ */
+function Setup_applyDropdown(ledger, tabName, col1Indexed, values) {
+  var sheet = ledger.getSheetByName(tabName);
+  if (!sheet) return;
+  var rule = SpreadsheetApp.newDataValidation().requireValueInList(values, true).setAllowInvalid(false).build();
+  sheet.getRange(2, col1Indexed, 999, 1).setDataValidation(rule);
+}
+
+/**
+ * Apply a checkbox to rows 2-1000 of one column.
+ * @param {Spreadsheet} ledger
+ * @param {string} tabName
+ * @param {number} col1Indexed
+ */
+function Setup_applyCheckbox(ledger, tabName, col1Indexed) {
+  var sheet = ledger.getSheetByName(tabName);
+  if (!sheet) return;
+  var rule = SpreadsheetApp.newDataValidation().requireCheckbox().build();
+  sheet.getRange(2, col1Indexed, 999, 1).setDataValidation(rule);
+}
+
+/**
+ * Protect an entire sheet so only the owner (the account running this
+ * script) may edit it. Idempotent: skips if a sheet protection already
+ * exists.
+ * @param {?Sheet} sheet
+ */
+function Setup_protectOwnerOnly(sheet) {
+  if (!sheet) return;
+  var existing = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET);
+  if (existing.length > 0) return;
+  var protection = sheet.protect().setDescription('owner-only: ' + sheet.getName());
+  var me = Session.getEffectiveUser();
+  var editors = protection.getEditors();
+  for (var i = 0; i < editors.length; i++) {
+    if (editors[i].getEmail() !== me.getEmail()) protection.removeEditor(editors[i]);
+  }
+  if (protection.canDomainEdit()) protection.setDomainEdit(false);
+}
+
+/**
+ * Protect an entire sheet as warn-only (editors see a confirmation
+ * dialog but are not blocked). Idempotent.
+ * @param {?Sheet} sheet
+ */
+function Setup_protectWarnOnly(sheet) {
+  if (!sheet) return;
+  var existing = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET);
+  if (existing.length > 0) return;
+  var protection = sheet.protect().setDescription('warn-only: ' + sheet.getName());
+  protection.setWarningOnly(true);
+}
+
+/**
+ * Protect the Approvals sheet except its intent columns (action,
+ * amount_override, note, confirm, intent_actor_email), which stay
+ * freely editable so committee members can express intent there.
+ * Idempotent.
+ * @param {?Sheet} sheet
+ */
+function Setup_protectApprovalsIntentOnly(sheet) {
+  if (!sheet) return;
+  var existing = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET);
+  if (existing.length > 0) return;
+  var protection = sheet.protect().setDescription('Approvals: intent columns only editable');
+  var c = COLS.Approvals;
+  var firstIntentCol = c.action;
+  var lastIntentCol = c.intent_actor_email;
+  var numCols = lastIntentCol - firstIntentCol + 1;
+  var unprotected = sheet.getRange(2, firstIntentCol, 999, numCols);
+  protection.setUnprotectedRanges([unprotected]);
+}
+
+/**
+ * Create the CF-Vault spreadsheet if it doesn't exist yet (checked via
+ * Script Properties, since it's a separate file from the container).
+ * @return {{id: string, url: string}}
+ */
+function Setup_ensureVaultSpreadsheet() {
+  var props = PropertiesService.getScriptProperties();
+  var existingId = props.getProperty('VAULT_ID');
+  var vault;
+  if (existingId) {
+    vault = SpreadsheetApp.openById(existingId);
+  } else {
+    vault = SpreadsheetApp.create('CF-Vault');
+    props.setProperty('VAULT_ID', vault.getId());
+  }
+  var sheet = vault.getSheetByName(TABS.VAULT);
+  if (!sheet) {
+    sheet = vault.getSheets()[0];
+    sheet.setName(TABS.VAULT);
+    var headers = Object.keys(COLS.Vault);
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    sheet.setFrozenRows(1);
+  }
+  var protections = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET);
+  if (protections.length === 0) {
+    var protection = sheet.protect().setDescription('CF-Vault: treasurer-only, PII');
+    var me = Session.getEffectiveUser();
+    var editors = protection.getEditors();
+    for (var i = 0; i < editors.length; i++) {
+      if (editors[i].getEmail() !== me.getEmail()) protection.removeEditor(editors[i]);
+    }
+    if (protection.canDomainEdit()) protection.setDomainEdit(false);
+  }
+  return { id: vault.getId(), url: vault.getUrl() };
+}
+
+/**
+ * Create the /CF-Finance Drive folder tree if missing. Stores every
+ * folder ID in Script Properties for use by IntakeForms.gs and Jobs.gs.
+ * @return {Object<string,string>} folder name -> id
+ */
+function Setup_ensureDriveFolders() {
+  var props = PropertiesService.getScriptProperties();
+  var root = Setup_getOrCreateFolder(DriveApp.getRootFolder(), 'CF-Finance');
+  props.setProperty('CF_FINANCE_FOLDER_ID', root.getId());
+  var names = ['Receipts', 'Snapshots', 'Statements', 'Archive'];
+  var ids = { CF_Finance: root.getId() };
+  for (var i = 0; i < names.length; i++) {
+    var folder = Setup_getOrCreateFolder(root, names[i]);
+    var propKey = names[i].toUpperCase() + '_FOLDER_ID';
+    props.setProperty(propKey, folder.getId());
+    ids[names[i]] = folder.getId();
+  }
+  return ids;
+}
+
+/**
+ * @param {Folder} parent
+ * @param {string} name
+ * @return {Folder} existing or newly created subfolder
+ */
+function Setup_getOrCreateFolder(parent, name) {
+  var it = parent.getFoldersByName(name);
+  if (it.hasNext()) return it.next();
+  return parent.createFolder(name);
+}
+
+/**
+ * Seed the Config tab with every policy key from BUILD-PLAN.md §3, but
+ * never overwrite a key that's already present (so a pasted-in webhook
+ * URL survives re-runs).
+ * @return {{created: boolean, keys: string[]}}
+ */
+function Setup_ensureConfigSeeded() {
+  var sheet = getSheet_(TABS.CONFIG);
+  var defaults = {
+    CURRENT_SEMESTER: '26A',
+    TREASURER_USER_ID: 'U-0001',
+    TREASURY_WEBHOOK_URL: 'PASTE_ME',
+    STATUS_WEBHOOK_URL: 'PASTE_ME',
+    PUBLIC_SHOW_AMOUNTS: 'FALSE',
+    CLAIM_DEADLINE_DAYS: '30',
+    SEMESTER_HARD_STOP_DAYS: '14',
+    MISSING_RECEIPT_CAP: '200',
+    MISSING_RECEIPT_MAX_PER_SEM: '2',
+    APPROVAL_SLA_HOURS: '72',
+    PAYOUT_AUTOCONFIRM_HOURS: '72',
+    LOCK_AFTER_PAID_HOURS: '24',
+    BACKUP_ACCOUNT_EMAIL: 'PASTE_ME'
+  };
+  var lastRow = sheet.getLastRow();
+  var existingKeys = {};
+  if (lastRow > 1) {
+    var values = sheet.getRange(2, COLS.Config.key, lastRow - 1, 1).getValues();
+    for (var i = 0; i < values.length; i++) {
+      if (values[i][0]) existingKeys[values[i][0]] = true;
+    }
+  }
+  var added = [];
+  for (var key in defaults) {
+    if (!existingKeys[key]) {
+      sheet.appendRow([key, defaults[key]]);
+      added.push(key);
+    }
+  }
+  if (added.length > 0) Config.invalidate();
+  return { created: added.length > 0, keys: added };
+}
+
+/**
+ * Seed Categories only if the tab is currently empty.
+ * @return {{created: boolean, count: number}}
+ */
+function Setup_ensureCategoriesSeeded() {
+  var sheet = getSheet_(TABS.CATEGORIES);
+  if (sheet.getLastRow() > 1) return { created: false, count: 0 };
+  var rows = [
+    ['CAT-ACT', 'Activities', 'EXPENSE', '', true],
+    ['CAT-FOOD', 'Food', 'EXPENSE', '', true],
+    ['CAT-TRAN', 'Transportation', 'EXPENSE', '', true],
+    ['CAT-CAMP', 'Camp', 'EXPENSE', '', true],
+    ['CAT-ADMIN', 'Admin', 'EXPENSE', '', true],
+    ['CAT-DON', 'Donations', 'INCOME', '', true],
+    ['CAT-RET', 'Retained Earnings', 'INCOME', '', true],
+    ['CAT-FEE', 'Camp Fees', 'INCOME', '', true],
+    ['CAT-OTH', 'Other', 'INCOME', '', true]
+  ];
+  sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
+  return { created: true, count: rows.length };
+}
+
+/**
+ * Seed the Treasurer's User row (U-0001) only if Users is currently empty.
+ * @return {{created: boolean, userId: ?string}}
+ */
+function Setup_ensureTreasurerUserSeeded() {
+  var sheet = getSheet_(TABS.USERS);
+  if (sheet.getLastRow() > 1) return { created: false, userId: null };
+  var email = '';
+  try {
+    email = Session.getActiveUser().getEmail() || '';
+  } catch (e) {
+    email = '';
+  }
+  var userId = 'U-0001';
+  var now = Utilities.formatDate(new Date(), 'Asia/Hong_Kong', "yyyy-MM-dd'T'HH:mm:ssXXX");
+  sheet.appendRow([userId, 'Treasurer', ROLES.TREASURER, email, true, now]);
+  return { created: true, userId: userId };
+}
+
+/**
+ * Write the D8 opening-balance Income row only if Income is currently
+ * empty. No legacy row-by-row import — see docs/adr and D8.
+ * @return {{created: boolean, incomeId: ?string, amount: ?number}}
+ */
+function Setup_ensureOpeningBalanceSeeded() {
+  var sheet = getSheet_(TABS.INCOME);
+  if (sheet.getLastRow() > 1) return { created: false, incomeId: null, amount: null };
+  var incomeId = Ids.nextId('Income');
+  var today = Utilities.formatDate(new Date(), 'Asia/Hong_Kong', 'yyyy-MM-dd');
+  var amount = 10167.35;
+  sheet.appendRow([
+    incomeId, today, 'CAT-RET', amount, 'U-0001',
+    'Opening balance import', '', 'Opening balance per SEM A Statement.xlsx'
+  ]);
+  return { created: true, incomeId: incomeId, amount: amount };
+}
