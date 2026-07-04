@@ -26,6 +26,7 @@ function setupAll() {
   Setup_cleanupDefaultSheet(ledger);
 
   var vaultInfo = Setup_ensureVaultSpreadsheet();
+  var dashboardInfo = Setup_ensureDashboardSpreadsheet();
   var folderInfo = Setup_ensureDriveFolders();
 
   var configSeeded = Setup_ensureConfigSeeded();
@@ -55,6 +56,8 @@ function setupAll() {
     ledgerUrl: ledger.getUrl(),
     vaultId: vaultInfo.id,
     vaultUrl: vaultInfo.url,
+    dashboardId: dashboardInfo.id,
+    dashboardUrl: dashboardInfo.url,
     tabsCreated: createdTabs,
     folders: folderInfo,
     configSeeded: configSeeded,
@@ -285,6 +288,67 @@ function Setup_ensureVaultSpreadsheet() {
     if (protection.canDomainEdit()) protection.setDomainEdit(false);
   }
   return { id: vault.getId(), url: vault.getUrl() };
+}
+
+/**
+ * Create the Dashboard spreadsheet if it doesn't exist yet.
+ * Sets up IMPORTRANGE formulas for Budget Requests, Expense Claims, and Income.
+ * Note: The owner may need to click 'Allow Access' on the #REF! errors once.
+ * @return {{id: string, url: string}}
+ */
+function Setup_ensureDashboardSpreadsheet() {
+  var props = PropertiesService.getScriptProperties();
+  var existingId = props.getProperty('DASHBOARD_ID');
+  var dash;
+  if (existingId) {
+    try {
+      dash = SpreadsheetApp.openById(existingId);
+    } catch (e) {
+      dash = null;
+    }
+  }
+  
+  if (!dash) {
+    dash = SpreadsheetApp.create('CF-Budget-Dashboard');
+    props.setProperty('DASHBOARD_ID', dash.getId());
+    
+    var ledgerId = props.getProperty('LEDGER_ID') || SpreadsheetApp.getActive().getId();
+    
+    var tabs = [TABS.BUDGET_REQUESTS, TABS.EXPENSE_CLAIMS, TABS.INCOME];
+    for (var i = 0; i < tabs.length; i++) {
+      var tabName = tabs[i];
+      var sheet = dash.getSheetByName(tabName);
+      if (!sheet) {
+        if (i === 0) {
+          sheet = dash.getSheets()[0];
+          sheet.setName(tabName);
+        } else {
+          sheet = dash.insertSheet(tabName);
+        }
+      }
+      var formula = '=IMPORTRANGE("' + ledgerId + '", "' + tabName + '!A:Z")';
+      sheet.getRange('A1').setFormula(formula);
+    }
+    
+    var sheets = dash.getSheets();
+    for (var j = 0; j < sheets.length; j++) {
+      if (tabs.indexOf(sheets[j].getName()) === -1) {
+        try { dash.deleteSheet(sheets[j]); } catch (e) {}
+      }
+    }
+    
+    var allSheets = dash.getSheets();
+    var me = Session.getEffectiveUser();
+    for (var k = 0; k < allSheets.length; k++) {
+      var p = allSheets[k].protect().setDescription('Dashboard is read-only IMPORTRANGE');
+      var editors = p.getEditors();
+      for (var e = 0; e < editors.length; e++) {
+        if (editors[e].getEmail() !== me.getEmail()) p.removeEditor(editors[e]);
+      }
+      if (p.canDomainEdit()) p.setDomainEdit(false);
+    }
+  }
+  return { id: dash.getId(), url: dash.getUrl() };
 }
 
 /**
