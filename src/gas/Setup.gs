@@ -20,8 +20,18 @@ function setupAll() {
   PropertiesService.getScriptProperties().setProperty('LEDGER_ID', ledger.getId());
 
   var createdTabs = Setup_ensureAllTabsExist(ledger);
+
+  var approvalsMigration = Setup_migrateApprovalsColumns(ledger);
+  if (approvalsMigration.migrated) {
+    Audit.append('SYSTEM', 'Approvals', 'APPROVALS', 'SCHEMA_MIGRATION', {
+      addedColumns: ['payout_method', 'payout_reference']
+    });
+  }
+
   Setup_installArrayFormulas(ledger);
   Setup_applyValidationsAndProtections(ledger);
+  Setup_styleTabHeaders(ledger);
+  Setup_styleApprovalsTab(ledger);
   Setup_hideCountersTab(ledger);
   Setup_cleanupDefaultSheet(ledger);
 
@@ -44,12 +54,16 @@ function setupAll() {
     Audit.append('SYSTEM', 'User', treasurerSeeded.userId, 'CREATE', { role: ROLES.TREASURER });
   }
 
+  var configConsistency = Setup_verifyConfigConsistency();
+
   var incomeSeeded = Setup_ensureOpeningBalanceSeeded();
   if (incomeSeeded.created) {
     Audit.append('SYSTEM', 'Income', incomeSeeded.incomeId, 'CREATE', {
       amount: incomeSeeded.amount, notes: 'Opening balance per SEM A Statement.xlsx'
     });
   }
+
+  SpreadsheetApp.flush(); // Crucial so a subsequent call in a separate execution (e.g. clasp run) doesn't race a stale read of what was just seeded.
 
   return {
     ledgerId: ledger.getId(),
@@ -59,10 +73,12 @@ function setupAll() {
     dashboardId: dashboardInfo.id,
     dashboardUrl: dashboardInfo.url,
     tabsCreated: createdTabs,
+    approvalsMigration: approvalsMigration,
     folders: folderInfo,
     configSeeded: configSeeded,
     categoriesSeeded: categoriesSeeded,
     treasurerSeeded: treasurerSeeded,
+    configConsistency: configConsistency,
     incomeSeeded: incomeSeeded
   };
 }
@@ -144,6 +160,7 @@ function Setup_applyValidationsAndProtections(ledger) {
   Setup_applyDropdown(ledger, TABS.USERS, COLS.Users.role, Setup_values(ROLES));
   Setup_applyDropdown(ledger, TABS.CATEGORIES, COLS.Categories.kind, ['EXPENSE', 'INCOME']);
   Setup_applyDropdown(ledger, TABS.APPROVALS, COLS.Approvals.action, Setup_values(ACTIONS));
+  Setup_applyDropdown(ledger, TABS.APPROVALS, COLS.Approvals.payout_method, Setup_values(PAYOUT_METHOD));
 
   Setup_applyCheckbox(ledger, TABS.USERS, COLS.Users.active);
   Setup_applyCheckbox(ledger, TABS.CATEGORIES, COLS.Categories.active);
@@ -236,15 +253,19 @@ function Setup_protectWarnOnly(sheet) {
 
 /**
  * Protect the Approvals sheet except its intent columns (action,
- * amount_override, note, confirm, intent_actor_email), which stay
- * freely editable so committee members can express intent there.
- * Idempotent.
+ * amount_override, note, payout_method, payout_reference, confirm,
+ * intent_actor_email), which stay freely editable so committee members
+ * can express intent there. Idempotent: always recreates the protection
+ * from the current COLS.Approvals values, so it self-heals if the
+ * intent-column range ever changes (e.g. new columns inserted) rather
+ * than permanently freezing whatever range existed on first run.
  * @param {?Sheet} sheet
  */
 function Setup_protectApprovalsIntentOnly(sheet) {
   if (!sheet) return;
   var existing = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET);
-  if (existing.length > 0) return;
+  for (var i = 0; i < existing.length; i++) existing[i].remove();
+
   var protection = sheet.protect().setDescription('Approvals: intent columns only editable');
   var c = COLS.Approvals;
   var firstIntentCol = c.action;
@@ -422,6 +443,64 @@ function Setup_ensureConfigSeeded() {
   }
   if (added.length > 0) Config.invalidate();
   return { created: added.length > 0, keys: added };
+}
+
+/**
+ * Detect and auto-heal Config.TREASURER_USER_ID drift (BUILD-PLAN P3
+ * hardening): the stored ID can survive an ID-scheme change across
+ * upgrades (e.g. 'U-0001' -> 'USER-0001' during the Phase 3 ID-prefix
+ * rework) while the real Users row moves to the new ID, silently breaking
+ * every transition that resolves the treasurer with ACTOR_NOT_FOUND. Safe
+ * to call on every setupAll() run — a no-op once Config is consistent.
+ * @return {{ok: boolean, corrected: boolean, issue: ?string}}
+ */
+function Setup_verifyConfigConsistency() {
+  var configuredId = Config.getOptional('TREASURER_USER_ID');
+  var usersValues = getSheet_(TABS.USERS).getDataRange().getValues();
+  var c = COLS.Users;
+  var treasurerUserIds = [];
+  for (var i = 1; i < usersValues.length; i++) {
+    var userId = usersValues[i][c.user_id - 1];
+    if (userId && usersValues[i][c.role - 1] === ROLES.TREASURER) treasurerUserIds.push(userId);
+  }
+
+  var resolution = CoreDecisions.resolveTreasurerIdDrift(configuredId, treasurerUserIds);
+
+  if (resolution.action === 'ok') {
+    return { ok: true, corrected: false, issue: null };
+  }
+  if (resolution.action === 'correct') {
+    Setup_setConfigValue_('TREASURER_USER_ID', resolution.correctedId);
+    var issue = 'Config.TREASURER_USER_ID (' + (configuredId || '(unset)') +
+      ') did not resolve to a real Users row; auto-corrected to ' + resolution.correctedId + '.';
+    Discord.postTreasury('⚠️ ' + issue);
+    return { ok: true, corrected: true, issue: issue };
+  }
+  var unresolvableIssue = 'Config.TREASURER_USER_ID (' + (configuredId || '(unset)') + ') does not resolve, and ' +
+    treasurerUserIds.length + ' TREASURER-role Users exist (need exactly 1 to auto-correct). Fix manually in the Config tab.';
+  Discord.postTreasury('🚨 ' + unresolvableIssue);
+  return { ok: false, corrected: false, issue: unresolvableIssue };
+}
+
+/**
+ * Update an existing Config row's value (creates the row if missing).
+ * @param {string} key
+ * @param {string} value
+ * @private
+ */
+function Setup_setConfigValue_(key, value) {
+  var sheet = getSheet_(TABS.CONFIG);
+  var values = sheet.getDataRange().getValues();
+  var c = COLS.Config;
+  for (var i = 1; i < values.length; i++) {
+    if (values[i][c.key - 1] === key) {
+      sheet.getRange(i + 1, c.value).setValue(value);
+      Config.invalidate();
+      return;
+    }
+  }
+  sheet.appendRow([key, value]);
+  Config.invalidate();
 }
 
 /**

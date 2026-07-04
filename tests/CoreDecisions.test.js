@@ -323,3 +323,71 @@ describe('computeReduceSplit', () => {
     });
   });
 });
+
+describe('checkReceiptTotal', () => {
+  test('line items summing under the receipt total is ok', () => {
+    expect(CoreDecisions.checkReceiptTotal(80, 100).ok).toBe(true);
+  });
+
+  test('line items summing to exactly the receipt total is ok', () => {
+    expect(CoreDecisions.checkReceiptTotal(100, 100).ok).toBe(true);
+  });
+
+  test('line items summing over the receipt total is not ok', () => {
+    expect(CoreDecisions.checkReceiptTotal(100.5, 100).ok).toBe(false);
+  });
+
+  test('a float-rounding cent is tolerated', () => {
+    expect(CoreDecisions.checkReceiptTotal(100.001, 100).ok).toBe(true);
+  });
+});
+
+describe('checkPayoutSum', () => {
+  test('payouts summing to exactly the claim total is ok', () => {
+    expect(CoreDecisions.checkPayoutSum(150, 150).ok).toBe(true);
+  });
+
+  test('payouts summing under the claim total is not ok', () => {
+    expect(CoreDecisions.checkPayoutSum(100, 150).ok).toBe(false);
+  });
+
+  test('payouts summing over the claim total is not ok', () => {
+    expect(CoreDecisions.checkPayoutSum(160, 150).ok).toBe(false);
+  });
+
+  test('a float-rounding cent is tolerated', () => {
+    expect(CoreDecisions.checkPayoutSum(150.001, 150).ok).toBe(true);
+  });
+});
+
+describe('resolveTreasurerIdDrift', () => {
+  test('configured ID resolves to a real treasurer -> ok, no correction', () => {
+    var result = CoreDecisions.resolveTreasurerIdDrift('USER-0001', ['USER-0001']);
+    expect(result).toEqual({ action: 'ok', correctedId: null });
+  });
+
+  test('configured ID is stale (e.g. pre-rename) but exactly one real treasurer exists -> auto-correct', () => {
+    var result = CoreDecisions.resolveTreasurerIdDrift('U-0001', ['USER-0001']);
+    expect(result).toEqual({ action: 'correct', correctedId: 'USER-0001' });
+  });
+
+  test('configured ID is unset but exactly one real treasurer exists -> auto-correct', () => {
+    var result = CoreDecisions.resolveTreasurerIdDrift(null, ['USER-0001']);
+    expect(result).toEqual({ action: 'correct', correctedId: 'USER-0001' });
+  });
+
+  test('no treasurer exists at all -> unresolvable, no guess', () => {
+    var result = CoreDecisions.resolveTreasurerIdDrift('U-0001', []);
+    expect(result).toEqual({ action: 'unresolvable', correctedId: null });
+  });
+
+  test('more than one treasurer exists -> unresolvable, refuse to guess which one', () => {
+    var result = CoreDecisions.resolveTreasurerIdDrift('U-0001', ['USER-0001', 'USER-0002']);
+    expect(result).toEqual({ action: 'unresolvable', correctedId: null });
+  });
+
+  test('configured ID matches one of several real treasurers -> ok, no correction', () => {
+    var result = CoreDecisions.resolveTreasurerIdDrift('USER-0002', ['USER-0001', 'USER-0002']);
+    expect(result).toEqual({ action: 'ok', correctedId: null });
+  });
+});

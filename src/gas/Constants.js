@@ -81,7 +81,7 @@ var COLS = Object.freeze({
   Approvals: Object.freeze({
     entity_id: 1, entity_type: 2, title: 3, requester_or_claimant: 4,
     amount: 5, status: 6, action: 7, amount_override: 8, note: 9,
-    confirm: 10, intent_actor_email: 11
+    payout_method: 10, payout_reference: 11, confirm: 12, intent_actor_email: 13
   }),
   Config: Object.freeze({ key: 1, value: 2 }),
   Counters: Object.freeze({ entity: 1, last_n: 2 }),
@@ -120,6 +120,11 @@ var STATUS = Object.freeze({
   })
 });
 
+/** Vault.payout_method / Payouts.method values (design §1.3). */
+var PAYOUT_METHOD = Object.freeze({
+  FPS: 'FPS', PAYME: 'PAYME', BANK: 'BANK', CASH: 'CASH'
+});
+
 /** Entity name -> ID prefix, used by Ids.nextId(). */
 var ENTITY_PREFIX = Object.freeze({
   User: 'USER',
@@ -140,9 +145,10 @@ var ACTIONS = Object.freeze({
   REJECT: 'REJECT',
   REQUEST_INFO: 'REQUEST_INFO',
   VERIFY: 'VERIFY',
-  APPROVE_PAYOUT: 'APPROVE_PAYOUT'
+  APPROVE_PAYOUT: 'APPROVE_PAYOUT',
+  MARK_PAID: 'MARK_PAID'
 });
 
 if (typeof module !== 'undefined') {
-  module.exports = { TABS, COLS, ROLES, STATUS, ENTITY_PREFIX, ACTIONS };
+  module.exports = { TABS, COLS, ROLES, STATUS, ENTITY_PREFIX, ACTIONS, PAYOUT_METHOD };
 }

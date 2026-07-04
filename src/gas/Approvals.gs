@@ -27,7 +27,7 @@ function refreshApprovalsTab() {
 
   if (lastRow > 2) sheet.getRange(3, 1, lastRow - 2, sheet.getLastColumn()).clearContent();
 
-  var rows = [].concat(Approvals_pendingRequestRows(), Approvals_claimRows());
+  var rows = [].concat(Approvals_pendingRequestRows(), Approvals_claimRows(), Approvals_queuedPayoutRows());
   if (rows.length > 0) {
     sheet.getRange(3, 1, rows.length, rows[0].length).setValues(rows);
   }
@@ -48,7 +48,7 @@ function Approvals_pendingRequestRows() {
     var amount = Engine._sumBudgetRequestLines(requestId, 'requested_amount');
     out.push([
       requestId, 'BudgetRequest', values[i][c.title - 1], values[i][c.requester_id - 1],
-      amount, STATUS.BudgetRequest.PENDING, '', '', '', false, ''
+      amount, STATUS.BudgetRequest.PENDING, '', '', '', '', '', false, ''
     ]);
   }
   return out;
@@ -70,7 +70,27 @@ function Approvals_claimRows() {
     var amount = Engine._sumClaimLineItems(claimId);
     out.push([
       claimId, 'ExpenseClaim', values[i][c.notes - 1] || claimId, values[i][c.claimant_id - 1],
-      amount, status, '', '', '', false, ''
+      amount, status, '', '', '', '', '', false, ''
+    ]);
+  }
+  return out;
+}
+
+/**
+ * @return {Array<Array>} one row per QUEUED Payout
+ * @private
+ */
+function Approvals_queuedPayoutRows() {
+  var sheet = getSheet_(TABS.PAYOUTS);
+  var values = sheet.getDataRange().getValues();
+  var c = COLS.Payouts;
+  var out = [];
+  for (var i = 1; i < values.length; i++) {
+    if (values[i][c.status - 1] !== STATUS.Payout.QUEUED) continue;
+    var payoutId = values[i][c.payout_id - 1];
+    out.push([
+      payoutId, 'Payout', 'Payout for ' + values[i][c.claim_id - 1], values[i][c.payee_user_id - 1],
+      values[i][c.amount - 1], STATUS.Payout.QUEUED, '', '', '', '', '', false, ''
     ]);
   }
   return out;
@@ -126,21 +146,33 @@ function onEditApprovals(e) {
   var action = rowValues[c.action - 1];
   var amountOverride = rowValues[c.amount_override - 1];
   var note = rowValues[c.note - 1];
+  var payoutMethod = rowValues[c.payout_method - 1];
+  var payoutReference = rowValues[c.payout_reference - 1];
 
   if (!entityId || !entityType || !action) {
     sheet.getRange(row, c.confirm).setValue(false);
     return;
   }
 
-  var actorInfo = Approvals_resolveActor(e);
-
-  var payload = {};
-  if (note) payload.decision_note = note;
-  if (amountOverride !== '' && amountOverride !== null && amountOverride !== undefined) {
-    payload.amount_override = Number(amountOverride);
+  if (entityType === 'Payout' && action === ACTIONS.MARK_PAID && !payoutMethod) {
+    SpreadsheetApp.getActive().toast('Select a payout method before confirming Mark paid.', 'Error');
+    sheet.getRange(row, c.confirm).setValue(false);
+    return;
   }
 
-  var result = Engine.transition(entityType, entityId, action, actorInfo.userId, payload);
+  var actorInfo = Approvals_resolveActor(e);
+
+  var result;
+  if (entityType === 'Payout' && action === ACTIONS.MARK_PAID) {
+    result = Payouts.markPayoutSent(entityId, payoutMethod, payoutReference || '', actorInfo.userId);
+  } else {
+    var payload = {};
+    if (note) payload.decision_note = note;
+    if (amountOverride !== '' && amountOverride !== null && amountOverride !== undefined) {
+      payload.amount_override = Number(amountOverride);
+    }
+    result = Engine.transition(entityType, entityId, action, actorInfo.userId, payload);
+  }
 
   Audit.append(actorInfo.userId, entityType, entityId, 'FIELD_SET', {
     source: 'ApprovalsTab', actorResolution: actorInfo.method, transitionOk: result.ok, reason: result.reason
@@ -149,6 +181,8 @@ function onEditApprovals(e) {
   sheet.getRange(row, c.action).setValue('');
   sheet.getRange(row, c.amount_override).setValue('');
   sheet.getRange(row, c.note).setValue('');
+  sheet.getRange(row, c.payout_method).setValue('');
+  sheet.getRange(row, c.payout_reference).setValue('');
   sheet.getRange(row, c.confirm).setValue(false);
   sheet.getRange(row, c.intent_actor_email).setValue(actorInfo.email || '');
 

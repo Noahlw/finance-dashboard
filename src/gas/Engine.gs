@@ -68,13 +68,16 @@ var Engine = {
         }
       }
 
+      var effectDetail = {};
       var nextStatus = (entityType === 'BudgetRequest')
         ? Engine._applyBudgetRequestEffect(entityId, row, action, def, actorUserId, payload, selfApproved)
-        : Engine._applyExpenseClaimEffect(entityId, row, action, def, actorUserId, payload, selfApproved);
+        : Engine._applyExpenseClaimEffect(entityId, row, action, def, actorUserId, payload, selfApproved, effectDetail);
 
-      Audit.append(actorUserId, entityType, entityId, 'TRANSITION', {
+      var auditDetail = {
         action: action, from: currentStatus, to: nextStatus, payload: payload, selfApproved: selfApproved
-      });
+      };
+      if (effectDetail.lockedHash) auditDetail.lockedHash = effectDetail.lockedHash;
+      Audit.append(actorUserId, entityType, entityId, 'TRANSITION', auditDetail);
 
       Engine._notify(entityType, entityId, action, currentStatus, nextStatus, actorUserId, selfApproved);
 
@@ -372,7 +375,7 @@ var Engine = {
    * are appended to `notes` instead (documented choice, see CONTEXT.md).
    * @private
    */
-  _applyExpenseClaimEffect: function (claimId, row, action, def, actorUserId, payload, selfApproved) {
+  _applyExpenseClaimEffect: function (claimId, row, action, def, actorUserId, payload, selfApproved, effectDetail) {
     var c = COLS.ExpenseClaims;
     var sheet = row.sheet;
     var now = Audit._nowIso();
@@ -404,7 +407,41 @@ var Engine = {
     sheet.getRange(row.rowIndex, c.status).setValue(nextStatus);
     if (selfApproved) sheet.getRange(row.rowIndex, c.self_approved).setValue(true);
     if (action === 'APPROVE_PAYOUT') Payouts.onClaimApprovedForPayout(claimId);
+    if (action === 'LOCK' && effectDetail) {
+      effectDetail.lockedHash = Engine._computeLockedRowHash(sheet, row.rowIndex);
+    }
     return nextStatus;
+  },
+
+  /**
+   * A hash of an ExpenseClaim row's current values, taken at LOCK time and
+   * re-derivable forever after by the nightly integrity sweep to detect any
+   * tampering with a locked row. Distinct from AuditLog's hash-chain
+   * (prevHash semantics) — 'LOCK_V1' is a versioned marker, not a chain link.
+   * This format MUST NOT change without a version bump, or every
+   * already-locked claim's stored hash becomes unverifiable.
+   * @param {Sheet} sheet the ExpenseClaims sheet
+   * @param {number} rowIndex
+   * @return {string}
+   * @private
+   */
+  _computeLockedRowHash: function (sheet, rowIndex) {
+    var numCols = Object.keys(COLS.ExpenseClaims).length;
+    var values = sheet.getRange(rowIndex, 1, 1, numCols).getValues()[0];
+    return CoreAudit.calculateHash('LOCK_V1', JSON.stringify(values));
+  },
+
+  /**
+   * Recompute a LOCKED claim's row hash as it stands right now, for the
+   * nightly integrity sweep to compare against the hash stored on its LOCK
+   * transition's audit row.
+   * @param {string} claimId
+   * @return {?string} null if the claim can't be loaded
+   */
+  computeCurrentLockedHash: function (claimId) {
+    var row = Engine._loadRow('ExpenseClaim', claimId);
+    if (!row) return null;
+    return Engine._computeLockedRowHash(row.sheet, row.rowIndex);
   },
 
   /** @private */

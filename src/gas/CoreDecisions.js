@@ -196,6 +196,48 @@ var CoreDecisions = {
         (approved >= s.requested ? STATUS_.BudgetRequestLine.APPROVED : STATUS_.BudgetRequestLine.REDUCED);
       return { approved_amount: approved, line_status: line_status };
     });
+  },
+
+  /**
+   * Nightly integrity sweep invariant: a receipt's linked ClaimLineItems
+   * must never total more than the receipt's own printed total.
+   * @param {number} lineItemsSum
+   * @param {number} receiptTotal
+   * @return {{ok: boolean}}
+   */
+  checkReceiptTotal: function (lineItemsSum, receiptTotal) {
+    return { ok: lineItemsSum <= receiptTotal + 0.005 };
+  },
+
+  /**
+   * Nightly integrity sweep invariant: a PAID claim's payouts must sum to
+   * exactly its total_amount (within float-rounding tolerance).
+   * @param {number} payoutsSum
+   * @param {number} claimTotal
+   * @return {{ok: boolean}}
+   */
+  checkPayoutSum: function (payoutsSum, claimTotal) {
+    return { ok: Math.abs(payoutsSum - claimTotal) < 0.005 };
+  },
+
+  /**
+   * Detect and resolve Config.TREASURER_USER_ID drift: the stored ID can
+   * survive an ID-scheme change across upgrades (e.g. 'U-0001' -> 'USER-0001')
+   * while the real Users row moves to the new ID, silently breaking every
+   * transition that resolves the treasurer. Auto-correctable only when
+   * exactly one TREASURER-role user exists to correct to.
+   * @param {?string} configuredId current Config.TREASURER_USER_ID (or null/unset)
+   * @param {string[]} treasurerUserIds every Users.user_id with role TREASURER
+   * @return {{action: 'ok'|'correct'|'unresolvable', correctedId: ?string}}
+   */
+  resolveTreasurerIdDrift: function (configuredId, treasurerUserIds) {
+    if (configuredId && treasurerUserIds.indexOf(configuredId) !== -1) {
+      return { action: 'ok', correctedId: null };
+    }
+    if (treasurerUserIds.length === 1) {
+      return { action: 'correct', correctedId: treasurerUserIds[0] };
+    }
+    return { action: 'unresolvable', correctedId: null };
   }
 };
 

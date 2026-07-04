@@ -25,13 +25,82 @@ var FormSetup = {
     var claimForm = claimFormId ? FormApp.openById(claimFormId) : FormSetup._buildClaimForm();
     if (!claimFormId) props.setProperty('CLAIM_FORM_ID', claimForm.getId());
 
+    FormSetup._warnIfClaimFormMissingFileUpload(claimForm);
+
     return { requestFormUrl: requestForm.getPublishedUrl(), claimFormUrl: claimForm.getPublishedUrl() };
+  },
+
+  /**
+   * FormApp cannot create a File Upload question, so "Receipt photo" must be
+   * added manually via the Forms editor (see CP-C) and could later be
+   * accidentally removed. Warn the treasurer if it's ever missing.
+   * @param {Form} claimForm
+   * @private
+   */
+  _warnIfClaimFormMissingFileUpload: function (claimForm) {
+    var items = claimForm.getItems();
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].getType() === FormApp.ItemType.FILE_UPLOAD) return;
+    }
+    Discord.postTreasury(
+      '⚠️ Expense Claim form is missing its "Receipt photo" file-upload question — ' +
+      'add it manually in the Forms editor (see CP-C in BUILD-PLAN.md).'
+    );
+  },
+
+  /**
+   * Create the committee/treasurer onboarding form if it doesn't exist yet
+   * (P3-3). Not distributed publicly — the Treasurer shares this link
+   * privately with the ≤10 exco (design §4.5, BUILD-PLAN P3-3/P3-4).
+   * @return {{onboardingFormUrl: string}}
+   */
+  createOnboardingForm: function () {
+    var props = PropertiesService.getScriptProperties();
+    var onboardingFormId = props.getProperty('ONBOARDING_FORM_ID');
+    var form = onboardingFormId ? FormApp.openById(onboardingFormId) : FormSetup._buildOnboardingForm();
+    if (!onboardingFormId) props.setProperty('ONBOARDING_FORM_ID', form.getId());
+    return { onboardingFormUrl: form.getPublishedUrl() };
+  },
+
+  /** @private */
+  _buildOnboardingForm: function () {
+    var form = FormApp.create('CF Committee Onboarding');
+    form.setDescription(
+      'Committee/treasurer onboarding. We store your student ID and payout details ' +
+      '(FPS/PayMe/bank/cash) solely to reimburse your expense claims. The Treasurer is the ' +
+      'named data controller for this data. It is kept in a separate, treasurer-only workbook, ' +
+      'never in the general ledger. You may request deletion of this data at any time by ' +
+      'contacting the Treasurer.'
+    );
+    form.setConfirmationMessage(
+      'Thanks — your onboarding details have been recorded. Contact the Treasurer if you need ' +
+      'to update or delete this data.'
+    );
+    form.setCollectEmail(true);
+    try { form.setRequireLogin(true); } catch (e) { /* ponytail: ignore if not on Workspace */ }
+    form.addCheckboxItem().setTitle('Consent')
+      .setChoiceValues(['I have read and agree to the storage of my student ID and payout details as described above.'])
+      .setRequired(true);
+    form.addTextItem().setTitle('Full name').setRequired(true);
+    form.addTextItem().setTitle('Student ID')
+      .setHelpText('Stored only in the treasurer-only Vault workbook, never in the general ledger.')
+      .setRequired(true);
+    form.addListItem().setTitle('Payout method')
+      .setChoiceValues(Object.keys(PAYOUT_METHOD)).setRequired(true);
+    form.addTextItem().setTitle('Payout handle')
+      .setHelpText('FPS ID / phone number, PayMe link, or bank account — matching the method above.')
+      .setRequired(true);
+    return form;
   },
 
   /** @private */
   _buildRequestForm: function () {
     var form = FormApp.create('CF Budget Request');
     form.setDescription('Submit a budget request for an upcoming event or expense. The treasurer will review and approve it. You will be notified in Discord when approved.');
+    form.setConfirmationMessage(
+      'Thanks — your budget request has been submitted. The treasurer will review it and ' +
+      'you\'ll be notified in Discord once it\'s approved, reduced, or needs more info.'
+    );
     form.setCollectEmail(true);
     try { form.setRequireLogin(true); } catch (e) { /* ponytail: ignore if not on Workspace */ }
     form.addTextItem().setTitle('Title').setHelpText('e.g., Summer Camp Supplies').setRequired(true);
@@ -53,19 +122,27 @@ var FormSetup = {
     var categories = FormSetup._expenseCategoryNames();
     form.addListItem().setTitle('Line ' + n + ' — Category').setChoiceValues(categories).setRequired(required);
     form.addTextItem().setTitle('Line ' + n + ' — Description').setHelpText('Specific item or group of items for this line.').setRequired(required);
-    form.addTextItem().setTitle('Line ' + n + ' — Amount (HKD)').setHelpText('Enter numbers only, e.g. 150.50').setRequired(required);
+    form.addTextItem().setTitle('Line ' + n + ' — Amount (HKD)').setHelpText('Enter numbers only, e.g. 150.50')
+      .setValidation(FormApp.createTextValidation().requireNumberGreaterThan(0).build())
+      .setRequired(required);
   },
 
   /** @private */
   _buildClaimForm: function () {
     var form = FormApp.create('CF Expense Claim');
     form.setDescription('Submit a claim for reimbursement. Ensure you upload a clear photo of the receipt matching the exact amount claimed.');
+    form.setConfirmationMessage(
+      'Thanks — your expense claim has been submitted. You\'ll be notified in Discord once ' +
+      'it\'s verified and queued for payout.'
+    );
     form.setCollectEmail(true);
     try { form.setRequireLogin(true); } catch (e) { /* ponytail: ignore if not on Workspace */ }
     form.addTextItem().setTitle('What is this claim for? (short description)').setHelpText('e.g., Drinks for Summer Camp').setRequired(true);
     form.addTextItem().setTitle('Receipt vendor').setHelpText('Name of the store or vendor').setRequired(false);
     form.addDateItem().setTitle('Receipt date').setHelpText('The date printed on the receipt').setRequired(true);
-    form.addTextItem().setTitle('Receipt total (HKD)').setHelpText('Must match the receipt exactly. Numbers only.').setRequired(true);
+    form.addTextItem().setTitle('Receipt total (HKD)').setHelpText('Must match the receipt exactly. Numbers only.')
+      .setValidation(FormApp.createTextValidation().requireNumberGreaterThan(0).build())
+      .setRequired(true);
     // "Receipt photo" file-upload question: ADD MANUALLY, see CP-C.
     FormSetup._addClaimLineQuestions(form, 1, true);
     FormSetup._addClaimLineQuestions(form, 2, false);
@@ -83,7 +160,9 @@ var FormSetup = {
     form.addListItem().setTitle('Line ' + n + ' — Budget line')
       .setHelpText('Select the approved budget line to deduct from.')
       .setChoiceValues(FormSetup._budgetLineChoices()).setRequired(required);
-    form.addTextItem().setTitle('Line ' + n + ' — Amount (HKD)').setHelpText('Amount from this receipt to charge to this budget line.').setRequired(required);
+    form.addTextItem().setTitle('Line ' + n + ' — Amount (HKD)').setHelpText('Amount from this receipt to charge to this budget line.')
+      .setValidation(FormApp.createTextValidation().requireNumberGreaterThan(0).build())
+      .setRequired(required);
   },
 
   /**
@@ -158,6 +237,19 @@ var FormSetup = {
     ScriptApp.newTrigger('onEditApprovals').forSpreadsheet(getLedger_()).onEdit().create();
   },
 
+  /**
+   * Install the onboarding form's onFormSubmit trigger (P3-3/P3-4).
+   * Idempotent: removes any pre-existing trigger for this handler first.
+   * Separate from installTriggers() so it doesn't gate the P1/P2 checkpoints
+   * on the onboarding form existing.
+   */
+  installOnboardingTrigger: function () {
+    var onboardingFormId = PropertiesService.getScriptProperties().getProperty('ONBOARDING_FORM_ID');
+    if (!onboardingFormId) throw new Error('Run FormSetup.createOnboardingForm() first.');
+    FormSetup._removeTriggersFor('onFormSubmitOnboarding');
+    ScriptApp.newTrigger('onFormSubmitOnboarding').forForm(FormApp.openById(onboardingFormId)).onFormSubmit().create();
+  },
+
   /** @param {string} handlerName @private */
   _removeTriggersFor: function (handlerName) {
     var triggers = ScriptApp.getProjectTriggers();
@@ -175,4 +267,14 @@ function runCreateForms() {
 function runInstallTriggers() {
   FormSetup.installTriggers();
   Logger.log('Triggers installed successfully.');
+}
+
+function runCreateOnboardingForm() {
+  var urls = FormSetup.createOnboardingForm();
+  Logger.log('Onboarding form created/found: ' + JSON.stringify(urls));
+}
+
+function runInstallOnboardingTrigger() {
+  FormSetup.installOnboardingTrigger();
+  Logger.log('Onboarding trigger installed successfully.');
 }
