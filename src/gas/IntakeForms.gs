@@ -35,16 +35,14 @@ function onFormSubmitRequest(e) {
     STATUS.BudgetRequest.PENDING, now, '', '', '', false, responseId
   ]);
 
+  var lines = Engine.parseRequestLines(answers);
   var lineCount = 0;
-  for (var n = 1; n <= 3; n++) {
-    var category = answers['Line ' + n + ' — Category'];
-    var desc = answers['Line ' + n + ' — Description'];
-    var amount = Number(answers['Line ' + n + ' — Amount (HKD)']);
-    if (!category || !desc || !amount) continue;
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
     lineCount++;
     var lineId = Ids.childId(requestId, lineCount, 'BUDGETLINE');
     getSheet_(TABS.BUDGET_REQUEST_LINES).appendRow([
-      lineId, requestId, IntakeForms_categoryIdByName(category), desc, amount, 0, STATUS.BudgetRequestLine.PENDING, 0, 0
+      lineId, requestId, IntakeForms_categoryIdByName(line.category), line.description, line.amount, 0, STATUS.BudgetRequestLine.PENDING, 0, 0
     ]);
   }
 
@@ -99,19 +97,18 @@ function onFormSubmitClaim(e) {
     '', '', 0, lateFlag, false, notes, responseId
   ]);
 
+  var claimLines = Engine.parseClaimLines(answers);
   var lineCount = 0;
   var rejectedLines = [];
-  for (var n = 1; n <= 3; n++) {
-    var budgetLineChoice = answers['Line ' + n + ' — Budget line'];
-    var amount = Number(answers['Line ' + n + ' — Amount (HKD)']);
-    if (!budgetLineChoice || !amount) continue;
-    var budgetLineId = IntakeForms_parseBudgetLineId(budgetLineChoice);
+  for (var claimLineIdx = 0; claimLineIdx < claimLines.length; claimLineIdx++) {
+    var claimLine = claimLines[claimLineIdx];
+    var budgetLineId = IntakeForms_parseBudgetLineId(claimLine.budgetLineChoice);
     var missingReceiptFlag = (answers['Missing receipt?'] === 'Yes');
     
-    var check = Engine.validateClaimLineAmount(budgetLineId, amount);
+    var check = Engine.validateClaimLineAmount(budgetLineId, claimLine.amount);
     if (!check.ok) {
       if (check.remaining < 0) check.remaining = 0; // sanity
-      var excessAmount = amount - check.remaining;
+      var excessAmount = claimLine.amount - check.remaining;
       
       var topUpRequestId = Ids.nextId('BudgetRequest');
       var topUpLineId = Ids.childId(topUpRequestId, 1, 'BUDGETLINE');
@@ -120,7 +117,7 @@ function onFormSubmitClaim(e) {
       var bLineRows = bLineSheet.getDataRange().getValues();
       var categoryId = '';
       var reqId = '';
-      for (var i=1; i<bLineRows.length; i++) {
+      for (var i = 1; i < bLineRows.length; i++) {
         if (bLineRows[i][0] === budgetLineId) {
           reqId = bLineRows[i][COLS.BudgetRequestLines.request_id - 1];
           categoryId = bLineRows[i][COLS.BudgetRequestLines.category_id - 1];
@@ -130,7 +127,7 @@ function onFormSubmitClaim(e) {
       var bReqSheet = getSheet_(TABS.BUDGET_REQUESTS);
       var bReqRows = bReqSheet.getDataRange().getValues();
       var eventId = '';
-      for (var i=1; i<bReqRows.length; i++) {
+      for (var i = 1; i < bReqRows.length; i++) {
         if (bReqRows[i][0] === reqId) {
           eventId = bReqRows[i][COLS.BudgetRequests.event_id - 1];
           break;
@@ -138,7 +135,7 @@ function onFormSubmitClaim(e) {
       }
       
       var topUpTitle = '[OVERBUDGET TOP-UP] for ' + budgetLineId;
-      var topUpJustification = 'Auto-generated top-up. User claimed HK$' + amount + ' but remaining was HK$' + check.remaining + '.';
+      var topUpJustification = 'Auto-generated top-up. User claimed HK$' + claimLine.amount + ' but remaining was HK$' + check.remaining + '.';
       
       bReqSheet.appendRow([
         topUpRequestId, user.userId, eventId, topUpTitle, topUpJustification, '',
@@ -171,7 +168,7 @@ function onFormSubmitClaim(e) {
     lineCount++;
     var cliId = Ids.childId(claimId, lineCount, 'CLAIMLINE');
     getSheet_(TABS.CLAIM_LINE_ITEMS).appendRow([
-      cliId, claimId, budgetLineId, receipt ? receipt.receiptId : '', amount, notes, missingReceiptFlag
+      cliId, claimId, budgetLineId, receipt ? receipt.receiptId : '', claimLine.amount, notes, missingReceiptFlag
     ]);
   }
 
