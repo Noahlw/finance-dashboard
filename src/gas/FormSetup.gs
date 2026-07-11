@@ -144,7 +144,7 @@ var FormSetup = {
     var categories = FormSetup._expenseCategoryNames();
     form.addListItem().setTitle('Line ' + n + ' — Category').setChoiceValues(categories).setRequired(required);
     form.addTextItem().setTitle('Line ' + n + ' — Description').setHelpText('Specific item or group of items for this line.').setRequired(required);
-    form.addTextItem().setTitle('Line ' + n + ' — Amount (HKD)').setHelpText('Enter numbers only, e.g. 150.50')
+    form.addTextItem().setTitle('Line ' + n + ' — Amount (HKD)').setHelpText('HKD, numbers only, 2 decimal places max, e.g. 150.50')
       .setValidation(FormApp.createTextValidation().requireNumberGreaterThan(0).build())
       .setRequired(required);
   },
@@ -162,7 +162,7 @@ var FormSetup = {
     form.addTextItem().setTitle('What is this claim for? (short description)').setHelpText('e.g., Drinks for Summer Camp').setRequired(true);
     form.addTextItem().setTitle('Receipt vendor').setHelpText('Name of the store or vendor').setRequired(false);
     form.addDateItem().setTitle('Receipt date').setHelpText('The date printed on the receipt').setRequired(true);
-    form.addTextItem().setTitle('Receipt total (HKD)').setHelpText('Must match the receipt exactly. Numbers only.')
+    form.addTextItem().setTitle('Receipt total (HKD)').setHelpText('Must match the receipt exactly. HKD, numbers only, 2 decimal places max, e.g. 88.50')
       .setValidation(FormApp.createTextValidation().requireNumberGreaterThan(0).build())
       .setRequired(true);
     // "Receipt photo" file-upload question: ADD MANUALLY, see CP-C.
@@ -204,7 +204,7 @@ var FormSetup = {
     form.addListItem().setTitle('Line ' + n + ' — Budget line')
       .setHelpText('Select the approved budget line to deduct from.')
       .setChoiceValues(FormSetup._budgetLineChoices()).setRequired(required);
-    form.addTextItem().setTitle('Line ' + n + ' — Amount (HKD)').setHelpText('Amount from this receipt to charge to this budget line.')
+    form.addTextItem().setTitle('Line ' + n + ' — Amount (HKD)').setHelpText('Amount from this receipt to charge to this budget line. HKD, numbers only, 2 decimal places max, e.g. 150.50')
       .setValidation(FormApp.createTextValidation().requireNumberGreaterThan(0).build())
       .setRequired(required);
   },
