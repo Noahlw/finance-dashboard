@@ -139,6 +139,25 @@ var Engine = {
   },
 
   /**
+   * Delegated parser for budget request lines.
+   * @param {Object<string,string>} answers
+   * @return {Array<{n:number, category:string, description:string, amount:number}>}
+   */
+  parseRequestLines: function (answers) {
+    return CoreDecisions.parseRequestLines(answers);
+  },
+
+  /**
+   * Delegated parser for expense claim lines.
+   * @param {Object<string,string>} answers
+   * @return {Array<{n:number, budgetLineChoice:string, amount:number}>}
+   */
+  parseClaimLines: function (answers) {
+    return CoreDecisions.parseClaimLines(answers);
+  },
+
+
+  /**
    * P2 Engine completeness checks for VERIFY on ExpenseClaims.
    * Checks budget remaining, missing receipt caps, and roles.
    *

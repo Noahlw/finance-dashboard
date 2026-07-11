@@ -149,6 +149,54 @@ var CoreDecisions = {
   },
 
   /**
+   * Parse budget request lines from the raw answers object.
+   * Only includes line n (1..3) when category, description, and amount are all truthy.
+   * @param {Object<string,string>} answers
+   * @return {Array<{n: number, category: string, description: string, amount: number}>}
+   */
+  parseRequestLines: function (answers) {
+    var result = [];
+    for (var n = 1; n <= 3; n++) {
+      var category = answers['Line ' + n + ' — Category'];
+      var desc = answers['Line ' + n + ' — Description'];
+      var amount = Number(answers['Line ' + n + ' — Amount (HKD)']);
+      if (category && desc && amount) {
+        result.push({
+          n: n,
+          category: category,
+          description: desc,
+          amount: amount
+        });
+      }
+    }
+    return result;
+  },
+
+  /**
+   * Parse expense claim lines from the raw answers object.
+   * Only includes line n (1..3) when budget line choice and amount are both truthy.
+   * @param {Object<string,string>} answers
+   * @return {Array<{n: number, budgetLineChoice: string, amount: number}>}
+   */
+  parseClaimLines: function (answers) {
+    var result = [];
+    for (var n = 1; n <= 3; n++) {
+      var budgetLineChoice = answers['Line ' + n + ' — Budget line'];
+      var amount = Number(answers['Line ' + n + ' — Amount (HKD)']);
+      if (budgetLineChoice && amount) {
+        result.push({
+          n: n,
+          budgetLineChoice: budgetLineChoice,
+          amount: amount
+        });
+      }
+    }
+    return result;
+  },
+
+
+
+  /**
    * The REDUCE proportional split: given every line's requested_amount and
    * the treasurer's amount_override, compute each line's approved_amount
    * and resulting line_status, in input order.

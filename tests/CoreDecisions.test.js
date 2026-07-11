@@ -391,3 +391,157 @@ describe('resolveTreasurerIdDrift', () => {
     expect(result).toEqual({ action: 'ok', correctedId: null });
   });
 });
+
+describe('parseRequestLines', () => {
+  test('all three lines present and valid returns all three in order', () => {
+    var answers = {
+      'Line 1 — Category': 'Category A',
+      'Line 1 — Description': 'Description A',
+      'Line 1 — Amount (HKD)': '50',
+      'Line 2 — Category': 'Category B',
+      'Line 2 — Description': 'Description B',
+      'Line 2 — Amount (HKD)': '60.5',
+      'Line 3 — Category': 'Category C',
+      'Line 3 — Description': 'Description C',
+      'Line 3 — Amount (HKD)': '70.25'
+    };
+    var result = CoreDecisions.parseRequestLines(answers);
+    expect(result.length).toBe(3);
+    expect(result[0]).toEqual({ n: 1, category: 'Category A', description: 'Description A', amount: 50 });
+    expect(result[1]).toEqual({ n: 2, category: 'Category B', description: 'Description B', amount: 60.5 });
+    expect(result[2]).toEqual({ n: 3, category: 'Category C', description: 'Description C', amount: 70.25 });
+  });
+
+  test('only line 1 present returns a single-entry array', () => {
+    var answers = {
+      'Line 1 — Category': 'Category A',
+      'Line 1 — Description': 'Description A',
+      'Line 1 — Amount (HKD)': '50'
+    };
+    var result = CoreDecisions.parseRequestLines(answers);
+    expect(result.length).toBe(1);
+    expect(result[0]).toEqual({ n: 1, category: 'Category A', description: 'Description A', amount: 50 });
+  });
+
+  test('line 1 and line 3 present, line 2 absent, returns both in order (line 2 missing from input)', () => {
+    var answers = {
+      'Line 1 — Category': 'Category A',
+      'Line 1 — Description': 'Description A',
+      'Line 1 — Amount (HKD)': '50',
+      'Line 3 — Category': 'Category C',
+      'Line 3 — Description': 'Description C',
+      'Line 3 — Amount (HKD)': '70.25'
+    };
+    var result = CoreDecisions.parseRequestLines(answers);
+    expect(result.length).toBe(2);
+    expect(result[0]).toEqual({ n: 1, category: 'Category A', description: 'Description A', amount: 50 });
+    expect(result[1]).toEqual({ n: 3, category: 'Category C', description: 'Description C', amount: 70.25 });
+  });
+
+  test('no lines present returns an empty array', () => {
+    var result = CoreDecisions.parseRequestLines({});
+    expect(result).toEqual([]);
+  });
+
+  test('amount of 0 is treated as absent', () => {
+    var answers = {
+      'Line 1 — Category': 'Category A',
+      'Line 1 — Description': 'Description A',
+      'Line 1 — Amount (HKD)': '0'
+    };
+    var result = CoreDecisions.parseRequestLines(answers);
+    expect(result.length).toBe(0);
+  });
+
+  test('a non-numeric amount is treated as absent', () => {
+    var answers = {
+      'Line 1 — Category': 'Category A',
+      'Line 1 — Description': 'Description A',
+      'Line 1 — Amount (HKD)': 'abc'
+    };
+    var result = CoreDecisions.parseRequestLines(answers);
+    expect(result.length).toBe(0);
+  });
+
+  test('category present but description missing is treated as absent', () => {
+    var answers = {
+      'Line 1 — Category': 'Category A',
+      'Line 1 — Amount (HKD)': '50'
+    };
+    var result = CoreDecisions.parseRequestLines(answers);
+    expect(result.length).toBe(0);
+  });
+});
+
+describe('parseClaimLines', () => {
+  test('all three lines present and valid returns all three in order', () => {
+    var answers = {
+      'Line 1 — Budget line': 'BUDGETLINE-26A-001-01 — BBQ — remaining HK$300.00',
+      'Line 1 — Amount (HKD)': '50',
+      'Line 2 — Budget line': 'BUDGETLINE-26A-001-02 — Drinks — remaining HK$150.00',
+      'Line 2 — Amount (HKD)': '60.5',
+      'Line 3 — Budget line': 'BUDGETLINE-26A-001-03 — Rent — remaining HK$1000.00',
+      'Line 3 — Amount (HKD)': '70.25'
+    };
+    var result = CoreDecisions.parseClaimLines(answers);
+    expect(result.length).toBe(3);
+    expect(result[0]).toEqual({ n: 1, budgetLineChoice: 'BUDGETLINE-26A-001-01 — BBQ — remaining HK$300.00', amount: 50 });
+    expect(result[1]).toEqual({ n: 2, budgetLineChoice: 'BUDGETLINE-26A-001-02 — Drinks — remaining HK$150.00', amount: 60.5 });
+    expect(result[2]).toEqual({ n: 3, budgetLineChoice: 'BUDGETLINE-26A-001-03 — Rent — remaining HK$1000.00', amount: 70.25 });
+  });
+
+  test('only line 1 present returns a single-entry array', () => {
+    var answers = {
+      'Line 1 — Budget line': 'BUDGETLINE-26A-001-01 — BBQ — remaining HK$300.00',
+      'Line 1 — Amount (HKD)': '50'
+    };
+    var result = CoreDecisions.parseClaimLines(answers);
+    expect(result.length).toBe(1);
+    expect(result[0]).toEqual({ n: 1, budgetLineChoice: 'BUDGETLINE-26A-001-01 — BBQ — remaining HK$300.00', amount: 50 });
+  });
+
+  test('line 1 and line 3 present, line 2 absent, returns both in order', () => {
+    var answers = {
+      'Line 1 — Budget line': 'BUDGETLINE-26A-001-01 — BBQ — remaining HK$300.00',
+      'Line 1 — Amount (HKD)': '50',
+      'Line 3 — Budget line': 'BUDGETLINE-26A-001-03 — Rent — remaining HK$1000.00',
+      'Line 3 — Amount (HKD)': '70.25'
+    };
+    var result = CoreDecisions.parseClaimLines(answers);
+    expect(result.length).toBe(2);
+    expect(result[0]).toEqual({ n: 1, budgetLineChoice: 'BUDGETLINE-26A-001-01 — BBQ — remaining HK$300.00', amount: 50 });
+    expect(result[1]).toEqual({ n: 3, budgetLineChoice: 'BUDGETLINE-26A-001-03 — Rent — remaining HK$1000.00', amount: 70.25 });
+  });
+
+  test('no lines present returns an empty array', () => {
+    var result = CoreDecisions.parseClaimLines({});
+    expect(result).toEqual([]);
+  });
+
+  test('amount of 0 is treated as absent', () => {
+    var answers = {
+      'Line 1 — Budget line': 'BUDGETLINE-26A-001-01 — BBQ — remaining HK$300.00',
+      'Line 1 — Amount (HKD)': '0'
+    };
+    var result = CoreDecisions.parseClaimLines(answers);
+    expect(result.length).toBe(0);
+  });
+
+  test('a non-numeric amount is treated as absent', () => {
+    var answers = {
+      'Line 1 — Budget line': 'BUDGETLINE-26A-001-01 — BBQ — remaining HK$300.00',
+      'Line 1 — Amount (HKD)': 'abc'
+    };
+    var result = CoreDecisions.parseClaimLines(answers);
+    expect(result.length).toBe(0);
+  });
+
+  test('budget line choice missing but amount present is treated as absent', () => {
+    var answers = {
+      'Line 1 — Amount (HKD)': '50'
+    };
+    var result = CoreDecisions.parseClaimLines(answers);
+    expect(result.length).toBe(0);
+  });
+});
+
