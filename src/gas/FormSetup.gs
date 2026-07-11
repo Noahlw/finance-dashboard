@@ -166,10 +166,32 @@ var FormSetup = {
       .setValidation(FormApp.createTextValidation().requireNumberGreaterThan(0).build())
       .setRequired(true);
     // "Receipt photo" file-upload question: ADD MANUALLY, see CP-C.
-    FormSetup._addClaimLineQuestions(form, 1, true);
-    FormSetup._addClaimLineQuestions(form, 2, false);
-    FormSetup._addClaimLineQuestions(form, 3, false);
+    FormSetup._buildClaimLines(form);
     return form;
+  },
+
+  /**
+   * @param {Form} form
+   * @private
+   */
+  _buildClaimLines: function (form) {
+    FormSetup._addClaimLineQuestions(form, 1, true);
+
+    var addSecondLineItem = form.addListItem().setTitle('Add a second line?').setRequired(true);
+    var line2PageBreak = form.addPageBreakItem().setTitle('Line 2');
+    FormSetup._addClaimLineQuestions(form, 2, false);
+
+    var choiceYes2 = addSecondLineItem.createChoice('Yes', line2PageBreak);
+    var choiceNo2 = addSecondLineItem.createChoice('No', FormApp.PageNavigationType.SUBMIT);
+    addSecondLineItem.setChoices([choiceYes2, choiceNo2]);
+
+    var addThirdLineItem = form.addListItem().setTitle('Add a third line?').setRequired(true);
+    var line3PageBreak = form.addPageBreakItem().setTitle('Line 3');
+    FormSetup._addClaimLineQuestions(form, 3, false);
+
+    var choiceYes3 = addThirdLineItem.createChoice('Yes', line3PageBreak);
+    var choiceNo3 = addThirdLineItem.createChoice('No', FormApp.PageNavigationType.SUBMIT);
+    addThirdLineItem.setChoices([choiceYes3, choiceNo3]);
   },
 
   /**
