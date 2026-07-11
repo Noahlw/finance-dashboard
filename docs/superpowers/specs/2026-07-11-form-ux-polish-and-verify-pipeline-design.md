@@ -1,13 +1,15 @@
-# Design Spec — Self-Driving Form-UX Polish & Browser Verify Pipeline
+# Design Spec — Form-UX Polish & Noah-Assisted Browser Verify (Approach A)
 
-**Date:** 2026-07-11
+**Date:** 2026-07-11 (rev. after CEO review)
 **Status:** Approved (design phase); pending user review before writing-plans
-**Author:** brainstorming session with Noah
+**Supersedes:** the earlier Approach-B draft of this file (scratch project + web-app
+`doGet` + 3-layer autonomous pipeline), which the 2026-07-11 CEO review rejected as
+over-investment. See `memory/ceo-review-form-ux-approach-a.md`.
 
 ## Problem
 
 The Google Forms intake UI is the last blocker to production. Three concrete
-issues (from Noah, 2026-07-11):
+issues (Noah, 2026-07-11):
 
 1. **Confusing / bad UX** — question order, wording, weak validation, and the
    rigid always-visible "Line 1 / Line 2 / Line 3" layout are awkward.
@@ -16,182 +18,143 @@ issues (from Noah, 2026-07-11):
 3. **Untested end-to-end** — no real submit → Sheet row → Engine → status
    round-trip has ever been verified from the form itself.
 
-Explicitly **out of scope:** visual restyling (theme color, header banner, fonts,
-CSS). FormApp cannot script these and Google Forms has a hard visual ceiling;
-Noah confirmed the blocker is *structural/UX*, not aesthetic. We stay inside
-Google Forms — no custom web front-end.
+**Out of scope:** visual restyling (theme color, header banner, fonts, CSS).
+FormApp cannot script these; the blocker is structural/UX, not aesthetic. We stay
+inside Google Forms — no custom web front-end.
 
-## Goal
+## Approach (A — minimal, Noah-assisted)
 
-Polish the three intake forms (Budget Request, Expense Claim, Onboarding) for
-clarity and correctness, and stand up a **browser-driven verify pipeline** that
-lets Claude test the forms itself each iteration without pulling Noah into every
-cycle. Batch-at-checkpoints cadence: Claude iterates autonomously against a
-scratch harness, commits each verified change locally, and stops only for prod
-deployment.
+Chosen over the autonomous test-rig because the forms are edited rarely, and the
+riskiest path (receipt file upload) can't be auto-tested — Google forces sign-in on
+file-upload questions. So we do NOT build: a scratch Apps Script project, a web-app
+`doGet` trigger, a login-off form fork, or autonomous submit-testing.
+
+- **Edit** `FormSetup.gs` (and, minimally, `IntakeForms.gs`) for the UX/validation/
+  branching fixes.
+- **Verify visually** with the `pair-agent` skill driving Noah's already-logged-in
+  browser against the REAL forms — **render/interaction only, never presses
+  Submit** (exercise branching, screenshot desktop + mobile). Login wall is
+  satisfied by Noah's session, so no login-off fork is needed.
+- **Verify functionally** with the existing manual **CP-E** round-trip (Noah
+  submits one real request+claim; confirms Sheet rows + Discord + `verifyChain`).
+
+## Prerequisite (DONE)
+
+The `clasp pull` fork was reconciled 2026-07-11: local git is canonical, the
+remote Approach-B fork (web-app/`executionApi` manifest, conflicting Approvals/
+Receipts schema, `TestFramework`/`TestHelpers`, `doGet`) was discarded, working
+tree clean, `npm test` green (67/67). Form editing builds on the canonical
+`FormSetup.gs`/`IntakeForms.gs`.
 
 ## Constraints (inherited, must not violate)
 
-- FormApp (Apps Script) is the only form builder in use. Scriptable: titles,
-  descriptions, help text, question types, required flags, validation, list/
-  dropdown choices, page-break sections, and go-to-section branching. NOT
-  scriptable: theme/color/header/fonts, and file-upload questions.
-- Prod forms keep `setCollectEmail(true)` + `setRequireLogin(true)`. Only the
-  **scratch** forms run with login OFF for anonymous browser testing.
-- The Engine remains the sole status mutator; form handlers only express intent.
-  No form change may write a `status`/`*_by`/`*_at` column directly.
-- Final `FormSetup.gs` ported to prod must contain **no scratch-only config**
-  (no login-off, no test webhook, no scratch IDs). Scratch differences live in a
-  separate seam (see Component 1).
+- FormApp is the only form builder. Scriptable: titles, descriptions, help text,
+  question types, required flags, validation, list choices, page-break sections,
+  go-to-section branching. NOT scriptable: theme/color/header/fonts, file-upload
+  questions.
+- Prod forms keep `setCollectEmail(true)` + `setRequireLogin(true)`.
+- Engine remains sole status mutator; no form change writes a `status`/`*_by`/
+  `*_at` column directly.
+- Money = Number, 2dp, HKD; timestamps ISO-8601 via `Audit._nowIso()`.
+- No file over ~400 lines (`FormSetup.gs` is 280 — watch the cap when adding
+  sections; split builders if needed).
 - Plan/spec discipline: no finished runnable implementation code in this doc.
 
-## Architecture
+## Work items
 
-### Component 1 — Scratch harness
+### 1. UX polish (FormApp-scriptable) — `FormSetup.gs`
+- Reorder/reword questions and help text across all three forms (Budget Request,
+  Expense Claim, Onboarding) for clarity.
+- Tighten validation: keep `requireNumberGreaterThan(0)` on EVERY amount field
+  after restructuring; sanity-check date fields (`Needed by`, `Receipt date`);
+  review required flags.
 
-A disposable Apps Script container-bound project with its own scratch `CF-Ledger`,
-fully isolated from prod.
+### 2. Progressive-disclosure line layout
+- Keep up to 3 lines, but present Line 1 immediately and gate Lines 2 & 3 behind an
+  "Add another line?" yes/no using FormApp **go-to-section** (`addPageBreakItem` +
+  `setGoToPage`). "No" routes straight to Submit. Applies to both
+  `_addRequestLineQuestions` and `_addClaimLineQuestions`.
+- **Grounded finding:** the existing parser already tolerates absent lines —
+  `IntakeForms_answersByTitle` builds its map from `response.getItemResponses()`,
+  which omits unanswered/skipped questions, and Lines 2 & 3 are already
+  `required=false`. So branching does NOT change the response shape the handler
+  sees. The new "Add another line?" answer lands as an unused key — harmless. Risk
+  shifts to building the section/branch structure correctly (branch must HIDE later
+  lines, not just paginate) — caught by the `pair-agent` visual verify.
+- The implementation plan must PIN: exact question order, section boundaries, each
+  branch target, and that "No" → Submit.
 
-- **Own `.clasp.json`** (own `scriptId`, own `parentId`) living OUTSIDE the prod
-  `src/gas/` tree — proposed at `scratch/gas/` with a copy of the `.gs`/`.js`
-  files, so `clasp push` to scratch never touches prod's `src/gas/.clasp.json`.
-  Per CLAUDE.md, `clasp create` silently overwrites the manifest at its rootDir —
-  the scratch manifest MUST be an isolated copy, never shared with prod.
-- **Config seam for login-off:** `FormSetup._buildRequestForm/_buildClaimForm/
-  _buildOnboardingForm` currently call `setRequireLogin(true)`. Introduce a single
-  indirection — a `Config`-driven or Script-Property flag (e.g.
-  `FORM_REQUIRE_LOGIN`, default TRUE) read once and applied to all three builders.
-  Scratch sets it FALSE; prod leaves it unset/TRUE. This is the ONLY behavioral
-  fork between scratch and prod, and it lives in data (Config/Script Property),
-  not in code branches — so the committed `FormSetup.gs` is identical for both.
-- **Scratch Ledger** is initialized by the existing `setupAll()` so the Engine has
-  real tabs to write into. Discord `TREASURY_WEBHOOK_URL`/`STATUS_WEBHOOK_URL`
-  point at a throwaway test webhook (or stay `PASTE_ME`, which `Discord.gs`
-  already treats as skip-and-log).
+### 3. Extract + test the line parser — `CoreDecisions.js` + Jest
+- Pull the "which of lines 1–3 are present, and parse each line's category/amount"
+  logic out of `IntakeForms.gs` into a pure helper in `CoreDecisions.js` (per ADR
+  0003 extract-and-strangle), delegated to via a one-line wrapper.
+- Jest-test the absent / partial (line 1 only, lines 1+3) / full cases. This is the
+  regression net for the branching change, since Jest can't touch FormApp.
+- Only extract the genuinely-named invariant (line-presence + parse), not trivial
+  control flow.
 
-### Component 2 — Rebuild trigger (web-app doGet)
+### 4. File-upload hardening
+- Keep the manual-add of the "Receipt photo" file-upload question (FormApp can't
+  create it) and the existing `_warnIfClaimFormMissingFileUpload` Discord guard.
+- The `pair-agent` visual verify asserts the receipt-upload question actually
+  renders on the live Claim form, so a silently-removed upload question is caught.
 
-Chosen mechanism: deploy the scratch project as a web app so Claude can trigger a
-form rebuild over HTTP with no GCP/OAuth console setup.
+### Deferred (written down, NOT in this scope)
+- Post a `#treasury` notice when "Add another line? = Yes" but the following line
+  parses absent (silent-underparse guard mirroring the upload-missing guard).
 
-- Add a `doGet(e)` entry point (scratch-only file, NOT ported to prod, or guarded
-  so prod's deployment ignores it) that dispatches on `e.parameter.action`:
-  - `action=rebuildForms` → deletes/recreates (or edits-in-place) the scratch
-    forms via `FormSetup`, returns JSON `{requestFormUrl, claimFormUrl,
-    onboardingFormUrl}` as `ContentService` text.
-  - `action=introspect` → returns a JSON dump of each form's items
-    (title, type, required, validation summary) for the structural assertion layer.
-  - `action=lastRow&entity=BudgetRequests|ExpenseClaims` → returns the most recent
-    row + its status, for the functional round-trip assertion.
-- Deployed "execute as me (owner), accessible to anyone with the link" so an
-  anonymous `curl`/`browse` GET runs it as the scratch owner.
-- **First task is a spike** to nail the deployment-refresh mechanic: whether the
-  stable `/exec` URL needs `clasp redeploy <deploymentId>` after each `clasp push`,
-  or a `/dev` head URL suffices. Document the exact command sequence as the
-  pipeline's "deploy step" before building on it.
+## Verification pipeline (Approach A)
 
-### Component 3 — Verify pipeline, three layers
+1. **Visual/interaction** — `pair-agent` on Noah's logged-in browser: load each
+   real form, exercise the "Add another line?" branch, screenshot desktop + mobile.
+   Never submits. Catches: layout, branch show/hide, upload-question presence,
+   wording, mobile.
+2. **Pure logic** — `npm test` (the extracted parser + existing suite). Catches:
+   line-presence/parse regressions.
+3. **Functional round-trip** — the existing CP-E, run by Noah: one real
+   request+claim submit → Sheet rows via Engine → Discord → `verifyChain().ok`.
 
-Run by Claude via the `browse` skill against the scratch form URLs:
+## Test-data isolation
 
-1. **Visual** — screenshot each `/viewform` at a desktop width and a mobile width;
-   keep before/after pairs for diffing when a change lands.
-2. **Structural** — call `?action=introspect`, assert every expected question
-   (title, type, required, validation) is present and correctly ordered; also
-   assert via `browse` DOM that branching sections show/hide as designed.
-3. **Functional round-trip** — `browse` fills and submits the scratch **Budget
-   Request** form (no file upload), then `?action=lastRow&entity=BudgetRequests`
-   asserts a row was created by the Engine with the expected PENDING status and
-   parsed line amounts.
-   - **Known limit (honest):** Google requires sign-in for **file-upload**
-     questions, so the Claim form's *receipt-upload* submit path cannot be tested
-     fully anonymously. Options for that one path: (a) test Claim submission
-     without the upload question on scratch and assert the non-upload fields +
-     validation; (b) use `pair-agent` against Noah's already-logged-in browser for
-     a one-off upload round-trip; (c) manual test at the prod checkpoint. Default:
-     (a) for the loop, (c) at deployment. This limit is specific to the upload
-     field only — all other Claim fields test anonymously.
-
-### Component 4 — UX polish backlog (all FormApp-scriptable)
-
-Applied to `FormSetup.gs` and verified through Components 2–3:
-
-- **Progressive disclosure for multi-line** (chosen): keep up to 3 lines, but
-  present Line 1 immediately and gate Lines 2 & 3 behind an "Add another line?"
-  yes/no that uses Forms **go-to-section** (page-break) branching. Simple claims/
-  requests see one clean line. Applies to both Request lines
-  (`_addRequestLineQuestions`) and Claim lines (`_addClaimLineQuestions`).
-  - Handler impact: `IntakeForms.gs` (`onFormSubmitRequest`/`onFormSubmitClaim`)
-    must still correctly map responses when Lines 2/3 are absent because the user
-    said "no" — verify blank/skipped-section responses parse as "unused line", not
-    as an error. This is a required regression check, not just a form change.
-- **Wording / order / help text** pass across all three forms for clarity.
-- **Validation tightening**: amount fields (already `requireNumberGreaterThan(0)`)
-  reviewed for 2dp/HKD sanity; date fields (`Needed by`, `Receipt date`) sanity-
-  checked; required flags reviewed.
-- **File-upload hardening**: keep the manual-add + existing
-  `_warnIfClaimFormMissingFileUpload` Discord guard; ADD a `browse` assertion in
-  the pipeline that the receipt-upload question actually renders on the live form,
-  so a silently-removed upload question is caught by the verify run.
-- **Onboarding form** gets the same clarity/validation pass.
-
-## Data flow (one iteration)
-
-```
-edit FormSetup.gs (prod repo)
-  → copy to scratch/gas/  → clasp push (scratch)  → deploy-refresh step
-  → browse GET ?action=rebuildForms  → scratch form URLs
-  → Layer 1 screenshot  → Layer 2 introspect+assert  → Layer 3 submit+lastRow assert
-  → npm test (pure logic unaffected but guards regressions)
-  → git commit locally (prod repo; scratch/ gitignored or committed separately)
-  → next item
-STOP → prod deployment checkpoint (Noah)
-```
+Pre-production only, so no isolation infra: submit freely during development, then
+**verified clean reset is a REQUIRED go-live task** — `cleanupTestPhase1()` →
+fresh `setupAll()` → assert `verifyChain().ok === true` from `GENESIS`, so zero test
+residue survives into the real semester.
 
 ## Error handling
 
-- Any pipeline layer failing = item not done; Claude fixes and re-runs, does not
-  commit red.
-- `browse` cannot reach the web app (deploy stale) → re-run the deploy-refresh
-  step from the Component 2 spike; do not silently skip verification.
-- Functional round-trip needs the scratch Ledger initialized; if `lastRow` errors
-  with "no such tab," re-run `setupAll()` on scratch.
-
-## Testing
-
-- **Jest** (`npm test`) still guards all pure logic in `CoreDecisions.js`/
-  `CoreAudit.js`; form changes shouldn't regress it, but the branching-response
-  parsing change in `IntakeForms.gs` may warrant a new pure-logic test if a
-  parse/normalize helper is extracted (only if it's a real named invariant, per
-  ADR 0003 extract-and-strangle discipline).
-- **Browser pipeline** (Components 2–3) is the new integration layer for the forms.
-- **`Tests.gs`** integration cases updated for any new handler behavior; run by
-  Noah at the prod checkpoint.
+- Any verification layer failing = item not done; fix and re-run; never commit red.
+- If `pair-agent` can't reach Noah's browser session, fall back to Noah pasting
+  screenshots; do not skip visual verification.
 
 ## Prod deployment checkpoint (the one human gate)
 
-Batched at the end of the autonomous run. Noah:
-1. `cd src/gas && clasp push --force` (prod).
-2. Run `FormSetup.createForms()` (and `createOnboardingForm()`), then
+Batched at the end. Noah:
+1. `cd src/gas && clasp push --force` (to the canonical project).
+2. Run `FormSetup.createForms()` (+ `createOnboardingForm()`), then
    `installTriggers()`.
-3. Manually add the "Receipt photo" file-upload question to the Claim form
-   (FormApp limitation) and set theme/header if desired.
-4. Set both forms: collect email ON, sign-in required ON (prod default).
-5. Confirm one real round-trip per BUILD-PLAN CP-E.
-
-## Open decisions resolved this session
-
-- Rebuild trigger: **web-app doGet** (lightest, no GCP/OAuth setup).
-- Multi-line layout: **progressive disclosure** via go-to-section branching.
-- Visual restyling: **out of scope** (Forms ceiling; blocker is structural).
+3. Manually (re)add the "Receipt photo" file-upload question to the Claim form and
+   set theme/header if desired.
+4. Confirm both forms: collect email ON, sign-in required ON.
+5. Run one CP-E round-trip.
+6. Before real semester use: run the verified clean reset (above).
 
 ## First tasks (for writing-plans to sequence)
 
-1. **Spike** the Component 2 deploy-refresh mechanic + `doGet` dispatcher; prove
-   `browse` can trigger a rebuild and read back form URLs.
-2. Stand up the scratch harness (Component 1): isolated `scratch/gas/.clasp.json`,
-   `FORM_REQUIRE_LOGIN` seam, scratch Ledger via `setupAll()`.
-3. Build the three-layer verify pipeline (Component 2–3) and prove it green on the
-   CURRENT forms before changing any UX (baseline).
-4. Then work the Component 4 UX backlog item-by-item through the pipeline.
-```
+1. Extract the line-presence+parse helper to `CoreDecisions.js` + Jest (regression
+   net first, before changing the form).
+2. Restructure `FormSetup.gs`: wording/order/validation pass + progressive-
+   disclosure branching, keeping the parser contract intact.
+3. `pair-agent` visual verify pass (Noah's browser) on all three forms.
+4. Add the file-upload render assertion to the verify pass.
+5. Emit the prod deployment checkpoint + the verified-clean-reset go-live task.
+
+## Decisions locked (CEO review, 2026-07-11)
+
+- Approach **A** (Noah-assisted, minimal); mode HOLD SCOPE.
+- Verification: `pair-agent` render/interaction-only + existing CP-E.
+- Test isolation: pre-prod submit-freely, then verified clean reset at go-live.
+- Line parser extracted to `CoreDecisions.js` + Jest.
+- Multi-line: progressive disclosure via go-to-section branching.
+- NOT in scope: visual restyling, scratch project, web-app `doGet`, login-off fork,
+  autonomous submit-testing.
