@@ -1,0 +1,13 @@
+{
+  "dependencies": {
+    "@google/clasp": "^3.3.0",
+    "puppeteer": "^25.3.0"
+  },
+  "scripts": {
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "jest": "^30.4.2"
+  }
+}
