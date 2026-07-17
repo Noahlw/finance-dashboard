@@ -14,7 +14,8 @@
     "e2e:auth": "node e2e/auth-capture.js",
     "e2e:test": "playwright test",
     "e2e:headed": "playwright test --headed",
-    "e2e:install": "npx playwright install chromium"
+    "e2e:install": "npx playwright install chromium",
+    "e2e:fixture": "node e2e/fixtures.js"
   },
   "jest": {
     "setupFiles": [
