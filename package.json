@@ -7,14 +7,19 @@
     "doc": "docs"
   },
   "dependencies": {
-    "@google/clasp": "^3.3.0",
-    "puppeteer": "^25.3.0"
+    "@google/clasp": "^3.3.0"
   },
   "scripts": {
-    "test": "jest"
+    "test": "jest",
+    "e2e:auth": "node e2e/auth-capture.js"
   },
   "jest": {
-    "setupFiles": ["<rootDir>/jest.setup.js"]
+    "setupFiles": [
+      "<rootDir>/jest.setup.js"
+    ],
+    "testPathIgnorePatterns": [
+      "<rootDir>/archive/"
+    ]
   },
   "keywords": [],
   "author": "",
@@ -22,6 +27,7 @@
   "type": "commonjs",
   "devDependencies": {
     "@types/jest": "^30.0.0",
-    "jest": "^30.4.2"
+    "jest": "^30.4.2",
+    "playwright": "^1.61.1"
   }
 }
