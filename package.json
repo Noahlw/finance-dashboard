@@ -7,21 +7,34 @@
     "doc": "docs"
   },
   "dependencies": {
-    "@google/clasp": "^3.3.0",
-    "puppeteer": "^25.3.0"
+    "@google/clasp": "^3.3.0"
   },
   "scripts": {
-    "test": "jest"
+    "test": "jest",
+    "e2e:auth": "node e2e/auth-capture.js",
+    "e2e:test": "playwright test",
+    "e2e:headed": "playwright test --headed",
+    "e2e:install": "npx playwright install chromium",
+    "e2e:fixture": "node e2e/fixtures.js"
   },
   "jest": {
-    "setupFiles": ["<rootDir>/jest.setup.js"]
+    "setupFiles": [
+      "<rootDir>/jest.setup.js"
+    ],
+    "testPathIgnorePatterns": [
+      "<rootDir>/archive/",
+      "<rootDir>/e2e/"
+    ]
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/jest": "^30.0.0",
-    "jest": "^30.4.2"
+    "jest": "^30.4.2",
+    "playwright": "^1.61.1",
+    "tsx": "^4.23.1"
   }
 }

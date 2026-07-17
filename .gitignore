@@ -4,3 +4,4 @@ dist
 .clasp.json
 .DS_Store
 *.log
+.auth.json
