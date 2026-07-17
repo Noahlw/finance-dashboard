@@ -11,14 +11,18 @@
   },
   "scripts": {
     "test": "jest",
-    "e2e:auth": "node e2e/auth-capture.js"
+    "e2e:auth": "node e2e/auth-capture.js",
+    "e2e:test": "playwright test",
+    "e2e:headed": "playwright test --headed",
+    "e2e:install": "npx playwright install chromium"
   },
   "jest": {
     "setupFiles": [
       "<rootDir>/jest.setup.js"
     ],
     "testPathIgnorePatterns": [
-      "<rootDir>/archive/"
+      "<rootDir>/archive/",
+      "<rootDir>/e2e/"
     ]
   },
   "keywords": [],
@@ -26,8 +30,10 @@
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/jest": "^30.0.0",
     "jest": "^30.4.2",
-    "playwright": "^1.61.1"
+    "playwright": "^1.61.1",
+    "tsx": "^4.23.1"
   }
 }
