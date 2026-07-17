@@ -1,16 +1,6 @@
-const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
-
-function execPromise(cmd, opts = {}) {
-  return new Promise((resolve, reject) => {
-    exec(cmd, opts, (err, stdout, stderr) => {
-      if (err) reject(err);
-      else resolve({ stdout: String(stdout || ''), stderr: String(stderr || '') });
-    });
-  });
-}
+const { execPromise } = require('./utils.js');
 
 function timestamp() {
   const now = new Date();
@@ -77,34 +67,4 @@ async function teardownEnv(envInfo) {
   }
 }
 
-async function sweepEnvironments(maxAgeHours = 4) {
-  try {
-    const listResult = await execPromise(`clasp list`);
-    const lines = listResult.stdout.split('\n');
-    const deadline = Date.now() - maxAgeHours * 3600000;
-
-    for (const line of lines) {
-      const match = line.match(/E2E-(\d{8}T\d{6})/);
-      if (match) {
-        const ts = match[1];
-        const year = ts.slice(0, 4);
-        const month = ts.slice(4, 6);
-        const day = ts.slice(6, 8);
-        const hour = ts.slice(9, 11);
-        const min = ts.slice(11, 13);
-        const sec = ts.slice(13, 15);
-        const created = new Date(`${year}-${month}-${day}T${hour}:${min}:${sec}`).getTime();
-
-        if (created < deadline) {
-          const idMatch = line.match(/([a-zA-Z0-9_-]{30,})/);
-          if (idMatch) {
-            await execPromise(`clasp delete ${idMatch[1]}`).catch(() => {});
-          }
-        }
-      }
-    }
-  } catch {
-  }
-}
-
-module.exports = { provisionEnv, teardownEnv, sweepEnvironments };
+module.exports = { provisionEnv, teardownEnv };

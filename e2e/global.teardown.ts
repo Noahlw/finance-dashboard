@@ -1,6 +1,6 @@
 import { FullConfig } from '@playwright/test';
 
-async function globalTeardown(config: FullConfig) {
+async function teardown() {
   const projectId = process.env.E2E_PROJECT_ID;
 
   if (projectId) {
@@ -15,5 +15,21 @@ async function globalTeardown(config: FullConfig) {
     console.log('[E2E Teardown] No ephemeral environment to clean up.');
   }
 }
+
+async function globalTeardown(config: FullConfig) {
+  await teardown();
+}
+
+process.on('exit', () => {
+  teardown().catch(() => {});
+});
+
+process.on('SIGINT', () => {
+  teardown().catch(() => {}).finally(() => process.exit(0));
+});
+
+process.on('SIGTERM', () => {
+  teardown().catch(() => {}).finally(() => process.exit(0));
+});
 
 export default globalTeardown;

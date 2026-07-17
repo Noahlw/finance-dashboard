@@ -1,13 +1,4 @@
-const { exec } = require('child_process');
-
-function execPromise(cmd) {
-  return new Promise((resolve, reject) => {
-    exec(cmd, (err, stdout, stderr) => {
-      if (err) reject(err);
-      else resolve({ stdout: String(stdout || ''), stderr: String(stderr || '') });
-    });
-  });
-}
+const { execPromise } = require('./utils.js');
 
 function parseE2eTimestamp(str) {
   const match = str.match(/E2E-(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})/);
