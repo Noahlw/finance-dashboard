@@ -15,10 +15,25 @@ export const apiService = {
         }, 300);
         return;
       }
-      google.script.run
-        .withSuccessHandler(resolve)
-        .withFailureHandler((_err: Error) => resolve({ allowed: false, reason: 'no_session' }))
-        .api_resolveSession();
+
+      let attempts = 0;
+      const maxAttempts = 3;
+
+      const call = () => {
+        attempts++;
+        google.script.run
+          .withSuccessHandler(resolve)
+          .withFailureHandler(() => {
+            if (attempts < maxAttempts) {
+              setTimeout(call, 1000);
+            } else {
+              resolve({ allowed: false, reason: 'no_session' });
+            }
+          })
+          .api_resolveSession();
+      };
+
+      call();
     });
   },
 

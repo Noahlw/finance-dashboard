@@ -98,6 +98,24 @@ describe('Api.js', () => {
       expect(result.reason).toBe('unauthorized_role');
     });
 
+    it('should deny ADVISOR_AUDITOR role', () => {
+      global.getSheet_.mockImplementationOnce(name => {
+        if (name === global.TABS.USERS) {
+          return { getDataRange: () => ({
+            getValues: () => [
+              ['user_id', 'display_name', 'role', 'email', 'active', 'created_at'],
+              ['U-010', 'Advisor', 'ADVISOR_AUDITOR', 'test@example.com', true, '2026-01-01']
+            ]
+          }) };
+        }
+        return { name, getDataRange: jest.fn(() => ({ getValues: () => [[]] })), getRange: jest.fn(), getLastRow: jest.fn(() => 1), appendRow: jest.fn() };
+      });
+      const { api_resolveSession } = require('../Api.js');
+      const result = api_resolveSession();
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toBe('unauthorized_role');
+    });
+
     it('should deny inactive user', () => {
       global.getSheet_.mockImplementationOnce(name => {
         if (name === global.TABS.USERS) {

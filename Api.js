@@ -166,7 +166,7 @@ function _resolveUser(email) {
         userId: values[i][c.user_id - 1],
         displayName: values[i][c.display_name - 1],
         role: values[i][c.role - 1],
-        active: values[i][c.active - 1] === true || values[i][c.active - 1] === 'TRUE',
+        active: String(values[i][c.active - 1]).trim().toUpperCase() === 'TRUE',
         isUnknown: false
       };
     }

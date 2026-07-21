@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import './App.css';
 import { apiService } from './services/api';
 import type {
-  SessionResponse, SessionInfo, SessionDenied,
+  SessionResponse, SessionInfo,
   WorkspaceView, MyClaimsResponse, Claim
 } from './types';
 
@@ -275,7 +275,19 @@ function PlaceholderView({ view }: { view: WorkspaceView }) {
 }
 
 function WorkspaceShell({ session }: { session: SessionInfo }) {
-  const [activeView, setActiveView] = useState<WorkspaceView>(session.views[0]);
+  const initialView = (window.location.hash?.replace('#', '') as WorkspaceView) || session.views[0];
+  const [activeView, setActiveView] = useState<WorkspaceView>(
+    session.views.includes(initialView) ? initialView : session.views[0]
+  );
+
+  useEffect(() => {
+    const onHashChange = () => {
+      const v = window.location.hash.replace('#', '') as WorkspaceView;
+      if (v && session.views.includes(v)) setActiveView(v);
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, [session.views]);
 
   const renderView = () => {
     switch (activeView) {
@@ -304,7 +316,7 @@ function WorkspaceShell({ session }: { session: SessionInfo }) {
             <button
               key={v}
               className={`sidebar-item ${activeView === v ? 'active' : ''}`}
-              onClick={() => setActiveView(v)}
+              onClick={() => { setActiveView(v); window.location.hash = v; }}
             >
               <span className="sidebar-icon">{getViewIcon(v)}</span>
               <span className="sidebar-label">{VIEW_LABELS[v]}</span>
@@ -351,6 +363,6 @@ export default function App() {
   }, []);
 
   if (!session) return <SessionLoading />;
-  if (!session.allowed) return <AccessDenied reason={session.reason} role={(session as SessionDenied).role} />;
+  if (!session.allowed) return <AccessDenied reason={session.reason} role={session.role} />;
   return <WorkspaceShell session={session} />;
 }
