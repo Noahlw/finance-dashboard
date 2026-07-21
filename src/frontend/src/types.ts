@@ -60,3 +60,58 @@ export interface EditClaimPayload {
   amount: number;
   notes: string;
 }
+
+// Budget Request types
+export interface BudgetRequestLine {
+  line_id: string;
+  request_id: string;
+  category_id: string;
+  description: string;
+  requested_amount: number;
+  approved_amount: number;
+  line_status: string;
+  claimed_amount: number;
+  remaining: number;
+}
+
+export interface BudgetRequest {
+  request_id: string;
+  requester_id: string;
+  event_id: string;
+  title: string;
+  justification: string;
+  needed_by: string;
+  status: string;
+  submitted_at: string;
+  decided_at: string;
+  decided_by: string;
+  decision_note: string;
+  lines: BudgetRequestLine[];
+}
+
+export interface BudgetRequestDraftPayload {
+  request_id?: string;
+  title: string;
+  justification: string;
+  needed_by: string;
+  event_id?: string;
+  lines: { category_id?: string; description: string; requested_amount: number }[];
+  uuid: string;
+}
+
+export interface PendingBudgetRequest {
+  request_id: string;
+  title: string;
+  requester_id: string;
+  justification: string;
+  needed_by: string;
+  submitted_at: string;
+  total_requested: number;
+}
+
+export interface BudgetDecisionPayload {
+  action: 'APPROVE' | 'REDUCE' | 'REJECT' | 'REQUEST_INFO' | 'CLOSE';
+  decision_note?: string;
+}
+
+export type BudgetRequestsTab = 'my-requests' | 'create' | 'pending';

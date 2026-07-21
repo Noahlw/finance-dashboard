@@ -264,6 +264,233 @@ function api_editClaim(payload) {
   return { success: true };
 }
 
+// ---------------------------------------------------------------------------
+// Budget Request API
+// ---------------------------------------------------------------------------
+
+/**
+ * Get all budget requests and their lines for the current user.
+ */
+function api_getMyBudgetRequests() {
+  var email = Session.getActiveUser().getEmail();
+  if (!email) throw new Error('User not authenticated (no active session)');
+
+  var user = _resolveUser(email);
+  if (user.isUnknown || (user.role !== ROLES.COMMITTEE && user.role !== ROLES.TREASURER)) {
+    return [];
+  }
+
+  var reqSheet = getSheet_(TABS.BUDGET_REQUESTS);
+  var reqRows = Engine._findRowsByColumn(reqSheet, COLS.BudgetRequests.requester_id, user.userId);
+  var c = COLS.BudgetRequests;
+  var lineC = COLS.BudgetRequestLines;
+  var lineSheet = getSheet_(TABS.BUDGET_REQUEST_LINES);
+
+  return reqRows.map(function (r) {
+    var id = r.values[c.request_id - 1];
+    var lineRows = Engine._findRowsByColumn(lineSheet, lineC.request_id, id);
+    return {
+      request_id: id,
+      requester_id: r.values[c.requester_id - 1],
+      event_id: r.values[c.event_id - 1],
+      title: r.values[c.title - 1],
+      justification: r.values[c.justification - 1],
+      needed_by: r.values[c.needed_by - 1],
+      status: r.values[c.status - 1],
+      submitted_at: r.values[c.submitted_at - 1],
+      decided_at: r.values[c.decided_at - 1],
+      decided_by: r.values[c.decided_by - 1],
+      decision_note: r.values[c.decision_note - 1],
+      lines: lineRows.map(function (l) {
+        return {
+          line_id: l.values[lineC.line_id - 1],
+          category_id: l.values[lineC.category_id - 1],
+          description: l.values[lineC.description - 1],
+          requested_amount: l.values[lineC.requested_amount - 1],
+          approved_amount: l.values[lineC.approved_amount - 1],
+          line_status: l.values[lineC.line_status - 1],
+          claimed_amount: l.values[lineC.claimed_amount - 1] || 0,
+          remaining: l.values[lineC.remaining - 1] || 0
+        };
+      })
+    };
+  });
+}
+
+/**
+ * Save a Budget Request as DRAFT (new) or update an existing DRAFT/NEEDS_INFO.
+ */
+function api_saveBudgetRequestDraft(payload) {
+  var email = Session.getActiveUser().getEmail();
+  if (!email) throw new Error('Not authenticated');
+  var user = _resolveUser(email);
+  if (user.isUnknown) throw new Error('Unregistered user');
+
+  var now = Audit._nowIso();
+  var c = COLS.BudgetRequests;
+  var lineC = COLS.BudgetRequestLines;
+  var sheet = getSheet_(TABS.BUDGET_REQUESTS);
+  var lineSheet = getSheet_(TABS.BUDGET_REQUEST_LINES);
+
+  var requestId;
+  var existingRow = null;
+
+  if (payload.request_id) {
+    existingRow = Engine._loadRow('BudgetRequest', payload.request_id);
+    if (existingRow) {
+      var curStatus = existingRow.values[c.status - 1];
+      if (curStatus !== STATUS.BudgetRequest.DRAFT && curStatus !== STATUS.BudgetRequest.NEEDS_INFO) {
+        throw new Error('Cannot edit a ' + curStatus + ' budget request');
+      }
+      requestId = payload.request_id;
+    }
+  }
+
+  if (!requestId) {
+    requestId = Ids.nextId('BudgetRequest');
+    _appendRow(sheet, [
+      requestId, user.userId, payload.event_id || '', payload.title || '',
+      payload.justification || '', payload.needed_by || '', STATUS.BudgetRequest.DRAFT,
+      '', '', '', '', false, payload.uuid || ''
+    ]);
+  } else {
+    var idx = existingRow.rowIndex;
+    sheet.getRange(idx, c.title).setValue(payload.title || '');
+    sheet.getRange(idx, c.justification).setValue(payload.justification || '');
+    sheet.getRange(idx, c.needed_by).setValue(payload.needed_by || '');
+    sheet.getRange(idx, c.event_id).setValue(payload.event_id || '');
+  }
+
+  if (payload.lines && payload.lines.length > 0) {
+    var existingLines = Engine._findRowsByColumn(lineSheet, lineC.request_id, requestId);
+    existingLines.forEach(function (el) {
+      var row = el.rowIndex;
+      lineSheet.getRange(row, lineC.description).setValue('');
+      lineSheet.getRange(row, lineC.requested_amount).setValue(0);
+      lineSheet.getRange(row, lineC.approved_amount).setValue(0);
+    });
+
+    payload.lines.forEach(function (line, i) {
+      var lineId;
+      if (existingLines[i]) {
+        lineId = existingLines[i].values[lineC.line_id - 1];
+        var row = existingLines[i].rowIndex;
+        lineSheet.getRange(row, lineC.category_id).setValue(line.category_id || '');
+        lineSheet.getRange(row, lineC.description).setValue(line.description);
+        lineSheet.getRange(row, lineC.requested_amount).setValue(Number(line.requested_amount) || 0);
+      } else {
+        lineId = Ids.childId(requestId, i + 1, 'BUDGETLINE');
+        _appendRow(lineSheet, [
+          lineId, requestId, line.category_id || '', line.description,
+          Number(line.requested_amount) || 0, 0, STATUS.BudgetRequestLine.PENDING, 0, 0
+        ]);
+      }
+    });
+  }
+
+  Audit.append(user.userId, 'BudgetRequest', requestId, existingRow ? 'DRAFT_UPDATE' : 'DRAFT_CREATE', {});
+  return { request_id: requestId, status: STATUS.BudgetRequest.DRAFT };
+}
+
+/**
+ * Submit a DRAFT or resubmit a NEEDS_INFO budget request via Engine.
+ */
+function api_submitBudgetRequest(requestId) {
+  var email = Session.getActiveUser().getEmail();
+  if (!email) throw new Error('Not authenticated');
+  var user = _resolveUser(email);
+  if (user.isUnknown) throw new Error('Unregistered user');
+
+  var row = Engine._loadRow('BudgetRequest', requestId);
+  if (!row) throw new Error('Budget request not found');
+
+  var c = COLS.BudgetRequests;
+  var curStatus = row.values[c.status - 1];
+  var action;
+  if (curStatus === STATUS.BudgetRequest.DRAFT) {
+    action = 'SUBMIT';
+  } else if (curStatus === STATUS.BudgetRequest.NEEDS_INFO) {
+    action = 'RESUBMIT';
+  } else {
+    throw new Error('Cannot submit a ' + curStatus + ' budget request');
+  }
+
+  var result = Engine.transition('BudgetRequest', requestId, action, user.userId, {});
+  if (!result.ok) throw new Error(result.reason);
+
+  return { request_id: requestId, status: result.to, submitted_at: Audit._nowIso() };
+}
+
+/**
+ * Discard/withdraw a DRAFT budget request.
+ */
+function api_discardBudgetRequest(requestId) {
+  var email = Session.getActiveUser().getEmail();
+  if (!email) throw new Error('Not authenticated');
+  var user = _resolveUser(email);
+  if (user.isUnknown) throw new Error('Unregistered user');
+
+  var result = Engine.transition('BudgetRequest', requestId, 'WITHDRAW', user.userId, {});
+  if (!result.ok) throw new Error(result.reason);
+  return { request_id: requestId, status: result.to };
+}
+
+/**
+ * Get all PENDING budget requests (Treasurer approvals view).
+ */
+function api_getPendingBudgetRequests() {
+  var email = Session.getActiveUser().getEmail();
+  if (!email) throw new Error('Not authenticated');
+  var user = _resolveUser(email);
+  if (user.isUnknown || user.role !== ROLES.TREASURER) {
+    throw new Error('Unauthorized');
+  }
+
+  var sheet = getSheet_(TABS.BUDGET_REQUESTS);
+  var values = sheet.getDataRange().getValues();
+  var c = COLS.BudgetRequests;
+  var out = [];
+
+  for (var i = 1; i < values.length; i++) {
+    if (values[i][c.status - 1] !== STATUS.BudgetRequest.PENDING) continue;
+    var id = values[i][c.request_id - 1];
+    var amount = Engine._sumBudgetRequestLines(id, 'requested_amount');
+    out.push({
+      request_id: id,
+      title: values[i][c.title - 1],
+      requester_id: values[i][c.requester_id - 1],
+      justification: values[i][c.justification - 1],
+      needed_by: values[i][c.needed_by - 1],
+      submitted_at: values[i][c.submitted_at - 1],
+      total_requested: amount
+    });
+  }
+  return out;
+}
+
+/**
+ * Treasurer decision on a budget request.
+ * action: 'APPROVE' | 'REDUCE' | 'REJECT' | 'REQUEST_INFO' | 'CLOSE'
+ * payload: { decision_note?, amount_override? }
+ */
+function api_decisionBudgetRequest(entityId, action, payload) {
+  var email = Session.getActiveUser().getEmail();
+  if (!email) throw new Error('Not authenticated');
+  var user = _resolveUser(email);
+  if (user.isUnknown || user.role !== ROLES.TREASURER) {
+    throw new Error('Unauthorized');
+  }
+
+  var result = Engine.transition('BudgetRequest', entityId, action, user.userId, payload || {});
+  if (!result.ok) throw new Error(result.reason);
+  return { request_id: entityId, from: result.from, to: result.to };
+}
+
 if (typeof module !== 'undefined') {
-  module.exports = { api_resolveSession, api_getMyClaims, api_uploadReceipt, api_submitClaim, api_editClaim, _sha256Hex, _isLate, _resolveUser };
+  module.exports = {
+    api_resolveSession, api_getMyClaims, api_uploadReceipt, api_submitClaim, api_editClaim,
+    api_getMyBudgetRequests, api_saveBudgetRequestDraft, api_submitBudgetRequest,
+    api_discardBudgetRequest, api_getPendingBudgetRequests, api_decisionBudgetRequest,
+    _sha256Hex, _isLate, _resolveUser
+  };
 }

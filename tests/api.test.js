@@ -5,17 +5,29 @@ global.getSheet_ = jest.fn();
 global.Engine = {
   _findRowsByColumn: jest.fn()
 };
-global.TABS = { EXPENSE_CLAIMS: 'ExpenseClaims', BUDGET_REQUESTS: 'BudgetRequests', USERS: 'Users', CLAIM_LINE_ITEMS: 'ClaimLineItems', RECEIPTS: 'Receipts' };
+global.TABS = { EXPENSE_CLAIMS: 'ExpenseClaims', BUDGET_REQUESTS: 'BudgetRequests', BUDGET_REQUEST_LINES: 'BudgetRequestLines', USERS: 'Users', CLAIM_LINE_ITEMS: 'ClaimLineItems', RECEIPTS: 'Receipts' };
 global.COLS = {
   ExpenseClaims: { claim_id: 1, claimant_id: 2, status: 3, submitted_at: 4, total_amount: 11, notes: 14, processed_response_id: 15 },
-  BudgetRequests: { request_id: 1, requester_id: 2, title: 4, status: 7, submitted_at: 8 },
+  BudgetRequests: { request_id: 1, requester_id: 2, event_id: 3, title: 4, justification: 5, needed_by: 6, status: 7, submitted_at: 8, decided_at: 9, decided_by: 10, decision_note: 11, self_approved: 12, processed_response_id: 13 },
+  BudgetRequestLines: { line_id: 1, request_id: 2, category_id: 3, description: 4, requested_amount: 5, approved_amount: 6, line_status: 7, claimed_amount: 8, remaining: 9 },
   Users: { user_id: 1, display_name: 2, role: 3, email: 4, active: 5, created_at: 6 },
   ClaimLineItems: { claim_id: 2, amount: 5, description: 6 },
   Receipts: { receipt_id: 1, file_id: 2, sha256: 3, uploaded_by: 4 }
 };
-global.STATUS = { ExpenseClaim: { SUBMITTED: 'SUBMITTED' } };
+global.STATUS = {
+  ExpenseClaim: { SUBMITTED: 'SUBMITTED' },
+  BudgetRequest: { DRAFT: 'DRAFT', PENDING: 'PENDING', NEEDS_INFO: 'NEEDS_INFO', APPROVED: 'APPROVED', PARTIALLY_APPROVED: 'PARTIALLY_APPROVED', REJECTED: 'REJECTED', WITHDRAWN: 'WITHDRAWN', CLOSED: 'CLOSED' },
+  BudgetRequestLine: { PENDING: 'PENDING', APPROVED: 'APPROVED', REDUCED: 'REDUCED', REJECTED: 'REJECTED' }
+};
 global.ROLES = { COMMITTEE: 'COMMITTEE', TREASURER: 'TREASURER', MEMBER: 'MEMBER', ADVISOR_AUDITOR: 'ADVISOR_AUDITOR' };
 global.Discord = { postStatus: jest.fn() };
+global.Audit = { _nowIso: jest.fn(() => '2026-07-21T12:00:00Z'), append: jest.fn() };
+global.Ids = { nextId: jest.fn(() => 'BUDGET-26A-001'), childId: jest.fn(() => 'BUDGETLINE-26A-001-01') };
+global.Engine._loadRow = jest.fn();
+global.Engine._sumBudgetRequestLines = jest.fn(() => 0);
+global.Engine.transition = jest.fn((entityType, entityId, action, actorUserId, payload) => {
+  return { ok: true, from: 'DRAFT', to: 'PENDING', selfApproved: false };
+});
 
 const { api_getMyClaims } = require('../Api.js');
 
@@ -35,10 +47,7 @@ describe('Api.js', () => {
       if (name === global.TABS.USERS) {
         return { getDataRange: () => ({ getValues: () => mockUsersData }) };
       }
-      if (name === global.TABS.BUDGET_REQUEST_LINES) {
-        return { getDataRange: () => ({ getValues: () => [[]] }) };
-      }
-      return { name: name, appendRow: jest.fn(), getDataRange: jest.fn(), getRange: jest.fn(), getLastRow: jest.fn() };
+      return { name: name, appendRow: jest.fn(), getDataRange: jest.fn(() => ({ getValues: jest.fn(() => [[]]) })), getRange: jest.fn(() => ({ setValue: jest.fn(), setValues: jest.fn(), getValues: jest.fn(() => [[]]) })), getLastRow: jest.fn(() => 1) };
     });
   });
 
@@ -140,6 +149,156 @@ describe('Api.js', () => {
       const result = api_resolveSession();
       expect(result.allowed).toBe(false);
       expect(result.reason).toBe('no_session');
+    });
+  });
+
+  describe('api_getMyBudgetRequests', () => {
+    it('should return empty array for unknown user', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'unknown@example.com' });
+      const { api_getMyBudgetRequests } = require('../Api.js');
+      const result = api_getMyBudgetRequests();
+      expect(result).toEqual([]);
+    });
+
+    it('should return requests with lines for current user', () => {
+      const findCalls = [];
+      global.Engine._findRowsByColumn.mockImplementation((sheet, colIndex, matchValue) => {
+        findCalls.push({ colIndex, matchValue });
+        if (findCalls.length === 1) {
+          return [{ values: ['BUDGET-26A-001', 'U-001', '', 'Test Request', 'Justification', '2026-08-01', 'PENDING', '2026-07-21', '', '', '', false, ''] }];
+        }
+        return [{ values: ['BUDGETLINE-26A-001-01', 'BUDGET-26A-001', 'CAT-1', 'First line', 500, 0, 'PENDING', 0, 500] }];
+      });
+      const { api_getMyBudgetRequests } = require('../Api.js');
+      const result = api_getMyBudgetRequests();
+      expect(result.length).toBe(1);
+      expect(result[0].title).toBe('Test Request');
+      expect(result[0].lines.length).toBe(1);
+      expect(result[0].lines[0].requested_amount).toBe(500);
+    });
+  });
+
+  describe('api_saveBudgetRequestDraft', () => {
+    it('should create a new draft', () => {
+      global.Ids.nextId.mockReturnValueOnce('BUDGET-26A-010');
+      const sheetCalls = [];
+      global.getSheet_.mockImplementation(name => {
+        sheetCalls.push(name);
+        if (name === global.TABS.USERS) {
+          return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        }
+        return {
+          name,
+          getDataRange: jest.fn(() => ({ getValues: () => [[]] })),
+          getRange: jest.fn(() => ({ setValue: jest.fn(), setValues: jest.fn(), getValues: jest.fn(() => [['']]) })),
+          getLastRow: jest.fn(() => 1),
+          getMaxRows: jest.fn(() => 10),
+          insertRowAfter: jest.fn(),
+          appendRow: jest.fn()
+        };
+      });
+      const { api_saveBudgetRequestDraft } = require('../Api.js');
+      const result = api_saveBudgetRequestDraft({
+        uuid: 'uuid-1',
+        title: 'New Budget',
+        justification: 'For event',
+        needed_by: '2026-08-15',
+        lines: [{ description: 'Food', requested_amount: 300 }]
+      });
+      expect(result.request_id).toBe('BUDGET-26A-010');
+    });
+
+    it('should throw when editing non-draft request', () => {
+      global.Engine._loadRow.mockReturnValueOnce({
+        rowIndex: 3,
+        values: ['BUDGET-26A-001', 'U-001', '', 'Test', '', '2026-08-01', 'APPROVED', '', '', '', '', false, '']
+      });
+      const { api_saveBudgetRequestDraft } = require('../Api.js');
+      expect(() => api_saveBudgetRequestDraft({ request_id: 'BUDGET-26A-001', title: 'Hack' })).toThrow('Cannot edit a APPROVED budget request');
+    });
+  });
+
+  describe('api_submitBudgetRequest', () => {
+    it('should submit a DRAFT request to PENDING', () => {
+      global.Engine._loadRow.mockReturnValueOnce({
+        rowIndex: 2,
+        values: ['BUDGET-26A-001', 'U-001', '', 'Test', '', '2026-08-01', 'DRAFT', '', '', '', '', false, '']
+      });
+      const { api_submitBudgetRequest } = require('../Api.js');
+      const result = api_submitBudgetRequest('BUDGET-26A-001');
+      expect(result.status).toBe('PENDING');
+      expect(global.Engine.transition).toHaveBeenCalledWith('BudgetRequest', 'BUDGET-26A-001', 'SUBMIT', 'U-001', {});
+    });
+
+    it('should resubmit a NEEDS_INFO request', () => {
+      global.Engine._loadRow.mockReturnValueOnce({
+        rowIndex: 2,
+        values: ['BUDGET-26A-001', 'U-001', '', 'Test', '', '2026-08-01', 'NEEDS_INFO', '', '', '', '', false, '']
+      });
+      global.Engine.transition.mockReturnValueOnce({ ok: true, from: 'NEEDS_INFO', to: 'PENDING' });
+      const { api_submitBudgetRequest } = require('../Api.js');
+      const result = api_submitBudgetRequest('BUDGET-26A-001');
+      expect(result.status).toBe('PENDING');
+      expect(global.Engine.transition).toHaveBeenCalledWith('BudgetRequest', 'BUDGET-26A-001', 'RESUBMIT', 'U-001', {});
+    });
+  });
+
+  describe('api_discardBudgetRequest', () => {
+    it('should withdraw a DRAFT request', () => {
+      global.Engine.transition.mockReturnValueOnce({ ok: true, from: 'DRAFT', to: 'WITHDRAWN' });
+      const { api_discardBudgetRequest } = require('../Api.js');
+      const result = api_discardBudgetRequest('BUDGET-26A-001');
+      expect(result.status).toBe('WITHDRAWN');
+    });
+  });
+
+  describe('api_getPendingBudgetRequests', () => {
+    it('should throw if user is not treasurer', () => {
+      const { api_getPendingBudgetRequests } = require('../Api.js');
+      expect(() => api_getPendingBudgetRequests()).toThrow('Unauthorized');
+    });
+
+    it('should return pending requests for treasurer', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'treasurer@example.com' });
+      global.getSheet_.mockImplementationOnce(name => {
+        if (name === global.TABS.USERS) {
+          return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-002', 'Treasurer', 'TREASURER', 'treasurer@example.com', true, '2026-01-01']] }) };
+        }
+        return { name, getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      global.getSheet_.mockImplementationOnce(name => {
+        if (name === global.TABS.BUDGET_REQUESTS) {
+          return { getDataRange: () => ({ getValues: () => [['request_id', 'requester_id', 'event_id', 'title', 'justification', 'needed_by', 'status', 'submitted_at'], ['BUDGET-26A-001', 'U-001', '', 'Pending Request', 'Justification', '2026-08-01', 'PENDING', '2026-07-21']] }) };
+        }
+        return { name, getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      global.Engine._sumBudgetRequestLines.mockReturnValueOnce(500);
+      const { api_getPendingBudgetRequests } = require('../Api.js');
+      const result = api_getPendingBudgetRequests();
+      expect(result.length).toBe(1);
+      expect(result[0].title).toBe('Pending Request');
+      expect(result[0].total_requested).toBe(500);
+    });
+  });
+
+  describe('api_decisionBudgetRequest', () => {
+    it('should throw if user is not treasurer', () => {
+      const { api_decisionBudgetRequest } = require('../Api.js');
+      expect(() => api_decisionBudgetRequest('BUDGET-26A-001', 'APPROVE', {})).toThrow('Unauthorized');
+    });
+
+    it('should approve a pending request', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'treasurer@example.com' });
+      global.getSheet_.mockImplementationOnce(name => {
+        if (name === global.TABS.USERS) {
+          return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-002', 'Treasurer', 'TREASURER', 'treasurer@example.com', true, '2026-01-01']] }) };
+        }
+        return { name, getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      global.Engine.transition.mockReturnValueOnce({ ok: true, from: 'PENDING', to: 'APPROVED' });
+      const { api_decisionBudgetRequest } = require('../Api.js');
+      const result = api_decisionBudgetRequest('BUDGET-26A-001', 'APPROVE', { decision_note: 'Looks good' });
+      expect(result.to).toBe('APPROVED');
     });
   });
 

@@ -5,6 +5,7 @@ import type {
   SessionResponse, SessionInfo,
   WorkspaceView, MyClaimsResponse, Claim
 } from './types';
+import BudgetRequestsView from './BudgetRequestsView';
 
 const VIEW_LABELS: Record<WorkspaceView, string> = {
   'claims': 'Claims',
@@ -292,6 +293,7 @@ function WorkspaceShell({ session }: { session: SessionInfo }) {
   const renderView = () => {
     switch (activeView) {
       case 'claims': return <ClaimsView />;
+      case 'budget-requests': return <BudgetRequestsView role={session.role} />;
       default: return <PlaceholderView view={activeView} />;
     }
   };

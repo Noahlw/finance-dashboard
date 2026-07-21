@@ -1,4 +1,4 @@
-import type { MyClaimsResponse, ClaimPayload, EditClaimPayload, SessionResponse } from '../types';
+import type { MyClaimsResponse, ClaimPayload, EditClaimPayload, SessionResponse, BudgetRequest, BudgetRequestDraftPayload, PendingBudgetRequest, BudgetDecisionPayload } from '../types';
 
 export const apiService = {
   resolveSession: (): Promise<SessionResponse> => {
@@ -108,6 +108,111 @@ export const apiService = {
         .withSuccessHandler(resolve)
         .withFailureHandler(reject)
         .api_uploadReceipt(fileName, mimeType, base64Data, vendor, receiptDate, receiptTotal);
+    });
+  },
+
+  getMyBudgetRequests: (): Promise<BudgetRequest[]> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => {
+          resolve([{
+            request_id: 'BUDGET-26A-001',
+            requester_id: 'U-001',
+            event_id: '',
+            title: 'Mock Budget Request',
+            justification: 'For testing',
+            needed_by: '2026-08-15',
+            status: 'PENDING',
+            submitted_at: '2026-07-21',
+            decided_at: '',
+            decided_by: '',
+            decision_note: '',
+            lines: [{ line_id: 'BL-001', request_id: 'BUDGET-26A-001', category_id: 'CAT-1', description: 'Catering', requested_amount: 500, approved_amount: 0, line_status: 'PENDING', claimed_amount: 0, remaining: 500 }]
+          }]);
+        }, 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_getMyBudgetRequests();
+    });
+  },
+
+  saveBudgetRequestDraft: (payload: BudgetRequestDraftPayload): Promise<{ request_id: string; status: string }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => {
+          resolve({ request_id: 'BUDGET-MOCK', status: 'DRAFT' });
+        }, 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_saveBudgetRequestDraft(payload);
+    });
+  },
+
+  submitBudgetRequest: (requestId: string): Promise<{ request_id: string; status: string }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => {
+          resolve({ request_id: requestId, status: 'PENDING' });
+        }, 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_submitBudgetRequest(requestId);
+    });
+  },
+
+  discardBudgetRequest: (requestId: string): Promise<{ request_id: string; status: string }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => {
+          resolve({ request_id: requestId, status: 'WITHDRAWN' });
+        }, 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_discardBudgetRequest(requestId);
+    });
+  },
+
+  getPendingBudgetRequests: (): Promise<PendingBudgetRequest[]> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => {
+          resolve([{
+            request_id: 'BUDGET-26A-002',
+            title: 'Pending Mock',
+            requester_id: 'U-002',
+            justification: 'Needs funds',
+            needed_by: '2026-09-01',
+            submitted_at: '2026-07-20',
+            total_requested: 1000
+          }]);
+        }, 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_getPendingBudgetRequests();
+    });
+  },
+
+  decisionBudgetRequest: (entityId: string, action: string, payload: BudgetDecisionPayload): Promise<{ request_id: string; from: string; to: string }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => {
+          resolve({ request_id: entityId, from: 'PENDING', to: action === 'APPROVE' ? 'APPROVED' : 'REJECTED' });
+        }, 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_decisionBudgetRequest(entityId, action, payload);
     });
   }
 };

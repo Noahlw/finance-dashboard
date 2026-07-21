@@ -541,3 +541,130 @@ button {
   color: var(--text-muted);
   font-size: 0.85rem;
 }
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--card-border);
+  padding-bottom: 0;
+  margin-bottom: 0;
+}
+
+.tab {
+  background: transparent;
+  color: var(--text-muted);
+  border: none;
+  padding: 0.75rem 1.25rem;
+  border-radius: 10px 10px 0 0;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tab:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.tab.active {
+  color: var(--accent);
+  background: rgba(59, 130, 246, 0.1);
+  border-bottom: 2px solid var(--accent);
+}
+
+/* Line rows in form */
+.line-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  align-items: center;
+}
+
+.line-row input {
+  flex: 1;
+}
+
+.line-row .danger-btn {
+  flex: 0 0 auto;
+  padding: 0.5rem 0.75rem;
+}
+
+/* Detail grid */
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.detail-grid div {
+  color: var(--text-main);
+  font-size: 0.9rem;
+}
+
+/* Decision actions */
+.decision-actions {
+  flex-wrap: wrap;
+}
+
+.danger-btn {
+  background-color: #ef4444;
+  color: white;
+}
+
+.danger-btn:hover {
+  background-color: #dc2626;
+}
+
+.warning-btn {
+  background-color: #eab308;
+  color: #1e293b;
+}
+
+.warning-btn:hover {
+  background-color: #ca8a04;
+}
+
+/* Wide modal */
+.wide-modal {
+  max-width: 700px;
+}
+
+/* Textarea styling */
+.form-group textarea {
+  width: 100%;
+  padding: 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--card-border);
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text-main);
+  font-family: inherit;
+  resize: vertical;
+}
+
+/* Additional status badges */
+.status-draft {
+  color: var(--text-muted);
+  background: rgba(148, 163, 184, 0.15);
+}
+
+.status-withdrawn {
+  color: var(--text-muted);
+  background: rgba(148, 163, 184, 0.15);
+}
+
+.status-needs_info {
+  color: #f97316;
+  background: rgba(249, 115, 22, 0.15);
+}
+
+.status-partially_approved {
+  color: var(--status-approved);
+  background: var(--status-approved-bg);
+}
+
+.status-closed {
+  color: var(--text-muted);
+  background: rgba(148, 163, 184, 0.15);
+}
