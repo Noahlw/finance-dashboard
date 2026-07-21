@@ -276,3 +276,268 @@ button {
   padding: 0.25rem 0.75rem;
   font-size: 0.8rem;
 }
+
+/* === Session Loading === */
+.session-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  color: var(--text-muted);
+  gap: 1rem;
+}
+
+/* === Access Denied === */
+.access-denied {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 2rem;
+}
+
+.access-denied-card {
+  background: var(--card-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  padding: 3rem;
+  max-width: 480px;
+  text-align: center;
+  animation: fadeInDown 0.5s ease-out;
+}
+
+.access-denied-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+  font-size: 2rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 1.5rem;
+}
+
+.access-denied-card h1 {
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.access-denied-card p {
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+/* === Workspace Shell === */
+.workspace {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.workspace-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.5rem;
+  border-bottom: 1px solid var(--card-border);
+  background: rgba(15, 23, 42, 0.95);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+
+.workspace-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  background: linear-gradient(to right, #60a5fa, #c084fc);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.workspace-user {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.workspace-user-name {
+  font-size: 0.85rem;
+  color: var(--text-main);
+}
+
+.workspace-role {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.2rem 0.6rem;
+  border-radius: 9999px;
+  letter-spacing: 0.025em;
+}
+
+.role-committee {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+}
+
+.role-treasurer {
+  background: rgba(234, 179, 8, 0.2);
+  color: #fbbf24;
+}
+
+.workspace-body {
+  display: flex;
+  flex: 1;
+}
+
+.workspace-sidebar {
+  display: none;
+  width: 220px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--card-border);
+  padding: 1rem 0.5rem;
+}
+
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+}
+
+.sidebar-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-main);
+}
+
+.sidebar-item.active {
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--accent);
+}
+
+.sidebar-icon {
+  font-size: 1.1rem;
+  width: 24px;
+  text-align: center;
+}
+
+.workspace-content {
+  flex: 1;
+  padding: 1.5rem;
+  overflow-y: auto;
+}
+
+.workspace-bottom-nav {
+  display: flex;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(15, 23, 42, 0.98);
+  border-top: 1px solid var(--card-border);
+  padding: 0.5rem 0;
+  z-index: 100;
+  justify-content: space-around;
+}
+
+.bottom-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.4rem 0.75rem;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  cursor: pointer;
+  transition: color 0.2s ease;
+  min-width: 0;
+}
+
+.bottom-nav-item.active {
+  color: var(--accent);
+}
+
+.bottom-nav-icon {
+  font-size: 1.2rem;
+}
+
+.bottom-nav-label {
+  white-space: nowrap;
+}
+
+.placeholder-card {
+  text-align: center;
+  padding: 3rem;
+}
+
+.placeholder-text {
+  color: var(--text-muted);
+  margin-top: 1rem;
+  font-style: italic;
+}
+
+.view-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+@media (min-width: 768px) {
+  body {
+    padding: 0;
+  }
+
+  .workspace-sidebar {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .workspace-bottom-nav {
+    display: none;
+  }
+
+  .workspace-content {
+    padding: 2rem;
+  }
+
+  .workspace-header {
+    padding: 1rem 2rem;
+  }
+}
+
+.alert {
+  padding: 1rem;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.alert.error {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.muted-text {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}

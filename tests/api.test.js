@@ -9,11 +9,12 @@ global.TABS = { EXPENSE_CLAIMS: 'ExpenseClaims', BUDGET_REQUESTS: 'BudgetRequest
 global.COLS = {
   ExpenseClaims: { claim_id: 1, claimant_id: 2, status: 3, submitted_at: 4, total_amount: 11, notes: 14, processed_response_id: 15 },
   BudgetRequests: { request_id: 1, requester_id: 2, title: 4, status: 7, submitted_at: 8 },
-  Users: { user_id: 1, email: 4 },
+  Users: { user_id: 1, display_name: 2, role: 3, email: 4, active: 5, created_at: 6 },
   ClaimLineItems: { claim_id: 2, amount: 5, description: 6 },
   Receipts: { receipt_id: 1, file_id: 2, sha256: 3, uploaded_by: 4 }
 };
 global.STATUS = { ExpenseClaim: { SUBMITTED: 'SUBMITTED' } };
+global.ROLES = { COMMITTEE: 'COMMITTEE', TREASURER: 'TREASURER', MEMBER: 'MEMBER', ADVISOR_AUDITOR: 'ADVISOR_AUDITOR' };
 global.Discord = { postStatus: jest.fn() };
 
 const { api_getMyClaims } = require('../Api.js');
@@ -27,8 +28,8 @@ describe('Api.js', () => {
     // Shared mocks for all tests
     global.Session.getActiveUser.mockReturnValue({ getEmail: () => testUserEmail });
     const mockUsersData = [
-      ['user_id', 'name', 'role', 'email'],
-      [testUserId, 'Test User', 'MEMBER', testUserEmail]
+      ['user_id', 'display_name', 'role', 'email', 'active', 'created_at'],
+      [testUserId, 'Test User', 'COMMITTEE', testUserEmail, true, '2026-01-01']
     ];
     global.getSheet_.mockImplementation(name => {
       if (name === global.TABS.USERS) {
@@ -41,6 +42,89 @@ describe('Api.js', () => {
     });
   });
 
+  describe('api_resolveSession', () => {
+    it('should allow COMMITTEE role with claims and budget-requests views', () => {
+      const { api_resolveSession } = require('../Api.js');
+      const result = api_resolveSession();
+      expect(result.allowed).toBe(true);
+      expect(result.role).toBe('COMMITTEE');
+      expect(result.user_id).toBe('U-001');
+      expect(result.display_name).toBe('Test User');
+      expect(result.views).toEqual(['claims', 'budget-requests']);
+    });
+
+    it('should allow TREASURER role with all views', () => {
+      global.getSheet_.mockImplementationOnce(name => {
+        if (name === global.TABS.USERS) {
+          return { getDataRange: () => ({
+            getValues: () => [
+              ['user_id', 'display_name', 'role', 'email', 'active', 'created_at'],
+              ['U-002', 'Treasurer User', 'TREASURER', 'test@example.com', true, '2026-01-01']
+            ]
+          }) };
+        }
+        return { name, getDataRange: jest.fn(() => ({ getValues: () => [[]] })), getRange: jest.fn(), getLastRow: jest.fn(() => 1), appendRow: jest.fn() };
+      });
+      const { api_resolveSession } = require('../Api.js');
+      const result = api_resolveSession();
+      expect(result.allowed).toBe(true);
+      expect(result.role).toBe('TREASURER');
+      expect(result.views).toEqual(['claims', 'budget-requests', 'income', 'payouts', 'reports']);
+    });
+
+    it('should deny unknown user', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'unknown@example.com' });
+      const { api_resolveSession } = require('../Api.js');
+      const result = api_resolveSession();
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toBe('unknown_user');
+    });
+
+    it('should deny MEMBER role', () => {
+      global.getSheet_.mockImplementationOnce(name => {
+        if (name === global.TABS.USERS) {
+          return { getDataRange: () => ({
+            getValues: () => [
+              ['user_id', 'display_name', 'role', 'email', 'active', 'created_at'],
+              ['U-003', 'Member User', 'MEMBER', 'test@example.com', true, '2026-01-01']
+            ]
+          }) };
+        }
+        return { name, getDataRange: jest.fn(() => ({ getValues: () => [[]] })), getRange: jest.fn(), getLastRow: jest.fn(() => 1), appendRow: jest.fn() };
+      });
+      const { api_resolveSession } = require('../Api.js');
+      const result = api_resolveSession();
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toBe('unauthorized_role');
+    });
+
+    it('should deny inactive user', () => {
+      global.getSheet_.mockImplementationOnce(name => {
+        if (name === global.TABS.USERS) {
+          return { getDataRange: () => ({
+            getValues: () => [
+              ['user_id', 'display_name', 'role', 'email', 'active', 'created_at'],
+              ['U-004', 'Inactive User', 'COMMITTEE', 'test@example.com', false, '2026-01-01']
+            ]
+          }) };
+        }
+        return { name, getDataRange: jest.fn(() => ({ getValues: () => [[]] })), getRange: jest.fn(), getLastRow: jest.fn(() => 1), appendRow: jest.fn() };
+      });
+      const { api_resolveSession } = require('../Api.js');
+      const result = api_resolveSession();
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toBe('inactive_user');
+    });
+
+    it('should deny no session email', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => '' });
+      const { api_resolveSession } = require('../Api.js');
+      const result = api_resolveSession();
+      expect(result.allowed).toBe(false);
+      expect(result.reason).toBe('no_session');
+    });
+  });
+
   describe('api_getMyClaims', () => {
     it('should throw if no email is found', () => {
       global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => '' });
@@ -50,8 +134,8 @@ describe('Api.js', () => {
     it('should return empty arrays if user is unknown', () => {
       global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'unknown@example.com' });
       const mockUsersDataUnknown = [
-        ['user_id', 'name', 'role', 'email'],
-        [testUserId, 'Test User', 'MEMBER', testUserEmail]
+        ['user_id', 'display_name', 'role', 'email', 'active', 'created_at'],
+        [testUserId, 'Test User', 'COMMITTEE', testUserEmail, true, '2026-01-01']
       ];
       global.getSheet_.mockImplementation(name => {
         if (name === global.TABS.USERS) {
@@ -90,7 +174,7 @@ describe('Api.js', () => {
       global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
       
       global.getSheet_.mockImplementation((tab) => {
-        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [[], ['USER-1', '', '', 'test@example.com']] }) };
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [[], ['USER-1', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
         return {
           getLastRow: () => 1,
           getRange: () => ({ getValues: () => [], setValues: jest.fn() }),
@@ -133,7 +217,7 @@ describe('Api.js', () => {
       };
 
       global.getSheet_.mockImplementation((tab) => {
-        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [[], ['USER-1', '', '', 'test@example.com']] }) };
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [[], ['USER-1', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
         if (tab === 'ExpenseClaims') return mockExpenseSheet;
         if (tab === 'ClaimLineItems') return mockCliSheet;
         return null;
@@ -152,7 +236,7 @@ describe('Api.js', () => {
       global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
 
       global.getSheet_.mockImplementation((tab) => {
-        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [[], ['USER-1', '', '', 'test@example.com']] }) };
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [[], ['USER-1', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
         if (tab === 'ExpenseClaims') return {
           getDataRange: () => ({
             getValues: () => [

@@ -7,8 +7,33 @@
 function doGet(e) {
   return HtmlService.createTemplateFromFile('index')
       .evaluate()
-      .setTitle('Budget Dashboard')
+      .setTitle('Finance Workspace')
       .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+function api_resolveSession() {
+  var email = Session.getActiveUser().getEmail();
+  if (!email) return { allowed: false, reason: 'no_session' };
+
+  var user = _resolveUser(email);
+  if (user.isUnknown) return { allowed: false, reason: 'unknown_user', email: email };
+
+  if (user.role !== ROLES.COMMITTEE && user.role !== ROLES.TREASURER) {
+    return { allowed: false, reason: 'unauthorized_role', role: user.role };
+  }
+
+  if (!user.active) return { allowed: false, reason: 'inactive_user' };
+
+  var views = [ 'claims', 'budget-requests' ];
+  if (user.role === ROLES.TREASURER) views.push('income', 'payouts', 'reports');
+
+  return {
+    allowed: true,
+    user_id: user.userId,
+    display_name: user.displayName,
+    role: user.role,
+    views: views
+  };
 }
 
 function api_getMyClaims() {
@@ -16,7 +41,9 @@ function api_getMyClaims() {
   if (!email) throw new Error('User not authenticated (no active session)');
 
   var user = _resolveUser(email);
-  if (user.isUnknown) return { claims: [], requests: [] };
+  if (user.isUnknown || (user.role !== ROLES.COMMITTEE && user.role !== ROLES.TREASURER)) {
+    return { claims: [], requests: [], budgetLines: [] };
+  }
 
   var claimsSheet = getSheet_(TABS.EXPENSE_CLAIMS);
   var claimsRows = Engine._findRowsByColumn(claimsSheet, COLS.ExpenseClaims.claimant_id, user.userId);
@@ -135,7 +162,13 @@ function _resolveUser(email) {
   var c = COLS.Users;
   for (var i = 1; i < values.length; i++) {
     if (String(values[i][c.email - 1]).toLowerCase() === email.toLowerCase()) {
-      return { userId: values[i][c.user_id - 1], isUnknown: false };
+      return {
+        userId: values[i][c.user_id - 1],
+        displayName: values[i][c.display_name - 1],
+        role: values[i][c.role - 1],
+        active: values[i][c.active - 1] === true || values[i][c.active - 1] === 'TRUE',
+        isUnknown: false
+      };
     }
   }
   return { userId: 'USER-UNKNOWN', isUnknown: true };
@@ -232,5 +265,5 @@ function api_editClaim(payload) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { api_getMyClaims, api_uploadReceipt, api_submitClaim, api_editClaim, _sha256Hex, _isLate, _resolveUser };
+  module.exports = { api_resolveSession, api_getMyClaims, api_uploadReceipt, api_submitClaim, api_editClaim, _sha256Hex, _isLate, _resolveUser };
 }

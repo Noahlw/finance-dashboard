@@ -1,3 +1,23 @@
+export type WorkspaceView = 'claims' | 'budget-requests' | 'income' | 'payouts' | 'reports';
+export type SessionRole = 'COMMITTEE' | 'TREASURER' | 'MEMBER' | 'ADVISOR_AUDITOR';
+
+export interface SessionInfo {
+  allowed: true;
+  user_id: string;
+  display_name: string;
+  role: SessionRole;
+  views: WorkspaceView[];
+}
+
+export interface SessionDenied {
+  allowed: false;
+  reason: 'no_session' | 'unknown_user' | 'unauthorized_role' | 'inactive_user';
+  email?: string;
+  role?: string;
+}
+
+export type SessionResponse = SessionInfo | SessionDenied;
+
 export interface Claim {
   claim_id: string;
   status: string;

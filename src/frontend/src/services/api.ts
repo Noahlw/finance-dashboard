@@ -1,6 +1,27 @@
-import type { MyClaimsResponse, ClaimPayload, EditClaimPayload } from '../types';
+import type { MyClaimsResponse, ClaimPayload, EditClaimPayload, SessionResponse } from '../types';
 
 export const apiService = {
+  resolveSession: (): Promise<SessionResponse> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => {
+          resolve({
+            allowed: true,
+            user_id: 'USER-MOCK',
+            display_name: 'Mock User',
+            role: 'COMMITTEE',
+            views: ['claims', 'budget-requests']
+          });
+        }, 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler((_err: Error) => resolve({ allowed: false, reason: 'no_session' }))
+        .api_resolveSession();
+    });
+  },
+
   getMyClaims: (): Promise<MyClaimsResponse> => {
     return new Promise((resolve, reject) => {
       if (typeof google === 'undefined' || !google.script) {
