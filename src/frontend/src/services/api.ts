@@ -32,16 +32,21 @@ import type {
 
 export const apiService = {
   activateMigration: (): Promise<{ ok: boolean; stage: string }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => resolve({ ok: true, stage: "ACTIVATED" }), 300);
         return;
       }
-      google.script.run.withSuccessHandler(resolve).api_activateMigration();
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
+        .api_activateMigration();
     }),
 
   addAccount: (payload: AddAccountPayload): Promise<FinanceAccount> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => {
           resolve({
@@ -57,11 +62,16 @@ export const apiService = {
         }, 300);
         return;
       }
-      google.script.run.withSuccessHandler(resolve).api_addAccount(payload);
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
+        .api_addAccount(payload);
     }),
 
   addMember: (payload: AddMemberPayload): Promise<Member> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => {
           resolve({
@@ -72,7 +82,12 @@ export const apiService = {
         }, 300);
         return;
       }
-      google.script.run.withSuccessHandler(resolve).api_addMember(payload);
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
+        .api_addMember(payload);
     }),
 
   approvePayout: (claimId: string): Promise<TransitionResult> =>
@@ -90,7 +105,10 @@ export const apiService = {
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .withFailureHandler(reject)
         .api_approvePayout(claimId);
     }),
@@ -113,18 +131,26 @@ export const apiService = {
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .withFailureHandler(reject)
         .api_approvePayout(claimId, accountId);
     }),
 
   cancelMigration: (): Promise<{ ok: boolean }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => resolve({ ok: true }), 300);
         return;
       }
-      google.script.run.withSuccessHandler(resolve).api_cancelMigration();
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
+        .api_cancelMigration();
     }),
 
   closeSemester: (): Promise<{
@@ -133,7 +159,7 @@ export const apiService = {
     next?: string;
     ready_for_migration?: boolean;
   }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(
           () =>
@@ -147,20 +173,28 @@ export const apiService = {
         );
         return;
       }
-      google.script.run.withSuccessHandler(resolve).api_closeSemester();
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
+        .api_closeSemester();
     }),
 
   confirmIncome: (
     incomeId: string,
     payload: { accountId?: string; note?: string }
   ): Promise<{ success: boolean }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => resolve({ success: true }), 300);
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .api_confirmIncome(incomeId, payload);
     }),
 
@@ -169,7 +203,7 @@ export const apiService = {
     entityId: string,
     newSemester: string
   ): Promise<{ ok: boolean; from: string; to: string }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(
           () => resolve({ from: "SEM A", ok: true, to: newSemester }),
@@ -178,18 +212,24 @@ export const apiService = {
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .api_correctSemester(entityType, entityId, newSemester);
     }),
 
   deactivateAccount: (accountId: string): Promise<{ success: boolean }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => resolve({ success: true }), 300);
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .api_deactivateAccount(accountId);
     }),
 
@@ -198,7 +238,7 @@ export const apiService = {
     action: string,
     payload: BudgetDecisionPayload
   ): Promise<{ request_id: string; from: string; to: string }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => {
           resolve({
@@ -210,7 +250,10 @@ export const apiService = {
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .api_decisionBudgetRequest(entityId, action, payload);
     }),
 
@@ -223,7 +266,10 @@ export const apiService = {
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .withFailureHandler(reject)
         .api_deleteOrphanedReceipt(receiptId);
     }),
@@ -231,7 +277,7 @@ export const apiService = {
   discardBudgetRequest: (
     requestId: string
   ): Promise<{ request_id: string; status: string }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => {
           resolve({ request_id: requestId, status: "WITHDRAWN" });
@@ -239,7 +285,10 @@ export const apiService = {
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .api_discardBudgetRequest(requestId);
     }),
 
@@ -253,25 +302,33 @@ export const apiService = {
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .withFailureHandler(reject)
         .api_editClaim(payload);
     }),
 
   executeMigration: (): Promise<{ ok: boolean; stage: string }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => resolve({ ok: true, stage: "REVIEW" }), 500);
         return;
       }
-      google.script.run.withSuccessHandler(resolve).api_executeMigration();
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
+        .api_executeMigration();
     }),
 
   exportCsv: (
     reportType: ReportType,
     filters?: ReportFilters
   ): Promise<string> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => {
           resolve(
@@ -281,14 +338,17 @@ export const apiService = {
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .api_exportCsv(reportType, filters || {});
     }),
 
   // ─── Finance Accounts ───
 
   getAccounts: (): Promise<FinanceAccount[]> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => {
           resolve([
@@ -306,16 +366,26 @@ export const apiService = {
         }, 300);
         return;
       }
-      google.script.run.withSuccessHandler(resolve).api_getAccounts();
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
+        .api_getAccounts();
     }),
 
   getAdjustments: (): Promise<AccountAdjustment[]> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => resolve([]), 300);
         return;
       }
-      google.script.run.withSuccessHandler(resolve).api_getAdjustments();
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
+        .api_getAdjustments();
     }),
 
   getClaimsQueue: (filters?: ClaimQueueFilters): Promise<ClaimQueueItem[]> =>
@@ -347,7 +417,10 @@ export const apiService = {
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .withFailureHandler(reject)
         .api_getClaimsQueue(filters || {});
     }),
@@ -355,7 +428,7 @@ export const apiService = {
   // ─── Dashboard ───
 
   getDashboardSummary: (): Promise<DashboardSummary> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => {
           resolve({
@@ -413,11 +486,16 @@ export const apiService = {
         }, 300);
         return;
       }
-      google.script.run.withSuccessHandler(resolve).api_getDashboardSummary();
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
+        .api_getDashboardSummary();
     }),
 
   getMembers: (): Promise<Member[]> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => {
           resolve([
@@ -427,11 +505,16 @@ export const apiService = {
         }, 300);
         return;
       }
-      google.script.run.withSuccessHandler(resolve).api_getMembers();
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
+        .api_getMembers();
     }),
 
   getMigrationPreview: (): Promise<MigrationPreview> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => {
           resolve({
@@ -481,11 +564,16 @@ export const apiService = {
         }, 300);
         return;
       }
-      google.script.run.withSuccessHandler(resolve).api_getMigrationPreview();
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
+        .api_getMigrationPreview();
     }),
 
   getMigrationSelections: (): Promise<MigrationSelections> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(
           () =>
@@ -502,23 +590,31 @@ export const apiService = {
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .api_getMigrationSelections();
     }),
 
   // ─── Annual Migration ───
 
   getMigrationState: (): Promise<MigrationState | null> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => resolve(null), 300);
         return;
       }
-      google.script.run.withSuccessHandler(resolve).api_getMigrationState();
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
+        .api_getMigrationState();
     }),
 
   getMyBudgetRequests: (): Promise<BudgetRequest[]> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => {
           resolve([
@@ -552,7 +648,12 @@ export const apiService = {
         }, 300);
         return;
       }
-      google.script.run.withSuccessHandler(resolve).api_getMyBudgetRequests();
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
+        .api_getMyBudgetRequests();
     }),
 
   getMyClaims: (): Promise<MyClaimsResponse> =>
@@ -599,13 +700,16 @@ export const apiService = {
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .withFailureHandler(reject)
         .api_getMyClaims();
     }),
 
   getPendingBudgetRequests: (): Promise<PendingBudgetRequest[]> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => {
           resolve([
@@ -623,28 +727,41 @@ export const apiService = {
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .api_getPendingBudgetRequests();
     }),
 
   getPendingIncome: (): Promise<IncomeItem[]> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => resolve([]), 300);
         return;
       }
-      google.script.run.withSuccessHandler(resolve).api_getPendingIncome();
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
+        .api_getPendingIncome();
     }),
 
   // ─── Payout Queue ───
 
   getQueuedPayouts: (): Promise<PayoutQueueItem[]> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => resolve([]), 300);
         return;
       }
-      google.script.run.withSuccessHandler(resolve).api_getQueuedPayouts();
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
+        .api_getQueuedPayouts();
     }),
 
   // ─── Reports ───
@@ -653,7 +770,7 @@ export const apiService = {
     reportType: ReportType,
     filters?: ReportFilters
   ): Promise<ReportData> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => {
           const mockRows = (() => {
@@ -728,7 +845,10 @@ export const apiService = {
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .api_getReportsData(reportType, filters || {});
     }),
 
@@ -742,7 +862,7 @@ export const apiService = {
     blockers: any[];
     blocker_count: number;
   }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => {
           resolve({
@@ -756,36 +876,49 @@ export const apiService = {
         }, 300);
         return;
       }
-      google.script.run.withSuccessHandler(resolve).api_getSemesterStatus();
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
+        .api_getSemesterStatus();
     }),
 
   getTransfers: (): Promise<AccountTransfer[]> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => resolve([]), 300);
         return;
       }
-      google.script.run.withSuccessHandler(resolve).api_getTransfers();
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
+        .api_getTransfers();
     }),
 
   markPayoutSent: (
     payoutId: string,
     payload: { txnReference: string; amount?: number; accountId?: string }
   ): Promise<{ success: boolean }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => resolve({ success: true }), 300);
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .api_markPayoutSent(payoutId, payload);
     }),
 
   reactivateMember: (
     userId: string
   ): Promise<{ user_id: string; active: boolean }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => {
           resolve({ active: true, user_id: userId });
@@ -793,7 +926,10 @@ export const apiService = {
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .api_reactivateMember(userId);
     }),
 
@@ -805,13 +941,16 @@ export const apiService = {
     direction: string;
     reason: string;
   }): Promise<{ success: boolean }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => resolve({ success: true }), 300);
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .api_recordAdjustment(payload);
     }),
 
@@ -820,7 +959,7 @@ export const apiService = {
   recordIncome: (
     payload: RecordIncomePayload
   ): Promise<{ success: boolean; income_id?: string }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(
           () => resolve({ income_id: "INC-MOCK", success: true }),
@@ -828,20 +967,28 @@ export const apiService = {
         );
         return;
       }
-      google.script.run.withSuccessHandler(resolve).api_recordIncome(payload);
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
+        .api_recordIncome(payload);
     }),
 
   recordPayoutFailed: (
     payoutId: string,
     reason: string
   ): Promise<{ success: boolean }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => resolve({ success: true }), 300);
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .api_recordPayoutFailed(payoutId, reason);
     }),
 
@@ -851,12 +998,17 @@ export const apiService = {
     amount: number;
     reason: string;
   }): Promise<{ success: boolean }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => resolve({ success: true }), 300);
         return;
       }
-      google.script.run.withSuccessHandler(resolve).api_recordTransfer(payload);
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
+        .api_recordTransfer(payload);
     }),
 
   rejectClaim: (claimId: string, reason: string): Promise<TransitionResult> =>
@@ -870,7 +1022,10 @@ export const apiService = {
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .withFailureHandler(reject)
         .api_rejectClaim(claimId, reason);
     }),
@@ -879,13 +1034,16 @@ export const apiService = {
     incomeId: string,
     note?: string
   ): Promise<{ success: boolean }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => resolve({ success: true }), 300);
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .api_rejectIncome(incomeId, note);
     }),
 
@@ -893,13 +1051,16 @@ export const apiService = {
     accountId: string,
     name: string
   ): Promise<{ success: boolean }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => resolve({ success: true }), 300);
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .api_renameAccount(accountId, name);
     }),
 
@@ -907,13 +1068,16 @@ export const apiService = {
     incomeId: string,
     note?: string
   ): Promise<{ success: boolean }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => resolve({ success: true }), 300);
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .api_requestIncomeInfo(incomeId, note);
     }),
 
@@ -928,7 +1092,10 @@ export const apiService = {
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .withFailureHandler(reject)
         .api_requestInfo(claimId, reason);
     }),
@@ -986,24 +1153,32 @@ export const apiService = {
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .withFailureHandler(reject)
         .api_resubmitClaim(claimId);
     }),
 
   retryPayout: (payoutId: string): Promise<{ success: boolean }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => resolve({ success: true }), 300);
         return;
       }
-      google.script.run.withSuccessHandler(resolve).api_retryPayout(payoutId);
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
+        .api_retryPayout(payoutId);
     }),
 
   saveBudgetRequestDraft: (
     payload: BudgetRequestDraftPayload
   ): Promise<{ request_id: string; status: string }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => {
           resolve({ request_id: "BUDGET-MOCK", status: "DRAFT" });
@@ -1011,14 +1186,17 @@ export const apiService = {
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .api_saveBudgetRequestDraft(payload);
     }),
 
   saveClaimDraft: (
     payload: ClaimDraftPayload
   ): Promise<{ claim_id: string; status: string }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => {
           resolve({
@@ -1028,19 +1206,27 @@ export const apiService = {
         }, 300);
         return;
       }
-      google.script.run.withSuccessHandler(resolve).api_saveClaimDraft(payload);
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
+        .api_saveClaimDraft(payload);
     }),
 
   setMigrationSelections: (
     selections: MigrationSelections
   ): Promise<{ ok: boolean; stage: string }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => resolve({ ok: true, stage: "REVIEW" }), 300);
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .api_setMigrationSelections(selections);
     }),
 
@@ -1049,7 +1235,7 @@ export const apiService = {
     stage: string;
     year_label: string;
   }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(
           () =>
@@ -1058,13 +1244,18 @@ export const apiService = {
         );
         return;
       }
-      google.script.run.withSuccessHandler(resolve).api_startMigration();
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
+        .api_startMigration();
     }),
 
   submitBudgetRequest: (
     requestId: string
   ): Promise<{ request_id: string; status: string }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => {
           resolve({ request_id: requestId, status: "PENDING" });
@@ -1072,7 +1263,10 @@ export const apiService = {
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .api_submitBudgetRequest(requestId);
     }),
 
@@ -1086,7 +1280,10 @@ export const apiService = {
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .withFailureHandler(reject)
         .api_submitClaim(payload);
     }),
@@ -1094,7 +1291,7 @@ export const apiService = {
   submitDraftClaim: (
     claimId: string
   ): Promise<{ claim_id: string; status: string }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => {
           resolve({ claim_id: claimId, status: "SUBMITTED" });
@@ -1102,18 +1299,24 @@ export const apiService = {
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .api_submitDraftClaim(claimId);
     }),
 
   suggestSemester: (expenseDate: string): Promise<{ semester: string }> =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => resolve({ semester: "SEM A" }), 300);
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .api_suggestSemester(expenseDate);
     }),
 
@@ -1134,7 +1337,10 @@ export const apiService = {
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .withFailureHandler(reject)
         .api_uploadReceipt(
           fileName,
@@ -1157,7 +1363,10 @@ export const apiService = {
         return;
       }
       google.script.run
-        .withSuccessHandler(resolve)
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
         .withFailureHandler(reject)
         .api_verifyClaim(claimId, payload || {});
     }),

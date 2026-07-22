@@ -12,13 +12,21 @@ var allowedReceiptMimes = [
   "image/gif",
   "application/pdf",
 ];
-var maxReceiptBytes = 5 * 1024 * 1024;
+var maxReceiptBytes = 3 * 1024 * 1024;
 
 function doGet(e) {
   return HtmlService.createTemplateFromFile("index")
     .evaluate()
     .setTitle("Finance Workspace")
     .addMetaTag("viewport", "width=device-width, initial-scale=1");
+}
+
+function _ok(data) {
+  return { ok: true, data: data };
+}
+
+function _err(code, message, details) {
+  return { ok: false, error: { code: code, message: message, details: details || {} } };
 }
 
 function api_resolveSession() {
@@ -57,7 +65,7 @@ function api_resolveSession() {
 function api_getMyClaims() {
   var email = Session.getActiveUser().getEmail();
   if (!email) {
-    throw new Error("User not authenticated (no active session)");
+    return _err("NOT_AUTHENTICATED", "User not authenticated (no active session)");
   }
 
   var user = _resolveUser(email);
@@ -65,7 +73,7 @@ function api_getMyClaims() {
     user.isUnknown ||
     (user.role !== ROLES.COMMITTEE && user.role !== ROLES.TREASURER)
   ) {
-    return { budgetLines: [], claims: [], requests: [] };
+    return _ok({ budgetLines: [], claims: [], requests: [] });
   }
 
   var claimsSheet = getSheet_(TABS.EXPENSE_CLAIMS);
@@ -107,7 +115,7 @@ function api_getMyClaims() {
   }
 
   var c = COLS.ExpenseClaims;
-  return {
+  return _ok({
     budgetLines,
     claims: claimsRows.map((r) => ({
       claim_id: r.values[c.claim_id - 1],
@@ -123,7 +131,7 @@ function api_getMyClaims() {
       submitted_at: r.values[COLS.BudgetRequests.submitted_at - 1],
       title: r.values[COLS.BudgetRequests.title - 1],
     })),
-  };
+  });
 }
 
 /**
@@ -140,21 +148,21 @@ function api_uploadReceipt(
 ) {
   var email = Session.getActiveUser().getEmail();
   if (!email) {
-    throw new Error("Not authenticated");
+    return _err("NOT_AUTHENTICATED", "Not authenticated");
   }
   var user = _resolveUser(email);
   if (user.isUnknown) {
-    throw new Error("Unregistered user");
+    return _err("NOT_AUTHENTICATED", "Unregistered user");
   }
 
   var bytes = Utilities.base64Decode(base64Data);
 
   if (bytes.length > maxReceiptBytes) {
-    throw new Error("File exceeds 5 MB limit.");
+    return _err("INVALID_PARAMETER", "File exceeds 3 MB limit.");
   }
 
   if (allowedReceiptMimes.indexOf(mimeType) === -1) {
-    throw new Error("Unsupported file type. Allowed: PNG, JPEG, GIF, PDF.");
+    return _err("INVALID_PARAMETER", "Unsupported file type. Allowed: PNG, JPEG, GIF, PDF.");
   }
 
   var sha256 = _sha256Hex(bytes);
@@ -171,9 +179,9 @@ function api_uploadReceipt(
   for (var i = 1; i < receiptData.length; i++) {
     if (receiptData[i][hashCol] === sha256) {
       if (receiptData[i][uploaderCol] === user.userId) {
-        return { receiptId: receiptData[i][idCol] };
+        return _ok({ receiptId: receiptData[i][idCol] });
       }
-      throw new Error("Duplicate receipt detected (uploaded by another user).");
+      return _err("UNAUTHORIZED", "Duplicate receipt detected (uploaded by another user).");
     }
     if (
       vendor &&
@@ -221,7 +229,7 @@ function api_uploadReceipt(
     Number(receiptTotal),
     fileLink,
   ]);
-  return { receiptId };
+  return _ok({ receiptId });
 }
 
 /**
@@ -232,20 +240,20 @@ function api_uploadReceipt(
 function api_deleteOrphanedReceipt(receiptId) {
   var email = Session.getActiveUser().getEmail();
   if (!email) {
-    throw new Error("Not authenticated");
+    return _err("NOT_AUTHENTICATED", "Not authenticated");
   }
   var user = _resolveUser(email);
   if (user.isUnknown) {
-    throw new Error("Unregistered user");
+    return _err("NOT_AUTHENTICATED", "Unregistered user");
   }
 
   var receiptRow = Engine._loadRow("Receipt", receiptId);
   if (!receiptRow) {
-    throw new Error("Receipt not found");
+    return _err("NOT_FOUND", "Receipt not found");
   }
 
   if (receiptRow.values[COLS.Receipts.uploaded_by - 1] !== user.userId) {
-    throw new Error("Unauthorized: only the uploader can delete this receipt");
+    return _err("UNAUTHORIZED", "Unauthorized: only the uploader can delete this receipt");
   }
 
   var driveFileId = receiptRow.values[COLS.Receipts.drive_file_id - 1];
@@ -260,7 +268,7 @@ function api_deleteOrphanedReceipt(receiptId) {
   var sheet = receiptRow.sheet || getSheet_(TABS.RECEIPTS);
   sheet.deleteRow(receiptRow.rowIndex);
   Audit.append(user.userId, "Receipt", receiptId, "DELETE_ORPHANED", {});
-  return { success: true };
+  return _ok({ success: true });
 }
 
 /**
@@ -269,14 +277,14 @@ function api_deleteOrphanedReceipt(receiptId) {
 function api_submitClaim(payload) {
   var email = Session.getActiveUser().getEmail();
   if (!email) {
-    throw new Error("Not authenticated");
+    return _err("NOT_AUTHENTICATED", "Not authenticated");
   }
   var user = _resolveUser(email);
   if (user.isUnknown) {
-    throw new Error("Unregistered user");
+    return _err("NOT_AUTHENTICATED", "Unregistered user");
   }
   if (!payload.claimantId) {
-    throw new Error("Claimant is required");
+    return _err("INVALID_PARAMETER", "Claimant is required");
   }
 
   if (
@@ -286,7 +294,7 @@ function api_submitClaim(payload) {
       payload.uuid
     )
   ) {
-    return { message: "Already processed", success: true }; // Idempotent
+    return _ok({ message: "Already processed", success: true }); // Idempotent
   }
 
   var claimId = Ids.nextId("ExpenseClaim");
@@ -344,7 +352,7 @@ function api_submitClaim(payload) {
     );
   } catch (e) {}
 
-  return { claimId, success: true };
+  return _ok({ claimId, success: true });
 }
 
 // Helpers
@@ -432,11 +440,11 @@ function _appendRow(sheet, values) {
 function api_editClaim(payload) {
   var email = Session.getActiveUser().getEmail();
   if (!email) {
-    throw new Error("Not authenticated");
+    return _err("NOT_AUTHENTICATED", "Not authenticated");
   }
   var user = _resolveUser(email);
   if (user.isUnknown) {
-    throw new Error("Unregistered user");
+    return _err("NOT_AUTHENTICATED", "Unregistered user");
   }
 
   var sheet = getSheet_(TABS.EXPENSE_CLAIMS);
@@ -448,17 +456,17 @@ function api_editClaim(payload) {
     if (rows[i][c.claim_id - 1] === payload.claimId) {
       rowIndex = i + 1; // 1-indexed for getRange
       if (rows[i][c.claimant_id - 1] !== user.userId) {
-        throw new Error("Unauthorized");
+        return _err("UNAUTHORIZED", "Unauthorized");
       }
       if (rows[i][c.status - 1] !== STATUS.ExpenseClaim.SUBMITTED) {
-        throw new Error("Only SUBMITTED claims can be edited.");
+        return _err("ILLEGAL_STATE", "Only SUBMITTED claims can be edited.");
       }
       break;
     }
   }
 
   if (rowIndex === -1) {
-    throw new Error("Claim not found");
+    return _err("NOT_FOUND", "Claim not found");
   }
 
   // Update total amount and notes
@@ -481,7 +489,7 @@ function api_editClaim(payload) {
   Audit.append(user.userId, "ExpenseClaim", payload.claimId, "UPDATE", {
     amount: total,
   });
-  return { success: true };
+  return _ok({ success: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -494,7 +502,7 @@ function api_editClaim(payload) {
 function api_getMyBudgetRequests() {
   var email = Session.getActiveUser().getEmail();
   if (!email) {
-    throw new Error("User not authenticated (no active session)");
+    return _err("NOT_AUTHENTICATED", "User not authenticated (no active session)");
   }
 
   var user = _resolveUser(email);
@@ -502,7 +510,7 @@ function api_getMyBudgetRequests() {
     user.isUnknown ||
     (user.role !== ROLES.COMMITTEE && user.role !== ROLES.TREASURER)
   ) {
-    return [];
+    return _ok([]);
   }
 
   var reqSheet = getSheet_(TABS.BUDGET_REQUESTS);
@@ -515,7 +523,7 @@ function api_getMyBudgetRequests() {
   var lineC = COLS.BudgetRequestLines;
   var lineSheet = getSheet_(TABS.BUDGET_REQUEST_LINES);
 
-  return reqRows.map((r) => {
+  return _ok(reqRows.map((r) => {
     var id = r.values[c.request_id - 1];
     var lineRows = Engine._findRowsByColumn(lineSheet, lineC.request_id, id);
     return {
@@ -541,7 +549,7 @@ function api_getMyBudgetRequests() {
       submitted_at: r.values[c.submitted_at - 1],
       title: r.values[c.title - 1],
     };
-  });
+  }));
 }
 
 /**
@@ -550,11 +558,11 @@ function api_getMyBudgetRequests() {
 function api_saveBudgetRequestDraft(payload) {
   var email = Session.getActiveUser().getEmail();
   if (!email) {
-    throw new Error("Not authenticated");
+    return _err("NOT_AUTHENTICATED", "Not authenticated");
   }
   var user = _resolveUser(email);
   if (user.isUnknown) {
-    throw new Error("Unregistered user");
+    return _err("NOT_AUTHENTICATED", "Unregistered user");
   }
 
   var now = Audit._nowIso();
@@ -574,7 +582,7 @@ function api_saveBudgetRequestDraft(payload) {
         curStatus !== STATUS.BudgetRequest.DRAFT &&
         curStatus !== STATUS.BudgetRequest.NEEDS_INFO
       ) {
-        throw new Error("Cannot edit a " + curStatus + " budget request");
+        return _err("ILLEGAL_STATE", "Cannot edit a " + curStatus + " budget request");
       }
       requestId = payload.request_id;
     }
@@ -654,7 +662,7 @@ function api_saveBudgetRequestDraft(payload) {
     existingRow ? "DRAFT_UPDATE" : "DRAFT_CREATE",
     {}
   );
-  return { request_id: requestId, status: STATUS.BudgetRequest.DRAFT };
+  return _ok({ request_id: requestId, status: STATUS.BudgetRequest.DRAFT });
 }
 
 /**
@@ -663,16 +671,16 @@ function api_saveBudgetRequestDraft(payload) {
 function api_submitBudgetRequest(requestId) {
   var email = Session.getActiveUser().getEmail();
   if (!email) {
-    throw new Error("Not authenticated");
+    return _err("NOT_AUTHENTICATED", "Not authenticated");
   }
   var user = _resolveUser(email);
   if (user.isUnknown) {
-    throw new Error("Unregistered user");
+    return _err("NOT_AUTHENTICATED", "Unregistered user");
   }
 
   var row = Engine._loadRow("BudgetRequest", requestId);
   if (!row) {
-    throw new Error("Budget request not found");
+    return _err("NOT_FOUND", "Budget request not found");
   }
 
   var c = COLS.BudgetRequests;
@@ -683,7 +691,7 @@ function api_submitBudgetRequest(requestId) {
   } else if (curStatus === STATUS.BudgetRequest.NEEDS_INFO) {
     action = "RESUBMIT";
   } else {
-    throw new Error("Cannot submit a " + curStatus + " budget request");
+    return _err("ILLEGAL_STATE", "Cannot submit a " + curStatus + " budget request");
   }
 
   var result = Engine.transition(
@@ -694,14 +702,14 @@ function api_submitBudgetRequest(requestId) {
     {}
   );
   if (!result.ok) {
-    throw new Error(result.reason);
+    return _err("ENGINE_ERROR", result.reason);
   }
 
-  return {
+  return _ok({
     request_id: requestId,
     status: result.to,
     submitted_at: Audit._nowIso(),
-  };
+  });
 }
 
 /**
@@ -710,11 +718,11 @@ function api_submitBudgetRequest(requestId) {
 function api_discardBudgetRequest(requestId) {
   var email = Session.getActiveUser().getEmail();
   if (!email) {
-    throw new Error("Not authenticated");
+    return _err("NOT_AUTHENTICATED", "Not authenticated");
   }
   var user = _resolveUser(email);
   if (user.isUnknown) {
-    throw new Error("Unregistered user");
+    return _err("NOT_AUTHENTICATED", "Unregistered user");
   }
 
   var result = Engine.transition(
@@ -725,9 +733,9 @@ function api_discardBudgetRequest(requestId) {
     {}
   );
   if (!result.ok) {
-    throw new Error(result.reason);
+    return _err("ENGINE_ERROR", result.reason);
   }
-  return { request_id: requestId, status: result.to };
+  return _ok({ request_id: requestId, status: result.to });
 }
 
 /**
@@ -736,11 +744,11 @@ function api_discardBudgetRequest(requestId) {
 function api_getPendingBudgetRequests() {
   var email = Session.getActiveUser().getEmail();
   if (!email) {
-    throw new Error("Not authenticated");
+    return _err("NOT_AUTHENTICATED", "Not authenticated");
   }
   var user = _resolveUser(email);
   if (user.isUnknown || user.role !== ROLES.TREASURER) {
-    throw new Error("Unauthorized");
+    return _err("UNAUTHORIZED", "Unauthorized");
   }
 
   var sheet = getSheet_(TABS.BUDGET_REQUESTS);
@@ -764,7 +772,7 @@ function api_getPendingBudgetRequests() {
       total_requested: amount,
     });
   }
-  return out;
+  return _ok(out);
 }
 
 /**
@@ -775,11 +783,11 @@ function api_getPendingBudgetRequests() {
 function api_decisionBudgetRequest(entityId, action, payload) {
   var email = Session.getActiveUser().getEmail();
   if (!email) {
-    throw new Error("Not authenticated");
+    return _err("NOT_AUTHENTICATED", "Not authenticated");
   }
   var user = _resolveUser(email);
   if (user.isUnknown || user.role !== ROLES.TREASURER) {
-    throw new Error("Unauthorized");
+    return _err("UNAUTHORIZED", "Unauthorized");
   }
 
   var result = Engine.transition(
@@ -790,9 +798,9 @@ function api_decisionBudgetRequest(entityId, action, payload) {
     payload || {}
   );
   if (!result.ok) {
-    throw new Error(result.reason);
+    return _err("ENGINE_ERROR", result.reason);
   }
-  return { from: result.from, request_id: entityId, to: result.to };
+  return _ok({ from: result.from, request_id: entityId, to: result.to });
 }
 
 // ---------------------------------------------------------------------------
@@ -854,7 +862,7 @@ function _findVaultByStudentId(studentId) {
  * List all members (Users with role=MEMBER). Excludes Vault PII (SID, payout details).
  */
 function api_getMembers() {
-  _requireOperator();
+  try { _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
 
   var sheet = getSheet_(TABS.USERS);
   var values = sheet.getDataRange().getValues();
@@ -872,28 +880,30 @@ function api_getMembers() {
       });
     }
   }
-  return out;
+  return _ok(out);
 }
 
 /**
  * Add a new member with unique SID. Does not create login access (email blank).
  */
 function api_addMember(payload) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (!(payload.student_id && String(payload.student_id).trim())) {
-    throw new Error("Student ID is required");
+    return _err("INVALID_PARAMETER", "Student ID is required");
   }
   if (!(payload.display_name && String(payload.display_name).trim())) {
-    throw new Error("Display name is required");
+    return _err("INVALID_PARAMETER", "Display name is required");
   }
 
   var existing = _findVaultByStudentId(payload.student_id);
   if (existing) {
     var user = _findUserById(existing.values[COLS.Vault.user_id - 1]);
     if (user && user.values[COLS.Users.active - 1] === true) {
-      throw new Error("Active member with this SID already exists");
+      return _err("ILLEGAL_STATE", "Active member with this SID already exists");
     }
-    throw new Error(
+    return _err(
+      "ILLEGAL_STATE",
       "Inactive member with this SID already exists. Use reactivate instead."
     );
   }
@@ -934,30 +944,31 @@ function api_addMember(payload) {
   Audit.append(operator.userId, "User", userId, "MEMBER_CREATE", {
     sid: String(payload.student_id).trim(),
   });
-  return { active: true, display_name: displayName, user_id: userId };
+  return _ok({ active: true, display_name: displayName, user_id: userId });
 }
 
 /**
  * Reactivate an inactive member by user_id.
  */
 function api_reactivateMember(userId) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   var user = _findUserById(userId);
   if (!user) {
-    throw new Error("Member not found");
+    return _err("NOT_FOUND", "Member not found");
   }
   if (user.values[COLS.Users.role - 1] !== ROLES.MEMBER) {
-    throw new Error("User is not a member");
+    return _err("ILLEGAL_STATE", "User is not a member");
   }
   if (user.values[COLS.Users.active - 1] === true) {
-    throw new Error("Member is already active");
+    return _err("ILLEGAL_STATE", "Member is already active");
   }
 
   getSheet_(TABS.USERS)
     .getRange(user.rowIndex, COLS.Users.active)
     .setValue(true);
   Audit.append(operator.userId, "User", userId, "MEMBER_REACTIVATE", {});
-  return { active: true, user_id: userId };
+  return _ok({ active: true, user_id: userId });
 }
 
 // ---------------------------------------------------------------------------
@@ -968,29 +979,30 @@ function api_reactivateMember(userId) {
  * Save a claim as a DRAFT. operator is the current user; claimant is the member.
  */
 function api_saveClaimDraft(payload) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (!payload.claimantId) {
-    throw new Error("Claimant is required");
+    return _err("INVALID_PARAMETER", "Claimant is required");
   }
   if (!payload.uuid) {
-    throw new Error("uuid is required");
+    return _err("INVALID_PARAMETER", "uuid is required");
   }
 
   if (payload.claimId) {
     var existing = Engine._loadRow("ExpenseClaim", payload.claimId);
     if (!existing) {
-      throw new Error("Claim not found");
+      return _err("NOT_FOUND", "Claim not found");
     }
     if (
       existing.values[COLS.ExpenseClaims.created_by - 1] !== operator.userId
     ) {
-      throw new Error("Unauthorized");
+      return _err("UNAUTHORIZED", "Unauthorized");
     }
     if (
       existing.values[COLS.ExpenseClaims.status - 1] !==
       STATUS.ExpenseClaim.DRAFT
     ) {
-      throw new Error("Only DRAFT claims can be updated as draft");
+      return _err("ILLEGAL_STATE", "Only DRAFT claims can be updated as draft");
     }
   }
 
@@ -1112,7 +1124,7 @@ function api_saveClaimDraft(payload) {
     payload.claimId ? "DRAFT_UPDATE" : "DRAFT_CREATE",
     { uuid: payload.uuid }
   );
-  return { claim_id: claimId, status: STATUS.ExpenseClaim.DRAFT };
+  return _ok({ claim_id: claimId, status: STATUS.ExpenseClaim.DRAFT });
 }
 
 /**
@@ -1121,17 +1133,18 @@ function api_saveClaimDraft(payload) {
  * Does not remove existing lines — only appends new ClaimLineItems.
  */
 function api_attachReceipts(claimId, receiptIds) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (!(receiptIds && Array.isArray(receiptIds)) || receiptIds.length === 0) {
-    throw new Error("receiptIds array is required");
+    return _err("INVALID_PARAMETER", "receiptIds array is required");
   }
 
   var existing = Engine._loadRow("ExpenseClaim", claimId);
   if (!existing) {
-    throw new Error("Claim not found");
+    return _err("NOT_FOUND", "Claim not found");
   }
   if (existing.values[COLS.ExpenseClaims.created_by - 1] !== operator.userId) {
-    throw new Error("Unauthorized");
+    return _err("UNAUTHORIZED", "Unauthorized");
   }
 
   var attachableStatuses = [
@@ -1142,7 +1155,8 @@ function api_attachReceipts(claimId, receiptIds) {
   ];
   var claimStatus = existing.values[COLS.ExpenseClaims.status - 1];
   if (attachableStatuses.indexOf(claimStatus) === -1) {
-    throw new Error(
+    return _err(
+      "ILLEGAL_STATE",
       "Receipts can only be attached to DRAFT, SUBMITTED, NEEDS_INFO, or VERIFIED claims"
     );
   }
@@ -1174,25 +1188,26 @@ function api_attachReceipts(claimId, receiptIds) {
   Audit.append(operator.userId, "ExpenseClaim", claimId, "RECEIPTS_ATTACHED", {
     receiptIds,
   });
-  return { claim_id: claimId, status: claimStatus };
+  return _ok({ claim_id: claimId, status: claimStatus });
 }
 
 /**
  * Submit a DRAFT claim for review.
  */
 function api_submitDraftClaim(claimId) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   var existing = Engine._loadRow("ExpenseClaim", claimId);
   if (!existing) {
-    throw new Error("Claim not found");
+    return _err("NOT_FOUND", "Claim not found");
   }
   if (existing.values[COLS.ExpenseClaims.created_by - 1] !== operator.userId) {
-    throw new Error("Unauthorized");
+    return _err("UNAUTHORIZED", "Unauthorized");
   }
   if (
     existing.values[COLS.ExpenseClaims.status - 1] !== STATUS.ExpenseClaim.DRAFT
   ) {
-    throw new Error("Only DRAFT claims can be submitted");
+    return _err("ILLEGAL_STATE", "Only DRAFT claims can be submitted");
   }
 
   var result = Engine.transition(
@@ -1203,13 +1218,13 @@ function api_submitDraftClaim(claimId) {
     {}
   );
   if (!result.ok) {
-    throw new Error(result.reason);
+    return _err("ENGINE_ERROR", result.reason);
   }
-  return {
+  return _ok({
     claim_id: claimId,
     status: result.to,
     submitted_at: Audit._nowIso(),
-  };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1217,7 +1232,8 @@ function api_submitDraftClaim(claimId) {
 // ---------------------------------------------------------------------------
 
 function api_getClaimsQueue(filters) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   filters = filters || {};
 
   var sheet = getSheet_(TABS.EXPENSE_CLAIMS);
@@ -1295,14 +1311,15 @@ function api_getClaimsQueue(filters) {
       verified_at: values[i][c.verified_at - 1],
     });
   }
-  return out;
+  return _ok(out);
 }
 
 /**
  * Verify a SUBMITTED claim. Calls Engine.transition with VERIFY action.
  */
 function api_verifyClaim(claimId, payload) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   payload = payload || {};
 
   var result = Engine.transition(
@@ -1313,18 +1330,19 @@ function api_verifyClaim(claimId, payload) {
     payload
   );
   if (!result.ok) {
-    throw new Error(result.reason);
+    return _err("ENGINE_ERROR", result.reason);
   }
-  return { claim_id: claimId, from: result.from, to: result.to };
+  return _ok({ claim_id: claimId, from: result.from, to: result.to });
 }
 
 /**
  * Reject a claim with a required reason. Calls Engine.transition with REJECT action.
  */
 function api_rejectClaim(claimId, reason) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (!(reason && String(reason).trim())) {
-    throw new Error("Rejection reason is required");
+    return _err("INVALID_PARAMETER", "Rejection reason is required");
   }
 
   var result = Engine.transition(
@@ -1335,18 +1353,19 @@ function api_rejectClaim(claimId, reason) {
     { decision_note: reason }
   );
   if (!result.ok) {
-    throw new Error(result.reason);
+    return _err("ENGINE_ERROR", result.reason);
   }
-  return { claim_id: claimId, from: result.from, to: result.to };
+  return _ok({ claim_id: claimId, from: result.from, to: result.to });
 }
 
 /**
  * Request more information on a SUBMITTED claim. Calls Engine.transition with REQUEST_INFO action.
  */
 function api_requestInfo(claimId, reason) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (!(reason && String(reason).trim())) {
-    throw new Error("Request note is required");
+    return _err("INVALID_PARAMETER", "Request note is required");
   }
 
   var result = Engine.transition(
@@ -1357,23 +1376,24 @@ function api_requestInfo(claimId, reason) {
     { decision_note: reason }
   );
   if (!result.ok) {
-    throw new Error(result.reason);
+    return _err("ENGINE_ERROR", result.reason);
   }
-  return { claim_id: claimId, from: result.from, to: result.to };
+  return _ok({ claim_id: claimId, from: result.from, to: result.to });
 }
 
 /**
  * Resubmit a NEEDS_INFO claim. Calls Engine.transition with RESUBMIT action.
  */
 function api_resubmitClaim(claimId) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
 
   var existing = Engine._loadRow("ExpenseClaim", claimId);
   if (!existing) {
-    throw new Error("Claim not found");
+    return _err("NOT_FOUND", "Claim not found");
   }
   if (existing.values[COLS.ExpenseClaims.created_by - 1] !== operator.userId) {
-    throw new Error("Unauthorized");
+    return _err("UNAUTHORIZED", "Unauthorized");
   }
 
   var result = Engine.transition(
@@ -1384,9 +1404,9 @@ function api_resubmitClaim(claimId) {
     {}
   );
   if (!result.ok) {
-    throw new Error(result.reason);
+    return _err("ENGINE_ERROR", result.reason);
   }
-  return { claim_id: claimId, from: result.from, to: result.to };
+  return _ok({ claim_id: claimId, from: result.from, to: result.to });
 }
 
 /**
@@ -1401,7 +1421,7 @@ function api_resubmitClaim(claimId) {
  * Available to all operators (COMMITTEE and TREASURER).
  */
 function api_getAccounts() {
-  _requireOperator();
+  try { _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   var sheet = getSheet_(TABS.FINANCE_ACCOUNTS);
   var values = sheet.getDataRange().getValues();
   var c = COLS.FinanceAccounts;
@@ -1422,19 +1442,20 @@ function api_getAccounts() {
       status: values[i][c.status - 1],
     });
   }
-  return out;
+  return _ok(out);
 }
 
 /**
  * Add a new Finance Account (Treasurer only).
  */
 function api_addAccount(payload) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (operator.role !== ROLES.TREASURER) {
-    throw new Error("Unauthorized");
+    return _err("UNAUTHORIZED", "Unauthorized");
   }
   if (!(payload.name && String(payload.name).trim())) {
-    throw new Error("Account name is required");
+    return _err("INVALID_PARAMETER", "Account name is required");
   }
 
   var accountId = Ids.nextId("FinanceAccount");
@@ -1457,33 +1478,34 @@ function api_addAccount(payload) {
     name: payload.name,
     openingBalance,
   });
-  return {
+  return _ok({
     account_id: accountId,
     name: String(payload.name).trim(),
     status: STATUS.FinanceAccount.ACTIVE,
-  };
+  });
 }
 
 /**
  * Rename an active Finance Account (Treasurer only).
  */
 function api_renameAccount(accountId, newName) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (operator.role !== ROLES.TREASURER) {
-    throw new Error("Unauthorized");
+    return _err("UNAUTHORIZED", "Unauthorized");
   }
   if (!(newName && String(newName).trim())) {
-    throw new Error("Account name is required");
+    return _err("INVALID_PARAMETER", "Account name is required");
   }
 
   var row = Engine._loadRow("FinanceAccount", accountId);
   if (!row) {
-    throw new Error("Account not found");
+    return _err("NOT_FOUND", "Account not found");
   }
   if (
     row.values[COLS.FinanceAccounts.status - 1] !== STATUS.FinanceAccount.ACTIVE
   ) {
-    throw new Error("Only active accounts can be renamed");
+    return _err("ILLEGAL_STATE", "Only active accounts can be renamed");
   }
 
   row.sheet
@@ -1492,26 +1514,27 @@ function api_renameAccount(accountId, newName) {
   Audit.append(operator.userId, "FinanceAccount", accountId, "RENAME", {
     newName,
   });
-  return { account_id: accountId, name: String(newName).trim() };
+  return _ok({ account_id: accountId, name: String(newName).trim() });
 }
 
 /**
  * Deactivate a Finance Account (Treasurer only). Historical data retained.
  */
 function api_deactivateAccount(accountId) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (operator.role !== ROLES.TREASURER) {
-    throw new Error("Unauthorized");
+    return _err("UNAUTHORIZED", "Unauthorized");
   }
 
   var row = Engine._loadRow("FinanceAccount", accountId);
   if (!row) {
-    throw new Error("Account not found");
+    return _err("NOT_FOUND", "Account not found");
   }
   if (
     row.values[COLS.FinanceAccounts.status - 1] !== STATUS.FinanceAccount.ACTIVE
   ) {
-    throw new Error("Account is already inactive");
+    return _err("ILLEGAL_STATE", "Account is already inactive");
   }
 
   var now = Audit._nowIso();
@@ -1522,7 +1545,7 @@ function api_deactivateAccount(accountId) {
     .getRange(row.rowIndex, COLS.FinanceAccounts.deactivated_at)
     .setValue(now);
   Audit.append(operator.userId, "FinanceAccount", accountId, "DEACTIVATE", {});
-  return { account_id: accountId, status: STATUS.FinanceAccount.INACTIVE };
+  return _ok({ account_id: accountId, status: STATUS.FinanceAccount.INACTIVE });
 }
 
 // ---------------------------------------------------------------------------
@@ -1534,15 +1557,16 @@ function api_deactivateAccount(accountId) {
  * The income starts as PENDING and must be confirmed by a Treasurer.
  */
 function api_recordIncome(payload) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (!payload.date) {
-    throw new Error("Date is required");
+    return _err("INVALID_PARAMETER", "Date is required");
   }
   if (!payload.categoryId) {
-    throw new Error("Category is required");
+    return _err("INVALID_PARAMETER", "Category is required");
   }
   if (!payload.amount || Number(payload.amount) <= 0) {
-    throw new Error("Amount must be positive");
+    return _err("INVALID_PARAMETER", "Amount must be positive");
   }
   if (!payload.accountId && payload.proposedAccountId) {
     payload.accountId = payload.proposedAccountId;
@@ -1560,16 +1584,17 @@ function api_recordIncome(payload) {
     payload.uuid || ""
   );
   if (!result.ok) {
-    throw new Error(result.reason || "Failed to record income");
+    return _err("ENGINE_ERROR", result.reason || "Failed to record income");
   }
-  return { income_id: result.incomeId, status: STATUS.Income.PENDING };
+  return _ok({ income_id: result.incomeId, status: STATUS.Income.PENDING });
 }
 
 /**
  * Get all pending income (Treasurer review queue).
  */
 function api_getPendingIncome() {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
 
   var sheet = getSheet_(TABS.INCOME);
   var values = sheet.getDataRange().getValues();
@@ -1598,65 +1623,68 @@ function api_getPendingIncome() {
       status,
     });
   }
-  return out;
+  return _ok(out);
 }
 
 /**
  * Confirm pending income and post to account balance (Treasurer only).
  */
 function api_confirmIncome(incomeId, accountId) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (operator.role !== ROLES.TREASURER) {
-    throw new Error("Unauthorized");
+    return _err("UNAUTHORIZED", "Unauthorized");
   }
 
   var result = Engine.confirmIncome(incomeId, accountId, operator.userId);
   if (!result.ok) {
-    throw new Error(result.reason);
+    return _err("ENGINE_ERROR", result.reason);
   }
-  return {
+  return _ok({
     account_id: result.accountId,
     income_id: incomeId,
     status: STATUS.Income.CONFIRMED,
-  };
+  });
 }
 
 /**
  * Reject pending income (Treasurer only).
  */
 function api_rejectIncome(incomeId, reason) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (operator.role !== ROLES.TREASURER) {
-    throw new Error("Unauthorized");
+    return _err("UNAUTHORIZED", "Unauthorized");
   }
   if (!(reason && String(reason).trim())) {
-    throw new Error("Rejection reason is required");
+    return _err("INVALID_PARAMETER", "Rejection reason is required");
   }
 
   var result = Engine.rejectIncome(incomeId, operator.userId, reason);
   if (!result.ok) {
-    throw new Error(result.reason);
+    return _err("ENGINE_ERROR", result.reason);
   }
-  return { income_id: incomeId, status: STATUS.Income.REJECTED };
+  return _ok({ income_id: incomeId, status: STATUS.Income.REJECTED });
 }
 
 /**
  * Request info on pending income (Treasurer only).
  */
 function api_requestIncomeInfo(incomeId, reason) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (operator.role !== ROLES.TREASURER) {
-    throw new Error("Unauthorized");
+    return _err("UNAUTHORIZED", "Unauthorized");
   }
   if (!(reason && String(reason).trim())) {
-    throw new Error("Note is required");
+    return _err("INVALID_PARAMETER", "Note is required");
   }
 
   var result = Engine.requestIncomeInfo(incomeId, operator.userId, reason);
   if (!result.ok) {
-    throw new Error(result.reason);
+    return _err("ENGINE_ERROR", result.reason);
   }
-  return { income_id: incomeId, status: STATUS.Income.NEEDS_INFO };
+  return _ok({ income_id: incomeId, status: STATUS.Income.NEEDS_INFO });
 }
 
 /**
@@ -1664,18 +1692,19 @@ function api_requestIncomeInfo(incomeId, reason) {
  * direction: 'CREDIT' (add money) or 'DEBIT' (subtract money)
  */
 function api_recordAdjustment(payload) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (operator.role !== ROLES.TREASURER) {
-    throw new Error("Unauthorized");
+    return _err("UNAUTHORIZED", "Unauthorized");
   }
   if (!payload.amount || Number(payload.amount) <= 0) {
-    throw new Error("Amount must be positive");
+    return _err("INVALID_PARAMETER", "Amount must be positive");
   }
   if (payload.direction !== "CREDIT" && payload.direction !== "DEBIT") {
-    throw new Error("Direction must be CREDIT or DEBIT");
+    return _err("INVALID_PARAMETER", "Direction must be CREDIT or DEBIT");
   }
   if (!(payload.reason && String(payload.reason).trim())) {
-    throw new Error("Reason is required");
+    return _err("INVALID_PARAMETER", "Reason is required");
   }
 
   var result = Engine.adjustAccount(
@@ -1686,24 +1715,25 @@ function api_recordAdjustment(payload) {
     operator.userId
   );
   if (!result.ok) {
-    throw new Error(result.reason);
+    return _err("ENGINE_ERROR", result.reason);
   }
-  return { account_id: payload.accountId, adjustment_id: result.adjustmentId };
+  return _ok({ account_id: payload.accountId, adjustment_id: result.adjustmentId });
 }
 
 /**
  * Record a transfer between accounts — Treasurer only.
  */
 function api_recordTransfer(payload) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (operator.role !== ROLES.TREASURER) {
-    throw new Error("Unauthorized");
+    return _err("UNAUTHORIZED", "Unauthorized");
   }
   if (!payload.amount || Number(payload.amount) <= 0) {
-    throw new Error("Amount must be positive");
+    return _err("INVALID_PARAMETER", "Amount must be positive");
   }
   if (!(payload.reason && String(payload.reason).trim())) {
-    throw new Error("Reason is required");
+    return _err("INVALID_PARAMETER", "Reason is required");
   }
 
   var result = Engine.transferBetweenAccounts(
@@ -1714,20 +1744,21 @@ function api_recordTransfer(payload) {
     operator.userId
   );
   if (!result.ok) {
-    throw new Error(result.reason);
+    return _err("ENGINE_ERROR", result.reason);
   }
-  return {
+  return _ok({
     from: payload.fromAccountId,
     to: payload.toAccountId,
     transfer_id: result.transferId,
-  };
+  });
 }
 
 /**
  * Get all account transfers.
  */
 function api_getTransfers() {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   var sheet = getSheet_(TABS.ACCOUNT_TRANSFERS);
   var values = sheet.getDataRange().getValues();
   var c = COLS.AccountTransfers;
@@ -1746,14 +1777,15 @@ function api_getTransfers() {
       transferred_by: values[i][c.transferred_by - 1],
     });
   }
-  return out;
+  return _ok(out);
 }
 
 /**
  * Get all account adjustments.
  */
 function api_getAdjustments(accountId) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   var sheet = getSheet_(TABS.ACCOUNT_ADJUSTMENTS);
   var values = sheet.getDataRange().getValues();
   var c = COLS.AccountAdjustments;
@@ -1775,7 +1807,7 @@ function api_getAdjustments(accountId) {
       reason: values[i][c.reason - 1] || "",
     });
   }
-  return out;
+  return _ok(out);
 }
 
 // ---------------------------------------------------------------------------
@@ -1787,9 +1819,10 @@ function api_getAdjustments(accountId) {
  * Optionally specify the Finance Account to deduct from.
  */
 function api_approvePayout(claimId, accountId) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (operator.role !== ROLES.TREASURER) {
-    throw new Error("Unauthorized");
+    return _err("UNAUTHORIZED", "Unauthorized");
   }
 
   var payload = {};
@@ -1805,16 +1838,17 @@ function api_approvePayout(claimId, accountId) {
     payload
   );
   if (!result.ok) {
-    throw new Error(result.reason);
+    return _err("ENGINE_ERROR", result.reason);
   }
-  return { claim_id: claimId, from: result.from, to: result.to };
+  return _ok({ claim_id: claimId, from: result.from, to: result.to });
 }
 
 /**
  * Get queued payouts (QUEUED and FAILED) for Treasurer action.
  */
 function api_getQueuedPayouts() {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   var sheet = getSheet_(TABS.PAYOUTS);
   var values = sheet.getDataRange().getValues();
   var c = COLS.Payouts;
@@ -1839,32 +1873,33 @@ function api_getQueuedPayouts() {
       txn_reference: values[i][c.txn_reference - 1] || "",
     });
   }
-  return out;
+  return _ok(out);
 }
 
 /**
  * Mark a queued payout as sent, deduct from account (Treasurer only).
  */
 function api_markPayoutSent(payoutId, payload) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (operator.role !== ROLES.TREASURER) {
-    throw new Error("Unauthorized");
+    return _err("UNAUTHORIZED", "Unauthorized");
   }
   var payoutRow = Engine._loadRow("Payout", payoutId);
   if (!payoutRow) {
-    throw new Error("Payout not found");
+    return _err("NOT_FOUND", "Payout not found");
   }
   var c = COLS.Payouts;
   var method = payload.method || payoutRow.values[c.method - 1];
   if (!method) {
-    throw new Error("Payment method is required");
+    return _err("INVALID_PARAMETER", "Payment method is required");
   }
   var sentAmount =
     payload.amount == null
       ? Number(payoutRow.values[c.amount - 1]) || 0
       : Number(payload.amount);
   if (sentAmount <= 0) {
-    throw new Error("Amount must be positive");
+    return _err("INVALID_PARAMETER", "Amount must be positive");
   }
 
   var result = Payouts.markPayoutSent(
@@ -1875,21 +1910,22 @@ function api_markPayoutSent(payoutId, payload) {
     operator.userId
   );
   if (!result.ok) {
-    throw new Error(result.reason);
+    return _err("ENGINE_ERROR", result.reason);
   }
-  return { payout_id: payoutId, status: STATUS.Payout.SENT };
+  return _ok({ payout_id: payoutId, status: STATUS.Payout.SENT });
 }
 
 /**
  * Record a failed payout attempt (Treasurer only).
  */
 function api_recordPayoutFailed(payoutId, failureReason) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (operator.role !== ROLES.TREASURER) {
-    throw new Error("Unauthorized");
+    return _err("UNAUTHORIZED", "Unauthorized");
   }
   if (!(failureReason && String(failureReason).trim())) {
-    throw new Error("Failure reason is required");
+    return _err("INVALID_PARAMETER", "Failure reason is required");
   }
 
   var result = Payouts.recordPayoutFailed(
@@ -1898,25 +1934,26 @@ function api_recordPayoutFailed(payoutId, failureReason) {
     operator.userId
   );
   if (!result.ok) {
-    throw new Error(result.reason);
+    return _err("ENGINE_ERROR", result.reason);
   }
-  return { payout_id: payoutId, status: STATUS.Payout.FAILED };
+  return _ok({ payout_id: payoutId, status: STATUS.Payout.FAILED });
 }
 
 /**
  * Retry a failed payout (Treasurer only).
  */
 function api_retryPayout(payoutId) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (operator.role !== ROLES.TREASURER) {
-    throw new Error("Unauthorized");
+    return _err("UNAUTHORIZED", "Unauthorized");
   }
 
   var result = Payouts.retryPayout(payoutId, operator.userId);
   if (!result.ok) {
-    throw new Error(result.reason);
+    return _err("ENGINE_ERROR", result.reason);
   }
-  return { payout_id: result.newPayoutId, status: STATUS.Payout.QUEUED };
+  return _ok({ payout_id: result.newPayoutId, status: STATUS.Payout.QUEUED });
 }
 
 // ---------------------------------------------------------------------------
@@ -1928,7 +1965,8 @@ function api_retryPayout(payoutId) {
  * Surfaces: missing receipts, over-budget claims, needs-info, failed payouts, pending requests.
  */
 function api_getDashboardSummary() {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
 
   var claimsSheet = getSheet_(TABS.EXPENSE_CLAIMS);
   var claimsValues = claimsSheet.getDataRange().getValues();
@@ -2068,7 +2106,7 @@ function api_getDashboardSummary() {
     }
   }
 
-  return {
+  return _ok({
     counts: {
       failed_payouts: failedPayouts.length,
       missing_receipts: missingReceipt.length,
@@ -2087,7 +2125,7 @@ function api_getDashboardSummary() {
     needs_info_claims: needsInfo,
     over_budget_claims: overBudget,
     pending_requests: pendingRequests,
-  };
+  });
 }
 
 /**
@@ -2096,22 +2134,23 @@ function api_getDashboardSummary() {
  * filters: { status?, fromDate?, toDate?, budgetLine?, eventId? }
  */
 function api_getReportsData(reportType, filters) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   filters = filters || {};
 
   switch (reportType) {
     case "claims":
-      return _buildClaimsReport(filters);
+      return _ok(_buildClaimsReport(filters));
     case "budget":
-      return _buildBudgetReport(filters);
+      return _ok(_buildBudgetReport(filters));
     case "income":
-      return _buildIncomeReport(filters);
+      return _ok(_buildIncomeReport(filters));
     case "payouts":
-      return _buildPayoutsReport(filters);
+      return _ok(_buildPayoutsReport(filters));
     case "accounts":
-      return _buildAccountsReport();
+      return _ok(_buildAccountsReport());
     default:
-      throw new Error("Unknown report type: " + reportType);
+      return _err("INVALID_PARAMETER", "Unknown report type: " + reportType);
   }
 }
 
@@ -2368,11 +2407,11 @@ function _buildAccountsReport() {
  * Returns a downloadable CSV string.
  */
 function api_exportCsv(reportType, filters) {
-  _requireOperator();
+  try { _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   var data = api_getReportsData(reportType, filters);
   var rows = data.rows || [];
   if (rows.length === 0) {
-    return "";
+    return _ok("");
   }
 
   var headers;
@@ -2392,7 +2431,7 @@ function api_exportCsv(reportType, filters) {
         "Expense Date",
         "Method",
       ];
-      return _csvRows(
+      return _ok(_csvRows(
         headers,
         rows.map((r) => [
           r.claim_id,
@@ -2408,7 +2447,7 @@ function api_exportCsv(reportType, filters) {
           r.expense_date,
           r.payout_method,
         ])
-      );
+      ));
     case "budget":
       headers = [
         "Request ID",
@@ -2419,7 +2458,7 @@ function api_exportCsv(reportType, filters) {
         "Total Requested",
         "Total Approved",
       ];
-      return _csvRows(
+      return _ok(_csvRows(
         headers,
         rows.map((r) => [
           r.request_id,
@@ -2430,7 +2469,7 @@ function api_exportCsv(reportType, filters) {
           r.total_requested,
           r.total_approved,
         ])
-      );
+      ));
     case "income":
       headers = [
         "Income ID",
@@ -2443,7 +2482,7 @@ function api_exportCsv(reportType, filters) {
         "Account",
         "Status",
       ];
-      return _csvRows(
+      return _ok(_csvRows(
         headers,
         rows.map((r) => [
           r.income_id,
@@ -2456,7 +2495,7 @@ function api_exportCsv(reportType, filters) {
           r.account_id,
           r.status,
         ])
-      );
+      ));
     case "payouts":
       headers = [
         "Payout ID",
@@ -2470,7 +2509,7 @@ function api_exportCsv(reportType, filters) {
         "Confirmed",
         "Failure Reason",
       ];
-      return _csvRows(
+      return _ok(_csvRows(
         headers,
         rows.map((r) => [
           r.payout_id,
@@ -2484,9 +2523,9 @@ function api_exportCsv(reportType, filters) {
           r.confirmed_at,
           _csvEscape(r.failure_reason),
         ])
-      );
+      ));
     default:
-      return "";
+      return _ok("");
   }
 }
 
@@ -2517,23 +2556,24 @@ function _csvEscape(val) {
  * Get the current semester status, including close blockers.
  */
 function api_getSemesterStatus() {
-  _requireOperator();
-  return Engine.getSemesterStatus();
+  try { _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  return _ok(Engine.getSemesterStatus());
 }
 
 /**
  * Suggest a semester for a given expense date.
  */
 function api_suggestSemester(expenseDate) {
-  _requireOperator();
-  return { semester: Engine.suggestSemester(expenseDate) };
+  try { _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  return _ok({ semester: Engine.suggestSemester(expenseDate) });
 }
 
 /**
  * Correct the semester assignment on a claim or budget request.
  */
 function api_correctSemester(entityType, entityId, newSemester) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   var result = Engine.correctSemester(
     entityType,
     entityId,
@@ -2541,25 +2581,26 @@ function api_correctSemester(entityType, entityId, newSemester) {
     operator.userId
   );
   if (!result.ok) {
-    throw new Error(result.reason);
+    return _err("ENGINE_ERROR", result.reason);
   }
-  return result;
+  return _ok(result);
 }
 
 /**
  * Close the current semester. Treasurer only.
  */
 function api_closeSemester() {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (operator.role !== ROLES.TREASURER) {
-    throw new Error("Unauthorized: Treasurer only");
+    return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
   }
   var currentSemester = Config.getOptional("CURRENT_SEMESTER") || "26A";
   var result = Engine.closeSemester(currentSemester, operator.userId);
   if (!result.ok) {
-    throw new Error(result.reason);
+    return _err("ENGINE_ERROR", result.reason);
   }
-  return result;
+  return _ok(result);
 }
 
 // ---------------------------------------------------------------------------
@@ -2570,16 +2611,16 @@ function api_closeSemester() {
  * Get the current migration state (null if none in progress).
  */
 function api_getMigrationState() {
-  _requireOperator();
-  return Migration.getState();
+  try { _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  return _ok(Migration.getState());
 }
 
 /**
  * Get a preview of what would be migrated.
  */
 function api_getMigrationPreview() {
-  _requireOperator();
-  return Migration.getPreview();
+  try { _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  return _ok(Migration.getPreview());
 }
 
 /**
@@ -2587,15 +2628,16 @@ function api_getMigrationPreview() {
  * Treasurer only.
  */
 function api_startMigration() {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (operator.role !== ROLES.TREASURER) {
-    throw new Error("Unauthorized: Treasurer only");
+    return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
   }
   var result = Migration.startMigration(operator.userId);
   if (!result.ok) {
-    throw new Error(result.reason);
+    return _err("ENGINE_ERROR", result.reason);
   }
-  return result;
+  return _ok(result);
 }
 
 /**
@@ -2603,23 +2645,24 @@ function api_startMigration() {
  * Treasurer only.
  */
 function api_setMigrationSelections(selections) {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (operator.role !== ROLES.TREASURER) {
-    throw new Error("Unauthorized: Treasurer only");
+    return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
   }
   var result = Migration.setSelections(operator.userId, selections);
   if (!result.ok) {
-    throw new Error(result.reason);
+    return _err("ENGINE_ERROR", result.reason);
   }
-  return result;
+  return _ok(result);
 }
 
 /**
  * Get the current selections for review.
  */
 function api_getMigrationSelections() {
-  _requireOperator();
-  return Migration.getSelections();
+  try { _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  return _ok(Migration.getSelections());
 }
 
 /**
@@ -2627,15 +2670,16 @@ function api_getMigrationSelections() {
  * Treasurer only.
  */
 function api_executeMigration() {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (operator.role !== ROLES.TREASURER) {
-    throw new Error("Unauthorized: Treasurer only");
+    return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
   }
   var result = Migration.executeMigration(operator.userId);
   if (!result.ok) {
-    throw new Error(result.reason);
+    return _err("ENGINE_ERROR", result.reason);
   }
-  return result;
+  return _ok(result);
 }
 
 /**
@@ -2643,15 +2687,16 @@ function api_executeMigration() {
  * Treasurer only.
  */
 function api_activateMigration() {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (operator.role !== ROLES.TREASURER) {
-    throw new Error("Unauthorized: Treasurer only");
+    return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
   }
   var result = Migration.activateMigration(operator.userId);
   if (!result.ok) {
-    throw new Error(result.reason);
+    return _err("ENGINE_ERROR", result.reason);
   }
-  return result;
+  return _ok(result);
 }
 
 /**
@@ -2659,20 +2704,23 @@ function api_activateMigration() {
  * Treasurer only.
  */
 function api_cancelMigration() {
-  var operator = _requireOperator();
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (operator.role !== ROLES.TREASURER) {
-    throw new Error("Unauthorized: Treasurer only");
+    return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
   }
   var result = Migration.cancelMigration(operator.userId);
   if (!result.ok) {
-    throw new Error(result.reason);
+    return _err("ENGINE_ERROR", result.reason);
   }
-  return result;
+  return _ok(result);
 }
 
 if (typeof module !== "undefined") {
   module.exports = {
+    _err,
     _isLate,
+    _ok,
     _resolveUser,
     _sha256Hex,
     api_activateMigration,

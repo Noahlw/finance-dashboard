@@ -557,7 +557,7 @@ describe("Api.js", () => {
         getEmail: () => "unknown@example.com",
       });
       const { api_getMyBudgetRequests } = require("../Api.js");
-      const result = api_getMyBudgetRequests();
+      const { data: result } = api_getMyBudgetRequests();
       expect(result).toEqual([]);
     });
 
@@ -605,7 +605,7 @@ describe("Api.js", () => {
         }
       );
       const { api_getMyBudgetRequests } = require("../Api.js");
-      const result = api_getMyBudgetRequests();
+      const { data: result } = api_getMyBudgetRequests();
       expect(result.length).toBe(1);
       expect(result[0].title).toBe("Test Request");
       expect(result[0].lines.length).toBe(1);
@@ -658,7 +658,7 @@ describe("Api.js", () => {
         };
       });
       const { api_saveBudgetRequestDraft } = require("../Api.js");
-      const result = api_saveBudgetRequestDraft({
+      const { data: result } = api_saveBudgetRequestDraft({
         justification: "For event",
         lines: [{ description: "Food", requested_amount: 300 }],
         needed_by: "2026-08-15",
@@ -688,12 +688,12 @@ describe("Api.js", () => {
         ],
       });
       const { api_saveBudgetRequestDraft } = require("../Api.js");
-      expect(() =>
-        api_saveBudgetRequestDraft({
-          request_id: "BUDGET-26A-001",
-          title: "Hack",
-        })
-      ).toThrow("Cannot edit a APPROVED budget request");
+      const result = api_saveBudgetRequestDraft({
+        request_id: "BUDGET-26A-001",
+        title: "Hack",
+      });
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toContain("Cannot edit a APPROVED budget request");
     });
   });
 
@@ -718,7 +718,7 @@ describe("Api.js", () => {
         ],
       });
       const { api_submitBudgetRequest } = require("../Api.js");
-      const result = api_submitBudgetRequest("BUDGET-26A-001");
+      const { data: result } = api_submitBudgetRequest("BUDGET-26A-001");
       expect(result.status).toBe("PENDING");
       expect(global.Engine.transition).toHaveBeenCalledWith(
         "BudgetRequest",
@@ -754,7 +754,7 @@ describe("Api.js", () => {
         to: "PENDING",
       });
       const { api_submitBudgetRequest } = require("../Api.js");
-      const result = api_submitBudgetRequest("BUDGET-26A-001");
+      const { data: result } = api_submitBudgetRequest("BUDGET-26A-001");
       expect(result.status).toBe("PENDING");
       expect(global.Engine.transition).toHaveBeenCalledWith(
         "BudgetRequest",
@@ -774,7 +774,7 @@ describe("Api.js", () => {
         to: "WITHDRAWN",
       });
       const { api_discardBudgetRequest } = require("../Api.js");
-      const result = api_discardBudgetRequest("BUDGET-26A-001");
+      const { data: result } = api_discardBudgetRequest("BUDGET-26A-001");
       expect(result.status).toBe("WITHDRAWN");
     });
   });
@@ -782,7 +782,9 @@ describe("Api.js", () => {
   describe("api_getPendingBudgetRequests", () => {
     it("should throw if user is not treasurer", () => {
       const { api_getPendingBudgetRequests } = require("../Api.js");
-      expect(() => api_getPendingBudgetRequests()).toThrow("Unauthorized");
+      const result = api_getPendingBudgetRequests();
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toContain("Unauthorized");
     });
 
     it("should return pending requests for treasurer", () => {
@@ -855,7 +857,7 @@ describe("Api.js", () => {
       });
       global.Engine._sumBudgetRequestLines.mockReturnValueOnce(500);
       const { api_getPendingBudgetRequests } = require("../Api.js");
-      const result = api_getPendingBudgetRequests();
+      const { data: result } = api_getPendingBudgetRequests();
       expect(result.length).toBe(1);
       expect(result[0].title).toBe("Pending Request");
       expect(result[0].total_requested).toBe(500);
@@ -865,9 +867,9 @@ describe("Api.js", () => {
   describe("api_decisionBudgetRequest", () => {
     it("should throw if user is not treasurer", () => {
       const { api_decisionBudgetRequest } = require("../Api.js");
-      expect(() =>
-        api_decisionBudgetRequest("BUDGET-26A-001", "APPROVE", {})
-      ).toThrow("Unauthorized");
+      const result = api_decisionBudgetRequest("BUDGET-26A-001", "APPROVE", {});
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toContain("Unauthorized");
     });
 
     it("should approve a pending request", () => {
@@ -910,7 +912,7 @@ describe("Api.js", () => {
         to: "APPROVED",
       });
       const { api_decisionBudgetRequest } = require("../Api.js");
-      const result = api_decisionBudgetRequest("BUDGET-26A-001", "APPROVE", {
+      const { data: result } = api_decisionBudgetRequest("BUDGET-26A-001", "APPROVE", {
         decision_note: "Looks good",
       });
       expect(result.to).toBe("APPROVED");
@@ -920,9 +922,9 @@ describe("Api.js", () => {
   describe("api_getMyClaims", () => {
     it("should throw if no email is found", () => {
       global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => "" });
-      expect(() => api_getMyClaims()).toThrow(
-        "User not authenticated (no active session)"
-      );
+      const result = api_getMyClaims();
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toContain("User not authenticated (no active session)");
     });
 
     it("should return empty arrays if user is unknown", () => {
@@ -952,7 +954,7 @@ describe("Api.js", () => {
         }
         return { name };
       });
-      const result = api_getMyClaims();
+      const { data: result } = api_getMyClaims();
       expect(result.claims).toEqual([]);
       expect(result.requests).toEqual([]);
     });
@@ -1005,7 +1007,7 @@ describe("Api.js", () => {
         }
       );
 
-      const result = api_getMyClaims();
+      const { data: result } = api_getMyClaims();
       expect(result.claims[0].claim_id).toBe("C-123");
       expect(result.requests[0].request_id).toBe("R-123");
     });
@@ -1060,7 +1062,7 @@ describe("Api.js", () => {
       };
 
       const { api_submitClaim } = require("../Api.js");
-      const result = api_submitClaim(payload);
+      const { data: result } = api_submitClaim(payload);
 
       expect(result.success).toBe(true);
       expect(result.claimId).toBe("C-2");
@@ -1135,7 +1137,7 @@ describe("Api.js", () => {
       const payload = { amount: 300, claimId: "C-1", notes: "Updated notes" };
 
       const { api_editClaim } = require("../Api.js");
-      const result = api_editClaim(payload);
+      const { data: result } = api_editClaim(payload);
 
       expect(result.success).toBe(true);
       expect(mockExpenseSheet.getRange).toHaveBeenCalled();
@@ -1180,9 +1182,9 @@ describe("Api.js", () => {
       const payload = { amount: 300, claimId: "C-1", notes: "Updated" };
 
       const { api_editClaim } = require("../Api.js");
-      expect(() => api_editClaim(payload)).toThrow(
-        "Only SUBMITTED claims can be edited."
-      );
+      const result = api_editClaim(payload);
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toContain("Only SUBMITTED claims can be edited.");
     });
   });
 
@@ -1226,7 +1228,7 @@ describe("Api.js", () => {
         };
       });
       const { api_getMembers } = require("../Api.js");
-      const result = api_getMembers();
+      const { data: result } = api_getMembers();
       expect(result.length).toBe(2);
       expect(result[0].user_id).toBe("M-001");
       expect(result[1].active).toBe(false);
@@ -1301,7 +1303,7 @@ describe("Api.js", () => {
       global.getVaultSheet_.mockReturnValue(vaultSheet);
 
       const { api_addMember } = require("../Api.js");
-      const result = api_addMember({
+      const { data: result } = api_addMember({
         display_name: "Dave",
         full_name: "David",
         payout_handle: "91234567",
@@ -1333,9 +1335,9 @@ describe("Api.js", () => {
         }),
       });
       const { api_addMember } = require("../Api.js");
-      expect(() =>
-        api_addMember({ display_name: "Dave", student_id: "S123456" })
-      ).toThrow("member");
+      const result = api_addMember({ display_name: "Dave", student_id: "S123456" });
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toContain("member");
     });
   });
 
@@ -1375,7 +1377,7 @@ describe("Api.js", () => {
         return { getRange: jest.fn(() => ({ setValue: jest.fn() })) };
       });
       const { api_reactivateMember } = require("../Api.js");
-      const result = api_reactivateMember("M-002");
+      const { data: result } = api_reactivateMember("M-002");
       expect(result.active).toBe(true);
     });
   });
@@ -1435,7 +1437,7 @@ describe("Api.js", () => {
       });
 
       const { api_saveClaimDraft } = require("../Api.js");
-      const result = api_saveClaimDraft({
+      const { data: result } = api_saveClaimDraft({
         amount: 100,
         budgetLineId: "BL-1",
         claimantId: "M-001",
@@ -1487,7 +1489,7 @@ describe("Api.js", () => {
         to: "SUBMITTED",
       });
       const { api_submitDraftClaim } = require("../Api.js");
-      const result = api_submitDraftClaim("CLAIM-26A-001");
+      const { data: result } = api_submitDraftClaim("CLAIM-26A-001");
       expect(result.status).toBe("SUBMITTED");
       expect(global.Engine.transition).toHaveBeenCalledWith(
         "ExpenseClaim",
@@ -1553,7 +1555,7 @@ describe("Api.js", () => {
         };
       });
       const { api_uploadReceipt } = require("../Api.js");
-      const result = api_uploadReceipt(
+      const { data: result } = api_uploadReceipt(
         "receipt.png",
         "image/png",
         "base64data",
@@ -1605,9 +1607,9 @@ describe("Api.js", () => {
         };
       });
       const { api_uploadReceipt } = require("../Api.js");
-      expect(() =>
-        api_uploadReceipt("file.txt", "text/plain", "base64data", "", "", 0)
-      ).toThrow("Unsupported file type");
+      const result = api_uploadReceipt("file.txt", "text/plain", "base64data", "", "", 0);
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toContain("Unsupported file type");
     });
 
     it("should return existing receiptId for same-user duplicate hash", () => {
@@ -1661,7 +1663,7 @@ describe("Api.js", () => {
         };
       });
       const { api_uploadReceipt } = require("../Api.js");
-      const result = api_uploadReceipt(
+      const { data: result } = api_uploadReceipt(
         "dupe.png",
         "image/png",
         "base64data",
@@ -1723,9 +1725,9 @@ describe("Api.js", () => {
         };
       });
       const { api_uploadReceipt } = require("../Api.js");
-      expect(() =>
-        api_uploadReceipt("dupe.png", "image/png", "base64data", "", "", 0)
-      ).toThrow("Duplicate receipt detected");
+      const result = api_uploadReceipt("dupe.png", "image/png", "base64data", "", "", 0);
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toContain("Duplicate receipt detected");
     });
 
     it("should reject files over 5 MB", () => {
@@ -1767,9 +1769,9 @@ describe("Api.js", () => {
         };
       });
       const { api_uploadReceipt } = require("../Api.js");
-      expect(() =>
-        api_uploadReceipt("large.png", "image/png", "bigbase64", "", "", 0)
-      ).toThrow("5 MB limit");
+      const result = api_uploadReceipt("large.png", "image/png", "bigbase64", "", "", 0);
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toContain("3 MB limit");
     });
   });
 
@@ -1819,7 +1821,7 @@ describe("Api.js", () => {
         return {};
       });
       const { api_deleteOrphanedReceipt } = require("../Api.js");
-      const result = api_deleteOrphanedReceipt("RECEIPT-001");
+      const { data: result } = api_deleteOrphanedReceipt("RECEIPT-001");
       expect(result.success).toBe(true);
       expect(receiptSheet.deleteRow).toHaveBeenCalledWith(3);
       expect(global.Audit.append).toHaveBeenCalled();
@@ -1868,9 +1870,9 @@ describe("Api.js", () => {
         return {};
       });
       const { api_deleteOrphanedReceipt } = require("../Api.js");
-      expect(() => api_deleteOrphanedReceipt("RECEIPT-001")).toThrow(
-        "Unauthorized"
-      );
+      const result = api_deleteOrphanedReceipt("RECEIPT-001");
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toContain("Unauthorized");
     });
 
     it("should throw for not found receipt", () => {
@@ -1903,9 +1905,9 @@ describe("Api.js", () => {
         return {};
       });
       const { api_deleteOrphanedReceipt } = require("../Api.js");
-      expect(() => api_deleteOrphanedReceipt("RECEIPT-999")).toThrow(
-        "Receipt not found"
-      );
+      const result = api_deleteOrphanedReceipt("RECEIPT-999");
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toContain("Receipt not found");
     });
   });
 
@@ -1978,7 +1980,7 @@ describe("Api.js", () => {
       global.Engine._findRowsByColumn.mockReturnValueOnce([]);
 
       const { api_saveClaimDraft } = require("../Api.js");
-      const result = api_saveClaimDraft({
+      const { data: result } = api_saveClaimDraft({
         amount: 200,
         claimantId: "M-001",
         expenseDate: "2026-07-15",
@@ -2157,7 +2159,7 @@ describe("Api.js", () => {
       ]);
 
       const { api_saveClaimDraft } = require("../Api.js");
-      const result = api_saveClaimDraft({
+      const { data: result } = api_saveClaimDraft({
         amount: 200,
         claimantId: "M-001",
         claimId: "CLAIM-26A-003",
@@ -2228,7 +2230,7 @@ describe("Api.js", () => {
       });
 
       const { api_submitClaim } = require("../Api.js");
-      const first = api_submitClaim({
+      const { data: first } = api_submitClaim({
         amount: 100,
         budgetLineId: "BL-1",
         claimantId: "M-001",
@@ -2343,7 +2345,7 @@ describe("Api.js", () => {
       });
 
       const { api_attachReceipts } = require("../Api.js");
-      const result = api_attachReceipts("CLAIM-ATTACH-001", [
+      const { data: result } = api_attachReceipts("CLAIM-ATTACH-001", [
         "RECEIPT-ATTACH-1",
         "RECEIPT-ATTACH-2",
       ]);
@@ -2387,11 +2389,9 @@ describe("Api.js", () => {
       });
 
       const { api_attachReceipts } = require("../Api.js");
-      expect(() =>
-        api_attachReceipts("CLAIM-ATTACH-002", ["RECEIPT-X"])
-      ).toThrow(
-        "Receipts can only be attached to DRAFT, SUBMITTED, NEEDS_INFO, or VERIFIED claims"
-      );
+      const result = api_attachReceipts("CLAIM-ATTACH-002", ["RECEIPT-X"]);
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toContain("Receipts can only be attached to DRAFT, SUBMITTED, NEEDS_INFO, or VERIFIED claims");
     });
 
     it("should reject attaching receipts by a different operator", () => {
@@ -2423,16 +2423,16 @@ describe("Api.js", () => {
       });
 
       const { api_attachReceipts } = require("../Api.js");
-      expect(() =>
-        api_attachReceipts("CLAIM-ATTACH-003", ["RECEIPT-Y"])
-      ).toThrow("Unauthorized");
+      const result = api_attachReceipts("CLAIM-ATTACH-003", ["RECEIPT-Y"]);
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toContain("Unauthorized");
     });
 
     it("should reject empty receiptIds array", () => {
       const { api_attachReceipts } = require("../Api.js");
-      expect(() => api_attachReceipts("CLAIM-001", [])).toThrow(
-        "receiptIds array is required"
-      );
+      const result = api_attachReceipts("CLAIM-001", []);
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toContain("receiptIds array is required");
     });
   });
 
@@ -2561,7 +2561,7 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_getClaimsQueue } = require("../Api.js");
-      const result = api_getClaimsQueue();
+      const { data: result } = api_getClaimsQueue();
       expect(result.length).toBe(2);
       expect(result[0].claim_id).toBe("CLAIM-001");
       expect(result[0].status).toBe("SUBMITTED");
@@ -2671,7 +2671,7 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_getClaimsQueue } = require("../Api.js");
-      const result = api_getClaimsQueue({ status: "VERIFIED" });
+      const { data: result } = api_getClaimsQueue({ status: "VERIFIED" });
       expect(result.length).toBe(1);
       expect(result[0].claim_id).toBe("CLAIM-002");
     });
@@ -2779,7 +2779,7 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_getClaimsQueue } = require("../Api.js");
-      const result = api_getClaimsQueue({ creator: "U-002" });
+      const { data: result } = api_getClaimsQueue({ creator: "U-002" });
       expect(result.length).toBe(1);
       expect(result[0].claim_id).toBe("CLAIM-002");
     });
@@ -2906,7 +2906,7 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_getClaimsQueue } = require("../Api.js");
-      const result = api_getClaimsQueue({ budgetLine: "BL-001" });
+      const { data: result } = api_getClaimsQueue({ budgetLine: "BL-001" });
       expect(result.length).toBe(1);
       expect(result[0].claim_id).toBe("CLAIM-001");
     });
@@ -3029,7 +3029,7 @@ describe("Api.js", () => {
         }),
       });
       const { api_getClaimsQueue } = require("../Api.js");
-      const result = api_getClaimsQueue({ sid: "S12345" });
+      const { data: result } = api_getClaimsQueue({ sid: "S12345" });
       expect(result.length).toBe(1);
       expect(result[0].claim_id).toBe("CLAIM-001");
     });
@@ -3074,7 +3074,7 @@ describe("Api.js", () => {
         to: "VERIFIED",
       });
       const { api_verifyClaim } = require("../Api.js");
-      const result = api_verifyClaim("CLAIM-001", {
+      const { data: result } = api_verifyClaim("CLAIM-001", {
         decision_note: "Looks good",
       });
       expect(result.to).toBe("VERIFIED");
@@ -3123,9 +3123,9 @@ describe("Api.js", () => {
         reason: "Self-verification not allowed",
       });
       const { api_verifyClaim } = require("../Api.js");
-      expect(() => api_verifyClaim("CLAIM-001")).toThrow(
-        "Self-verification not allowed"
-      );
+      const result = api_verifyClaim("CLAIM-001");
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toContain("Self-verification not allowed");
     });
   });
 
@@ -3168,7 +3168,7 @@ describe("Api.js", () => {
         to: "REJECTED",
       });
       const { api_rejectClaim } = require("../Api.js");
-      const result = api_rejectClaim("CLAIM-001", "Insufficient documentation");
+      const { data: result } = api_rejectClaim("CLAIM-001", "Insufficient documentation");
       expect(result.to).toBe("REJECTED");
       expect(global.Engine.transition).toHaveBeenCalledWith(
         "ExpenseClaim",
@@ -3181,9 +3181,9 @@ describe("Api.js", () => {
 
     it("should throw if reason is empty", () => {
       const { api_rejectClaim } = require("../Api.js");
-      expect(() => api_rejectClaim("CLAIM-001", "")).toThrow(
-        "Rejection reason is required"
-      );
+      const result = api_rejectClaim("CLAIM-001", "");
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toContain("Rejection reason is required");
     });
   });
 
@@ -3226,7 +3226,7 @@ describe("Api.js", () => {
         to: "NEEDS_INFO",
       });
       const { api_requestInfo } = require("../Api.js");
-      const result = api_requestInfo(
+      const { data: result } = api_requestInfo(
         "CLAIM-001",
         "Please provide original receipt"
       );
@@ -3242,9 +3242,9 @@ describe("Api.js", () => {
 
     it("should throw if request note is empty", () => {
       const { api_requestInfo } = require("../Api.js");
-      expect(() => api_requestInfo("CLAIM-001", "")).toThrow(
-        "Request note is required"
-      );
+      const result = api_requestInfo("CLAIM-001", "");
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toContain("Request note is required");
     });
   });
 
@@ -3312,7 +3312,7 @@ describe("Api.js", () => {
         to: "SUBMITTED",
       });
       const { api_resubmitClaim } = require("../Api.js");
-      const result = api_resubmitClaim("CLAIM-001");
+      const { data: result } = api_resubmitClaim("CLAIM-001");
       expect(result.to).toBe("SUBMITTED");
       expect(global.Engine.transition).toHaveBeenCalledWith(
         "ExpenseClaim",
@@ -3356,9 +3356,9 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_resubmitClaim } = require("../Api.js");
-      expect(() => api_resubmitClaim("CLAIM-NOT-FOUND")).toThrow(
-        "Claim not found"
-      );
+      const result = api_resubmitClaim("CLAIM-NOT-FOUND");
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toContain("Claim not found");
     });
   });
 
@@ -3401,7 +3401,7 @@ describe("Api.js", () => {
         to: "APPROVED_FOR_PAYOUT",
       });
       const { api_approvePayout } = require("../Api.js");
-      const result = api_approvePayout("CLAIM-001");
+      const { data: result } = api_approvePayout("CLAIM-001");
       expect(result.to).toBe("APPROVED_FOR_PAYOUT");
     });
 
@@ -3437,7 +3437,9 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_approvePayout } = require("../Api.js");
-      expect(() => api_approvePayout("CLAIM-001")).toThrow("Unauthorized");
+      const result = api_approvePayout("CLAIM-001");
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toContain("Unauthorized");
     });
 
     it("should support optional accountId parameter for treasurer", () => {
@@ -3478,7 +3480,7 @@ describe("Api.js", () => {
         to: "APPROVED_FOR_PAYOUT",
       });
       const { api_approvePayout } = require("../Api.js");
-      const result = api_approvePayout("CLAIM-001", "AC-001");
+      const { data: result } = api_approvePayout("CLAIM-001", "AC-001");
       expect(result.to).toBe("APPROVED_FOR_PAYOUT");
       expect(global.Engine.transition).toHaveBeenCalledWith(
         "ExpenseClaim",
@@ -3568,7 +3570,7 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_getAccounts } = require("../Api.js");
-      const result = api_getAccounts();
+      const { data: result } = api_getAccounts();
       expect(result.length).toBe(2);
       expect(result[0].account_id).toBe("AC-001");
       expect(result[0].name).toBe("Main Checking");
@@ -3644,7 +3646,7 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_addAccount } = require("../Api.js");
-      const result = api_addAccount({
+      const { data: result } = api_addAccount({
         name: "Petty Cash",
         opening_balance: 500,
       });
@@ -3685,7 +3687,9 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_addAccount } = require("../Api.js");
-      expect(() => api_addAccount({ name: "Test" })).toThrow("Unauthorized");
+      const result = api_addAccount({ name: "Test" });
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toContain("Unauthorized");
     });
   });
 
@@ -3738,7 +3742,7 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_renameAccount } = require("../Api.js");
-      const result = api_renameAccount("AC-001", "New Name");
+      const { data: result } = api_renameAccount("AC-001", "New Name");
       expect(result.name).toBe("New Name");
       expect(result.account_id).toBe("AC-001");
       expect(sheetMock.getRange).toHaveBeenCalledWith(
@@ -3798,7 +3802,7 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_deactivateAccount } = require("../Api.js");
-      const result = api_deactivateAccount("AC-001");
+      const { data: result } = api_deactivateAccount("AC-001");
       expect(result.status).toBe("INACTIVE");
       expect(result.account_id).toBe("AC-001");
     });
@@ -3842,7 +3846,7 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_recordIncome } = require("../Api.js");
-      const result = api_recordIncome({
+      const { data: result } = api_recordIncome({
         accountId: "AC-001",
         amount: 500,
         categoryId: "CAT-001",
@@ -3885,7 +3889,7 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_recordIncome } = require("../Api.js");
-      const result = api_recordIncome({
+      const { data: result } = api_recordIncome({
         amount: 500,
         categoryId: "CAT-001",
         date: "2026-07-22",
@@ -3980,7 +3984,7 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_getPendingIncome } = require("../Api.js");
-      const result = api_getPendingIncome();
+      const { data: result } = api_getPendingIncome();
       expect(result.length).toBe(1);
       expect(result[0].income_id).toBe("INC-001");
     });
@@ -4019,7 +4023,7 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_confirmIncome } = require("../Api.js");
-      const result = api_confirmIncome("INC-001", "AC-001");
+      const { data: result } = api_confirmIncome("INC-001", "AC-001");
       expect(result.status).toBe("CONFIRMED");
       expect(result.account_id).toBe("AC-001");
       expect(global.Engine.confirmIncome).toHaveBeenCalledWith(
@@ -4061,7 +4065,9 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_confirmIncome } = require("../Api.js");
-      expect(() => api_confirmIncome("INC-001", "")).toThrow("Unauthorized");
+      const result = api_confirmIncome("INC-001", "");
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toContain("Unauthorized");
     });
   });
 
@@ -4098,7 +4104,7 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_rejectIncome } = require("../Api.js");
-      const result = api_rejectIncome("INC-001", "Duplicate entry");
+      const { data: result } = api_rejectIncome("INC-001", "Duplicate entry");
       expect(result.status).toBe("REJECTED");
       expect(global.Engine.rejectIncome).toHaveBeenCalledWith(
         "INC-001",
@@ -4141,7 +4147,7 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_requestIncomeInfo } = require("../Api.js");
-      const result = api_requestIncomeInfo("INC-001", "Need proof");
+      const { data: result } = api_requestIncomeInfo("INC-001", "Need proof");
       expect(result.status).toBe("NEEDS_INFO");
       expect(global.Engine.requestIncomeInfo).toHaveBeenCalledWith(
         "INC-001",
@@ -4188,7 +4194,7 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_recordAdjustment } = require("../Api.js");
-      const result = api_recordAdjustment({
+      const { data: result } = api_recordAdjustment({
         accountId: "AC-001",
         amount: 100,
         direction: "CREDIT",
@@ -4237,14 +4243,14 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_recordAdjustment } = require("../Api.js");
-      expect(() =>
-        api_recordAdjustment({
-          accountId: "AC-001",
-          amount: 100,
-          direction: "CREDIT",
-          reason: "Test",
-        })
-      ).toThrow("Unauthorized");
+      const result = api_recordAdjustment({
+        accountId: "AC-001",
+        amount: 100,
+        direction: "CREDIT",
+        reason: "Test",
+      });
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toContain("Unauthorized");
     });
   });
 
@@ -4281,7 +4287,7 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_recordTransfer } = require("../Api.js");
-      const result = api_recordTransfer({
+      const { data: result } = api_recordTransfer({
         amount: 200,
         fromAccountId: "AC-001",
         reason: "Reallocation",
@@ -4358,7 +4364,7 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_getTransfers } = require("../Api.js");
-      const result = api_getTransfers();
+      const { data: result } = api_getTransfers();
       expect(result.length).toBe(1);
       expect(result[0].from_account_id).toBe("AC-001");
     });
@@ -4423,7 +4429,7 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_getAdjustments } = require("../Api.js");
-      const result = api_getAdjustments();
+      const { data: result } = api_getAdjustments();
       expect(result.length).toBe(1);
       expect(result[0].adjustment_id).toBe("ADJ-001");
     });
@@ -4522,7 +4528,7 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_getQueuedPayouts } = require("../Api.js");
-      const result = api_getQueuedPayouts();
+      const { data: result } = api_getQueuedPayouts();
       expect(result.length).toBe(2);
       expect(result[0].status).toBe("QUEUED");
       expect(result[1].status).toBe("FAILED");
@@ -4560,7 +4566,7 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_getQueuedPayouts } = require("../Api.js");
-      const result = api_getQueuedPayouts();
+      const { data: result } = api_getQueuedPayouts();
       expect(result.length).toBe(0);
     });
   });
@@ -4613,7 +4619,7 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_markPayoutSent } = require("../Api.js");
-      const result = api_markPayoutSent("PAYOUT-001", {
+      const { data: result } = api_markPayoutSent("PAYOUT-001", {
         txnReference: "FPS-REF-123",
       });
       expect(result.status).toBe("SENT");
@@ -4658,9 +4664,9 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_markPayoutSent } = require("../Api.js");
-      expect(() => api_markPayoutSent("PAYOUT-001", {})).toThrow(
-        "Unauthorized"
-      );
+      const result = api_markPayoutSent("PAYOUT-001", {});
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toContain("Unauthorized");
     });
   });
 
@@ -4697,7 +4703,7 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_recordPayoutFailed } = require("../Api.js");
-      const result = api_recordPayoutFailed(
+      const { data: result } = api_recordPayoutFailed(
         "PAYOUT-001",
         "Bank details incorrect"
       );
@@ -4740,7 +4746,7 @@ describe("Api.js", () => {
         return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
       });
       const { api_retryPayout } = require("../Api.js");
-      const result = api_retryPayout("PAYOUT-001");
+      const { data: result } = api_retryPayout("PAYOUT-001");
       expect(result.status).toBe("QUEUED");
       expect(global.Payouts.retryPayout).toHaveBeenCalledWith(
         "PAYOUT-001",
