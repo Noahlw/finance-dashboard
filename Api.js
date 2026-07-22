@@ -1,57 +1,85 @@
+"use strict";
 /**
  * Secure API boundaries for the React Frontend.
  * These functions enforce Session authentication (IDOR prevention)
  * before interacting with the Engine.
  */
 
-var allowedReceiptMimes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'application/pdf'];
+var allowedReceiptMimes = [
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "image/gif",
+  "application/pdf",
+];
 var maxReceiptBytes = 5 * 1024 * 1024;
 
 function doGet(e) {
-  return HtmlService.createTemplateFromFile('index')
-      .evaluate()
-      .setTitle('Finance Workspace')
-      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  return HtmlService.createTemplateFromFile("index")
+    .evaluate()
+    .setTitle("Finance Workspace")
+    .addMetaTag("viewport", "width=device-width, initial-scale=1");
 }
 
 function api_resolveSession() {
   var email = Session.getActiveUser().getEmail();
-  if (!email) return { allowed: false, reason: 'no_session' };
-
-  var user = _resolveUser(email);
-  if (user.isUnknown) return { allowed: false, reason: 'unknown_user', email: email };
-
-  if (user.role !== ROLES.COMMITTEE && user.role !== ROLES.TREASURER) {
-    return { allowed: false, reason: 'unauthorized_role', role: user.role };
+  if (!email) {
+    return { allowed: false, reason: "no_session" };
   }
 
-  if (!user.active) return { allowed: false, reason: 'inactive_user' };
+  var user = _resolveUser(email);
+  if (user.isUnknown) {
+    return { allowed: false, email, reason: "unknown_user" };
+  }
 
-  var views = [ 'review', 'claims', 'members', 'budget-requests' ];
-  if (user.role === ROLES.TREASURER) views.push('income', 'payouts', 'reports');
+  if (user.role !== ROLES.COMMITTEE && user.role !== ROLES.TREASURER) {
+    return { allowed: false, reason: "unauthorized_role", role: user.role };
+  }
+
+  if (!user.active) {
+    return { allowed: false, reason: "inactive_user" };
+  }
+
+  var views = ["review", "claims", "members", "budget-requests"];
+  if (user.role === ROLES.TREASURER) {
+    views.push("income", "payouts", "reports");
+  }
 
   return {
     allowed: true,
-    user_id: user.userId,
     display_name: user.displayName,
     role: user.role,
-    views: views
+    user_id: user.userId,
+    views,
   };
 }
 
 function api_getMyClaims() {
   var email = Session.getActiveUser().getEmail();
-  if (!email) throw new Error('User not authenticated (no active session)');
+  if (!email) {
+    throw new Error("User not authenticated (no active session)");
+  }
 
   var user = _resolveUser(email);
-  if (user.isUnknown || (user.role !== ROLES.COMMITTEE && user.role !== ROLES.TREASURER)) {
-    return { claims: [], requests: [], budgetLines: [] };
+  if (
+    user.isUnknown ||
+    (user.role !== ROLES.COMMITTEE && user.role !== ROLES.TREASURER)
+  ) {
+    return { budgetLines: [], claims: [], requests: [] };
   }
 
   var claimsSheet = getSheet_(TABS.EXPENSE_CLAIMS);
-  var claimsRows = Engine._findRowsByColumn(claimsSheet, COLS.ExpenseClaims.created_by, user.userId);
+  var claimsRows = Engine._findRowsByColumn(
+    claimsSheet,
+    COLS.ExpenseClaims.created_by,
+    user.userId
+  );
   var requestsSheet = getSheet_(TABS.BUDGET_REQUESTS);
-  var requestsRows = Engine._findRowsByColumn(requestsSheet, COLS.BudgetRequests.requester_id, user.userId);
+  var requestsRows = Engine._findRowsByColumn(
+    requestsSheet,
+    COLS.BudgetRequests.requester_id,
+    user.userId
+  );
   var requestIds = {};
   for (var i = 0; i < requestsRows.length; i++) {
     requestIds[requestsRows[i].values[0]] = true;
@@ -64,21 +92,37 @@ function api_getMyClaims() {
 
   for (var i = 1; i < allLines.length; i++) {
     var rId = allLines[i][c_brl.request_id - 1];
-    if (requestIds[rId] && allLines[i][c_brl.line_status - 1] === 'APPROVED' && allLines[i][c_brl.remaining - 1] > 0) {
+    if (
+      requestIds[rId] &&
+      allLines[i][c_brl.line_status - 1] === "APPROVED" &&
+      allLines[i][c_brl.remaining - 1] > 0
+    ) {
       budgetLines.push({
-        line_id: allLines[i][c_brl.line_id - 1],
-        request_id: rId,
         description: allLines[i][c_brl.description - 1],
-        remaining: allLines[i][c_brl.remaining - 1]
+        line_id: allLines[i][c_brl.line_id - 1],
+        remaining: allLines[i][c_brl.remaining - 1],
+        request_id: rId,
       });
     }
   }
 
   var c = COLS.ExpenseClaims;
   return {
-    claims: claimsRows.map(function(r) { return { claim_id: r.values[c.claim_id - 1], status: r.values[c.status - 1], submitted_at: r.values[c.submitted_at - 1], total_amount: r.values[c.total_amount - 1], notes: r.values[c.notes - 1], claimant_id: r.values[c.claimant_id - 1] }; }),
-    requests: requestsRows.map(function(r) { return { request_id: r.values[COLS.BudgetRequests.request_id - 1], title: r.values[COLS.BudgetRequests.title - 1], status: r.values[COLS.BudgetRequests.status - 1], submitted_at: r.values[COLS.BudgetRequests.submitted_at - 1] }; }),
-    budgetLines: budgetLines
+    budgetLines,
+    claims: claimsRows.map((r) => ({
+      claim_id: r.values[c.claim_id - 1],
+      claimant_id: r.values[c.claimant_id - 1],
+      notes: r.values[c.notes - 1],
+      status: r.values[c.status - 1],
+      submitted_at: r.values[c.submitted_at - 1],
+      total_amount: r.values[c.total_amount - 1],
+    })),
+    requests: requestsRows.map((r) => ({
+      request_id: r.values[COLS.BudgetRequests.request_id - 1],
+      status: r.values[COLS.BudgetRequests.status - 1],
+      submitted_at: r.values[COLS.BudgetRequests.submitted_at - 1],
+      title: r.values[COLS.BudgetRequests.title - 1],
+    })),
   };
 }
 
@@ -86,17 +130,32 @@ function api_getMyClaims() {
  * Handle Base64 file uploads to Google Drive.
  * Idempotent: same SHA-256 + same user returns existing receiptId.
  */
-function api_uploadReceipt(fileName, mimeType, base64Data, vendor, receiptDate, receiptTotal) {
+function api_uploadReceipt(
+  fileName,
+  mimeType,
+  base64Data,
+  vendor,
+  receiptDate,
+  receiptTotal
+) {
   var email = Session.getActiveUser().getEmail();
-  if (!email) throw new Error('Not authenticated');
+  if (!email) {
+    throw new Error("Not authenticated");
+  }
   var user = _resolveUser(email);
-  if (user.isUnknown) throw new Error('Unregistered user');
+  if (user.isUnknown) {
+    throw new Error("Unregistered user");
+  }
 
   var bytes = Utilities.base64Decode(base64Data);
 
-  if (bytes.length > maxReceiptBytes) throw new Error('File exceeds 5 MB limit.');
+  if (bytes.length > maxReceiptBytes) {
+    throw new Error("File exceeds 5 MB limit.");
+  }
 
-  if (allowedReceiptMimes.indexOf(mimeType) === -1) throw new Error('Unsupported file type. Allowed: PNG, JPEG, GIF, PDF.');
+  if (allowedReceiptMimes.indexOf(mimeType) === -1) {
+    throw new Error("Unsupported file type. Allowed: PNG, JPEG, GIF, PDF.");
+  }
 
   var sha256 = _sha256Hex(bytes);
 
@@ -111,32 +170,58 @@ function api_uploadReceipt(fileName, mimeType, base64Data, vendor, receiptDate, 
 
   for (var i = 1; i < receiptData.length; i++) {
     if (receiptData[i][hashCol] === sha256) {
-      if (receiptData[i][uploaderCol] === user.userId) return { receiptId: receiptData[i][idCol] };
-      else throw new Error('Duplicate receipt detected (uploaded by another user).');
+      if (receiptData[i][uploaderCol] === user.userId) {
+        return { receiptId: receiptData[i][idCol] };
+      }
+      throw new Error("Duplicate receipt detected (uploaded by another user).");
     }
-    if (vendor && receiptDate && Number(receiptTotal) > 0 &&
-        receiptData[i][vendorCol] === vendor &&
-        String(receiptData[i][dateCol]) === String(receiptDate) &&
-        Number(receiptData[i][totalCol]) === Number(receiptTotal)) {
-      try { Discord.postTreasury('⚠️ Soft Warning: Receipt matches existing receipt **' + receiptData[i][idCol] + '** on Vendor, Date, and Total. Possible duplicate claim.'); } catch(e){}
+    if (
+      vendor &&
+      receiptDate &&
+      Number(receiptTotal) > 0 &&
+      receiptData[i][vendorCol] === vendor &&
+      String(receiptData[i][dateCol]) === String(receiptDate) &&
+      Number(receiptData[i][totalCol]) === Number(receiptTotal)
+    ) {
+      try {
+        Discord.postTreasury(
+          "⚠️ Soft Warning: Receipt matches existing receipt **" +
+            receiptData[i][idCol] +
+            "** on Vendor, Date, and Total. Possible duplicate claim."
+        );
+      } catch (e) {}
     }
   }
 
-  var folderId = PropertiesService.getScriptProperties().getProperty('RECEIPTS_FOLDER_ID');
+  var folderId =
+    PropertiesService.getScriptProperties().getProperty("RECEIPTS_FOLDER_ID");
   var folder = DriveApp.getFolderById(folderId);
   var blob = Utilities.newBlob(bytes, mimeType, fileName);
-  
-  var receiptId = Ids.nextId('Receipt');
-  var newName = receiptId + '_' + fileName;
+
+  var receiptId = Ids.nextId("Receipt");
+  var newName = receiptId + "_" + fileName;
   blob.setName(newName);
   var file = folder.createFile(blob);
   var driveFileId = file.getId();
 
-  var fileLink = '=HYPERLINK("https://drive.google.com/open?id=' + driveFileId + '", "View Receipt")';
+  var fileLink =
+    '=HYPERLINK("https://drive.google.com/open?id=' +
+    driveFileId +
+    '", "View Receipt")';
   var now = Audit._nowIso();
 
-  _appendRow(receiptSheet, [receiptId, driveFileId, sha256, user.userId, now, vendor, receiptDate, Number(receiptTotal), fileLink]);
-  return { receiptId: receiptId };
+  _appendRow(receiptSheet, [
+    receiptId,
+    driveFileId,
+    sha256,
+    user.userId,
+    now,
+    vendor,
+    receiptDate,
+    Number(receiptTotal),
+    fileLink,
+  ]);
+  return { receiptId };
 }
 
 /**
@@ -146,15 +231,21 @@ function api_uploadReceipt(fileName, mimeType, base64Data, vendor, receiptDate, 
  */
 function api_deleteOrphanedReceipt(receiptId) {
   var email = Session.getActiveUser().getEmail();
-  if (!email) throw new Error('Not authenticated');
+  if (!email) {
+    throw new Error("Not authenticated");
+  }
   var user = _resolveUser(email);
-  if (user.isUnknown) throw new Error('Unregistered user');
+  if (user.isUnknown) {
+    throw new Error("Unregistered user");
+  }
 
-  var receiptRow = Engine._loadRow('Receipt', receiptId);
-  if (!receiptRow) throw new Error('Receipt not found');
+  var receiptRow = Engine._loadRow("Receipt", receiptId);
+  if (!receiptRow) {
+    throw new Error("Receipt not found");
+  }
 
   if (receiptRow.values[COLS.Receipts.uploaded_by - 1] !== user.userId) {
-    throw new Error('Unauthorized: only the uploader can delete this receipt');
+    throw new Error("Unauthorized: only the uploader can delete this receipt");
   }
 
   var driveFileId = receiptRow.values[COLS.Receipts.drive_file_id - 1];
@@ -168,7 +259,7 @@ function api_deleteOrphanedReceipt(receiptId) {
 
   var sheet = receiptRow.sheet || getSheet_(TABS.RECEIPTS);
   sheet.deleteRow(receiptRow.rowIndex);
-  Audit.append(user.userId, 'Receipt', receiptId, 'DELETE_ORPHANED', {});
+  Audit.append(user.userId, "Receipt", receiptId, "DELETE_ORPHANED", {});
   return { success: true };
 }
 
@@ -177,37 +268,83 @@ function api_deleteOrphanedReceipt(receiptId) {
  */
 function api_submitClaim(payload) {
   var email = Session.getActiveUser().getEmail();
-  if (!email) throw new Error('Not authenticated');
+  if (!email) {
+    throw new Error("Not authenticated");
+  }
   var user = _resolveUser(email);
-  if (user.isUnknown) throw new Error('Unregistered user');
-  if (!payload.claimantId) throw new Error('Claimant is required');
-
-  if (_alreadyProcessed(TABS.EXPENSE_CLAIMS, COLS.ExpenseClaims.processed_response_id, payload.uuid)) {
-    return { success: true, message: 'Already processed' }; // Idempotent
+  if (user.isUnknown) {
+    throw new Error("Unregistered user");
+  }
+  if (!payload.claimantId) {
+    throw new Error("Claimant is required");
   }
 
-  var claimId = Ids.nextId('ExpenseClaim');
+  if (
+    _alreadyProcessed(
+      TABS.EXPENSE_CLAIMS,
+      COLS.ExpenseClaims.processed_response_id,
+      payload.uuid
+    )
+  ) {
+    return { message: "Already processed", success: true }; // Idempotent
+  }
+
+  var claimId = Ids.nextId("ExpenseClaim");
   var now = Audit._nowIso();
   var lateFlag = _isLate(payload.expenseDate);
   var total = Number(payload.amount);
 
   _appendRow(getSheet_(TABS.EXPENSE_CLAIMS), [
-    claimId, payload.claimantId, STATUS.ExpenseClaim.SUBMITTED, now, '', '', '', '',
-    '', '', total, lateFlag, false, payload.notes, payload.uuid, user.userId,
-    payload.expenseDate || '', payload.semester || '', payload.eventId || '',
-    payload.payoutMethod || 'FPS', payload.payoutHandle || ''
+    claimId,
+    payload.claimantId,
+    STATUS.ExpenseClaim.SUBMITTED,
+    now,
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+    total,
+    lateFlag,
+    false,
+    payload.notes,
+    payload.uuid,
+    user.userId,
+    payload.expenseDate || "",
+    payload.semester || "",
+    payload.eventId || "",
+    payload.payoutMethod || "FPS",
+    payload.payoutHandle || "",
   ]);
 
-  var cliId = Ids.childId(claimId, 1, 'CLAIMLINE');
+  var cliId = Ids.childId(claimId, 1, "CLAIMLINE");
   var missingReceipt = !payload.receiptId;
   _appendRow(getSheet_(TABS.CLAIM_LINE_ITEMS), [
-    cliId, claimId, payload.budgetLineId, payload.receiptId || '', total, payload.notes, missingReceipt
+    cliId,
+    claimId,
+    payload.budgetLineId,
+    payload.receiptId || "",
+    total,
+    payload.notes,
+    missingReceipt,
   ]);
 
-  Audit.append(user.userId, 'ExpenseClaim', claimId, 'CREATE', { lines: 1, lateFlag: lateFlag, uuid: payload.uuid });
-  try { Discord.postStatus(claimId, payload.notes, STATUS.ExpenseClaim.SUBMITTED, null); } catch(e){}
+  Audit.append(user.userId, "ExpenseClaim", claimId, "CREATE", {
+    lateFlag,
+    lines: 1,
+    uuid: payload.uuid,
+  });
+  try {
+    Discord.postStatus(
+      claimId,
+      payload.notes,
+      STATUS.ExpenseClaim.SUBMITTED,
+      null
+    );
+  } catch (e) {}
 
-  return { success: true, claimId: claimId };
+  return { claimId, success: true };
 }
 
 // Helpers
@@ -218,42 +355,58 @@ function _resolveUser(email) {
   for (var i = 1; i < values.length; i++) {
     if (String(values[i][c.email - 1]).toLowerCase() === email.toLowerCase()) {
       return {
-        userId: values[i][c.user_id - 1],
+        active:
+          String(values[i][c.active - 1])
+            .trim()
+            .toUpperCase() === "TRUE",
         displayName: values[i][c.display_name - 1],
+        isUnknown: false,
         role: values[i][c.role - 1],
-        active: String(values[i][c.active - 1]).trim().toUpperCase() === 'TRUE',
-        isUnknown: false
+        userId: values[i][c.user_id - 1],
       };
     }
   }
-  return { userId: 'USER-UNKNOWN', isUnknown: true };
+  return { isUnknown: true, userId: "USER-UNKNOWN" };
 }
 
 function _sha256Hex(bytes) {
-  var digest = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes);
-  var hex = '';
+  var digest = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    bytes
+  );
+  var hex = "";
   for (var i = 0; i < digest.length; i++) {
     var v = (digest[i] < 0 ? digest[i] + 256 : digest[i]).toString(16);
-    hex += (v.length === 1 ? '0' + v : v);
+    hex += v.length === 1 ? "0" + v : v;
   }
   return hex;
 }
 
 function _isLate(dateStr) {
-  if (!dateStr) return false;
+  if (!dateStr) {
+    return false;
+  }
   var d = new Date(dateStr);
-  if (isNaN(d.getTime())) return false;
-  var deadlineDays = Config.getNum('CLAIM_DEADLINE_DAYS');
-  return new Date() > new Date(d.getTime() + deadlineDays * 24 * 60 * 60 * 1000);
+  if (isNaN(d.getTime())) {
+    return false;
+  }
+  var deadlineDays = Config.getNum("CLAIM_DEADLINE_DAYS");
+  return (
+    new Date() > new Date(d.getTime() + deadlineDays * 24 * 60 * 60 * 1000)
+  );
 }
 
 function _alreadyProcessed(tabName, colIndex, uuid) {
   var sheet = getSheet_(tabName);
   var lastRow = sheet.getLastRow();
-  if (lastRow <= 1) return false;
+  if (lastRow <= 1) {
+    return false;
+  }
   var values = sheet.getRange(2, colIndex, lastRow - 1, 1).getValues();
   for (var i = 0; i < values.length; i++) {
-    if (values[i][0] === uuid) return true;
+    if (values[i][0] === uuid) {
+      return true;
+    }
   }
   return false;
 }
@@ -267,7 +420,9 @@ function _appendRow(sheet, values) {
       break;
     }
   }
-  if (insertRow > sheet.getMaxRows()) sheet.insertRowAfter(sheet.getMaxRows());
+  if (insertRow > sheet.getMaxRows()) {
+    sheet.insertRowAfter(sheet.getMaxRows());
+  }
   sheet.getRange(insertRow, 1, 1, values.length).setValues([values]);
 }
 
@@ -276,27 +431,35 @@ function _appendRow(sheet, values) {
  */
 function api_editClaim(payload) {
   var email = Session.getActiveUser().getEmail();
-  if (!email) throw new Error('Not authenticated');
+  if (!email) {
+    throw new Error("Not authenticated");
+  }
   var user = _resolveUser(email);
-  if (user.isUnknown) throw new Error('Unregistered user');
+  if (user.isUnknown) {
+    throw new Error("Unregistered user");
+  }
 
   var sheet = getSheet_(TABS.EXPENSE_CLAIMS);
   var rows = sheet.getDataRange().getValues();
   var c = COLS.ExpenseClaims;
-  
+
   var rowIndex = -1;
   for (var i = 1; i < rows.length; i++) {
     if (rows[i][c.claim_id - 1] === payload.claimId) {
       rowIndex = i + 1; // 1-indexed for getRange
-      if (rows[i][c.claimant_id - 1] !== user.userId) throw new Error('Unauthorized');
+      if (rows[i][c.claimant_id - 1] !== user.userId) {
+        throw new Error("Unauthorized");
+      }
       if (rows[i][c.status - 1] !== STATUS.ExpenseClaim.SUBMITTED) {
-        throw new Error('Only SUBMITTED claims can be edited.');
+        throw new Error("Only SUBMITTED claims can be edited.");
       }
       break;
     }
   }
 
-  if (rowIndex === -1) throw new Error('Claim not found');
+  if (rowIndex === -1) {
+    throw new Error("Claim not found");
+  }
 
   // Update total amount and notes
   var total = Number(payload.amount);
@@ -315,7 +478,9 @@ function api_editClaim(payload) {
     }
   }
 
-  Audit.append(user.userId, 'ExpenseClaim', payload.claimId, 'UPDATE', { amount: total });
+  Audit.append(user.userId, "ExpenseClaim", payload.claimId, "UPDATE", {
+    amount: total,
+  });
   return { success: true };
 }
 
@@ -328,46 +493,53 @@ function api_editClaim(payload) {
  */
 function api_getMyBudgetRequests() {
   var email = Session.getActiveUser().getEmail();
-  if (!email) throw new Error('User not authenticated (no active session)');
+  if (!email) {
+    throw new Error("User not authenticated (no active session)");
+  }
 
   var user = _resolveUser(email);
-  if (user.isUnknown || (user.role !== ROLES.COMMITTEE && user.role !== ROLES.TREASURER)) {
+  if (
+    user.isUnknown ||
+    (user.role !== ROLES.COMMITTEE && user.role !== ROLES.TREASURER)
+  ) {
     return [];
   }
 
   var reqSheet = getSheet_(TABS.BUDGET_REQUESTS);
-  var reqRows = Engine._findRowsByColumn(reqSheet, COLS.BudgetRequests.requester_id, user.userId);
+  var reqRows = Engine._findRowsByColumn(
+    reqSheet,
+    COLS.BudgetRequests.requester_id,
+    user.userId
+  );
   var c = COLS.BudgetRequests;
   var lineC = COLS.BudgetRequestLines;
   var lineSheet = getSheet_(TABS.BUDGET_REQUEST_LINES);
 
-  return reqRows.map(function (r) {
+  return reqRows.map((r) => {
     var id = r.values[c.request_id - 1];
     var lineRows = Engine._findRowsByColumn(lineSheet, lineC.request_id, id);
     return {
-      request_id: id,
-      requester_id: r.values[c.requester_id - 1],
-      event_id: r.values[c.event_id - 1],
-      title: r.values[c.title - 1],
-      justification: r.values[c.justification - 1],
-      needed_by: r.values[c.needed_by - 1],
-      status: r.values[c.status - 1],
-      submitted_at: r.values[c.submitted_at - 1],
       decided_at: r.values[c.decided_at - 1],
       decided_by: r.values[c.decided_by - 1],
       decision_note: r.values[c.decision_note - 1],
-      lines: lineRows.map(function (l) {
-        return {
-          line_id: l.values[lineC.line_id - 1],
-          category_id: l.values[lineC.category_id - 1],
-          description: l.values[lineC.description - 1],
-          requested_amount: l.values[lineC.requested_amount - 1],
-          approved_amount: l.values[lineC.approved_amount - 1],
-          line_status: l.values[lineC.line_status - 1],
-          claimed_amount: l.values[lineC.claimed_amount - 1] || 0,
-          remaining: l.values[lineC.remaining - 1] || 0
-        };
-      })
+      event_id: r.values[c.event_id - 1],
+      justification: r.values[c.justification - 1],
+      lines: lineRows.map((l) => ({
+        approved_amount: l.values[lineC.approved_amount - 1],
+        category_id: l.values[lineC.category_id - 1],
+        claimed_amount: l.values[lineC.claimed_amount - 1] || 0,
+        description: l.values[lineC.description - 1],
+        line_id: l.values[lineC.line_id - 1],
+        line_status: l.values[lineC.line_status - 1],
+        remaining: l.values[lineC.remaining - 1] || 0,
+        requested_amount: l.values[lineC.requested_amount - 1],
+      })),
+      needed_by: r.values[c.needed_by - 1],
+      request_id: id,
+      requester_id: r.values[c.requester_id - 1],
+      status: r.values[c.status - 1],
+      submitted_at: r.values[c.submitted_at - 1],
+      title: r.values[c.title - 1],
     };
   });
 }
@@ -377,9 +549,13 @@ function api_getMyBudgetRequests() {
  */
 function api_saveBudgetRequestDraft(payload) {
   var email = Session.getActiveUser().getEmail();
-  if (!email) throw new Error('Not authenticated');
+  if (!email) {
+    throw new Error("Not authenticated");
+  }
   var user = _resolveUser(email);
-  if (user.isUnknown) throw new Error('Unregistered user');
+  if (user.isUnknown) {
+    throw new Error("Unregistered user");
+  }
 
   var now = Audit._nowIso();
   var c = COLS.BudgetRequests;
@@ -391,59 +567,93 @@ function api_saveBudgetRequestDraft(payload) {
   var existingRow = null;
 
   if (payload.request_id) {
-    existingRow = Engine._loadRow('BudgetRequest', payload.request_id);
+    existingRow = Engine._loadRow("BudgetRequest", payload.request_id);
     if (existingRow) {
       var curStatus = existingRow.values[c.status - 1];
-      if (curStatus !== STATUS.BudgetRequest.DRAFT && curStatus !== STATUS.BudgetRequest.NEEDS_INFO) {
-        throw new Error('Cannot edit a ' + curStatus + ' budget request');
+      if (
+        curStatus !== STATUS.BudgetRequest.DRAFT &&
+        curStatus !== STATUS.BudgetRequest.NEEDS_INFO
+      ) {
+        throw new Error("Cannot edit a " + curStatus + " budget request");
       }
       requestId = payload.request_id;
     }
   }
 
-  if (!requestId) {
-    requestId = Ids.nextId('BudgetRequest');
-    _appendRow(sheet, [
-      requestId, user.userId, payload.event_id || '', payload.title || '',
-      payload.justification || '', payload.needed_by || '', STATUS.BudgetRequest.DRAFT,
-      '', '', '', '', false, payload.uuid || ''
-    ]);
-  } else {
+  if (requestId) {
     var idx = existingRow.rowIndex;
-    sheet.getRange(idx, c.title).setValue(payload.title || '');
-    sheet.getRange(idx, c.justification).setValue(payload.justification || '');
-    sheet.getRange(idx, c.needed_by).setValue(payload.needed_by || '');
-    sheet.getRange(idx, c.event_id).setValue(payload.event_id || '');
+    sheet.getRange(idx, c.title).setValue(payload.title || "");
+    sheet.getRange(idx, c.justification).setValue(payload.justification || "");
+    sheet.getRange(idx, c.needed_by).setValue(payload.needed_by || "");
+    sheet.getRange(idx, c.event_id).setValue(payload.event_id || "");
+  } else {
+    requestId = Ids.nextId("BudgetRequest");
+    _appendRow(sheet, [
+      requestId,
+      user.userId,
+      payload.event_id || "",
+      payload.title || "",
+      payload.justification || "",
+      payload.needed_by || "",
+      STATUS.BudgetRequest.DRAFT,
+      "",
+      "",
+      "",
+      "",
+      false,
+      payload.uuid || "",
+    ]);
   }
 
   if (payload.lines && payload.lines.length > 0) {
-    var existingLines = Engine._findRowsByColumn(lineSheet, lineC.request_id, requestId);
-    existingLines.forEach(function (el) {
+    var existingLines = Engine._findRowsByColumn(
+      lineSheet,
+      lineC.request_id,
+      requestId
+    );
+    existingLines.forEach((el) => {
       var row = el.rowIndex;
-      lineSheet.getRange(row, lineC.description).setValue('');
+      lineSheet.getRange(row, lineC.description).setValue("");
       lineSheet.getRange(row, lineC.requested_amount).setValue(0);
       lineSheet.getRange(row, lineC.approved_amount).setValue(0);
     });
 
-    payload.lines.forEach(function (line, i) {
+    payload.lines.forEach((line, i) => {
       var lineId;
       if (existingLines[i]) {
         lineId = existingLines[i].values[lineC.line_id - 1];
         var row = existingLines[i].rowIndex;
-        lineSheet.getRange(row, lineC.category_id).setValue(line.category_id || '');
+        lineSheet
+          .getRange(row, lineC.category_id)
+          .setValue(line.category_id || "");
         lineSheet.getRange(row, lineC.description).setValue(line.description);
-        lineSheet.getRange(row, lineC.requested_amount).setValue(Number(line.requested_amount) || 0);
+        lineSheet
+          .getRange(row, lineC.requested_amount)
+          .setValue(Number(line.requested_amount) || 0);
       } else {
-        lineId = Ids.childId(requestId, i + 1, 'BUDGETLINE');
+        lineId = Ids.childId(requestId, i + 1, "BUDGETLINE");
         _appendRow(lineSheet, [
-          lineId, requestId, line.category_id || '', line.description,
-          Number(line.requested_amount) || 0, 0, STATUS.BudgetRequestLine.PENDING, 0, 0
+          lineId,
+          requestId,
+          line.category_id || "",
+          line.description,
+          Number(line.requested_amount) || 0,
+          0,
+          STATUS.BudgetRequestLine.PENDING,
+          0,
+          0,
         ]);
       }
     });
   }
 
-  Audit.append(user.userId, 'BudgetRequest', requestId, existingRow ? 'DRAFT_UPDATE' : 'DRAFT_CREATE', {});
+  Audit.append(
+    user.userId,
+    "BudgetRequest",
+    requestId,
+    existingRow ? "DRAFT_UPDATE" : "DRAFT_CREATE",
+    {}
+  );
   return { request_id: requestId, status: STATUS.BudgetRequest.DRAFT };
 }
 
@@ -452,28 +662,46 @@ function api_saveBudgetRequestDraft(payload) {
  */
 function api_submitBudgetRequest(requestId) {
   var email = Session.getActiveUser().getEmail();
-  if (!email) throw new Error('Not authenticated');
+  if (!email) {
+    throw new Error("Not authenticated");
+  }
   var user = _resolveUser(email);
-  if (user.isUnknown) throw new Error('Unregistered user');
+  if (user.isUnknown) {
+    throw new Error("Unregistered user");
+  }
 
-  var row = Engine._loadRow('BudgetRequest', requestId);
-  if (!row) throw new Error('Budget request not found');
+  var row = Engine._loadRow("BudgetRequest", requestId);
+  if (!row) {
+    throw new Error("Budget request not found");
+  }
 
   var c = COLS.BudgetRequests;
   var curStatus = row.values[c.status - 1];
   var action;
   if (curStatus === STATUS.BudgetRequest.DRAFT) {
-    action = 'SUBMIT';
+    action = "SUBMIT";
   } else if (curStatus === STATUS.BudgetRequest.NEEDS_INFO) {
-    action = 'RESUBMIT';
+    action = "RESUBMIT";
   } else {
-    throw new Error('Cannot submit a ' + curStatus + ' budget request');
+    throw new Error("Cannot submit a " + curStatus + " budget request");
   }
 
-  var result = Engine.transition('BudgetRequest', requestId, action, user.userId, {});
-  if (!result.ok) throw new Error(result.reason);
+  var result = Engine.transition(
+    "BudgetRequest",
+    requestId,
+    action,
+    user.userId,
+    {}
+  );
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
 
-  return { request_id: requestId, status: result.to, submitted_at: Audit._nowIso() };
+  return {
+    request_id: requestId,
+    status: result.to,
+    submitted_at: Audit._nowIso(),
+  };
 }
 
 /**
@@ -481,12 +709,24 @@ function api_submitBudgetRequest(requestId) {
  */
 function api_discardBudgetRequest(requestId) {
   var email = Session.getActiveUser().getEmail();
-  if (!email) throw new Error('Not authenticated');
+  if (!email) {
+    throw new Error("Not authenticated");
+  }
   var user = _resolveUser(email);
-  if (user.isUnknown) throw new Error('Unregistered user');
+  if (user.isUnknown) {
+    throw new Error("Unregistered user");
+  }
 
-  var result = Engine.transition('BudgetRequest', requestId, 'WITHDRAW', user.userId, {});
-  if (!result.ok) throw new Error(result.reason);
+  var result = Engine.transition(
+    "BudgetRequest",
+    requestId,
+    "WITHDRAW",
+    user.userId,
+    {}
+  );
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
   return { request_id: requestId, status: result.to };
 }
 
@@ -495,10 +735,12 @@ function api_discardBudgetRequest(requestId) {
  */
 function api_getPendingBudgetRequests() {
   var email = Session.getActiveUser().getEmail();
-  if (!email) throw new Error('Not authenticated');
+  if (!email) {
+    throw new Error("Not authenticated");
+  }
   var user = _resolveUser(email);
   if (user.isUnknown || user.role !== ROLES.TREASURER) {
-    throw new Error('Unauthorized');
+    throw new Error("Unauthorized");
   }
 
   var sheet = getSheet_(TABS.BUDGET_REQUESTS);
@@ -507,17 +749,19 @@ function api_getPendingBudgetRequests() {
   var out = [];
 
   for (var i = 1; i < values.length; i++) {
-    if (values[i][c.status - 1] !== STATUS.BudgetRequest.PENDING) continue;
+    if (values[i][c.status - 1] !== STATUS.BudgetRequest.PENDING) {
+      continue;
+    }
     var id = values[i][c.request_id - 1];
-    var amount = Engine._sumBudgetRequestLines(id, 'requested_amount');
+    var amount = Engine._sumBudgetRequestLines(id, "requested_amount");
     out.push({
-      request_id: id,
-      title: values[i][c.title - 1],
-      requester_id: values[i][c.requester_id - 1],
       justification: values[i][c.justification - 1],
       needed_by: values[i][c.needed_by - 1],
+      request_id: id,
+      requester_id: values[i][c.requester_id - 1],
       submitted_at: values[i][c.submitted_at - 1],
-      total_requested: amount
+      title: values[i][c.title - 1],
+      total_requested: amount,
     });
   }
   return out;
@@ -530,15 +774,25 @@ function api_getPendingBudgetRequests() {
  */
 function api_decisionBudgetRequest(entityId, action, payload) {
   var email = Session.getActiveUser().getEmail();
-  if (!email) throw new Error('Not authenticated');
+  if (!email) {
+    throw new Error("Not authenticated");
+  }
   var user = _resolveUser(email);
   if (user.isUnknown || user.role !== ROLES.TREASURER) {
-    throw new Error('Unauthorized');
+    throw new Error("Unauthorized");
   }
 
-  var result = Engine.transition('BudgetRequest', entityId, action, user.userId, payload || {});
-  if (!result.ok) throw new Error(result.reason);
-  return { request_id: entityId, from: result.from, to: result.to };
+  var result = Engine.transition(
+    "BudgetRequest",
+    entityId,
+    action,
+    user.userId,
+    payload || {}
+  );
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
+  return { from: result.from, request_id: entityId, to: result.to };
 }
 
 // ---------------------------------------------------------------------------
@@ -547,11 +801,15 @@ function api_decisionBudgetRequest(entityId, action, payload) {
 
 function _requireOperator() {
   var email = Session.getActiveUser().getEmail();
-  if (!email) throw new Error('Not authenticated');
+  if (!email) {
+    throw new Error("Not authenticated");
+  }
   var user = _resolveUser(email);
-  if (user.isUnknown) throw new Error('Unregistered user');
+  if (user.isUnknown) {
+    throw new Error("Unregistered user");
+  }
   if (user.role !== ROLES.COMMITTEE && user.role !== ROLES.TREASURER) {
-    throw new Error('Unauthorized');
+    throw new Error("Unauthorized");
   }
   return user;
 }
@@ -605,9 +863,12 @@ function api_getMembers() {
   for (var i = 1; i < values.length; i++) {
     if (values[i][c.role - 1] === ROLES.MEMBER) {
       out.push({
-        user_id: values[i][c.user_id - 1],
+        active:
+          String(values[i][c.active - 1])
+            .trim()
+            .toUpperCase() === "TRUE",
         display_name: values[i][c.display_name - 1],
-        active: String(values[i][c.active - 1]).trim().toUpperCase() === 'TRUE'
+        user_id: values[i][c.user_id - 1],
       });
     }
   }
@@ -619,44 +880,61 @@ function api_getMembers() {
  */
 function api_addMember(payload) {
   var operator = _requireOperator();
-  if (!payload.student_id || !String(payload.student_id).trim()) {
-    throw new Error('Student ID is required');
+  if (!(payload.student_id && String(payload.student_id).trim())) {
+    throw new Error("Student ID is required");
   }
-  if (!payload.display_name || !String(payload.display_name).trim()) {
-    throw new Error('Display name is required');
+  if (!(payload.display_name && String(payload.display_name).trim())) {
+    throw new Error("Display name is required");
   }
 
   var existing = _findVaultByStudentId(payload.student_id);
   if (existing) {
     var user = _findUserById(existing.values[COLS.Vault.user_id - 1]);
     if (user && user.values[COLS.Users.active - 1] === true) {
-      throw new Error('Active member with this SID already exists');
+      throw new Error("Active member with this SID already exists");
     }
-    throw new Error('Inactive member with this SID already exists. Use reactivate instead.');
+    throw new Error(
+      "Inactive member with this SID already exists. Use reactivate instead."
+    );
   }
 
-  var userId = Ids.nextId('User');
+  var userId = Ids.nextId("User");
   var now = Audit._nowIso();
   var displayName = String(payload.display_name).trim();
-  _appendRow(getSheet_(TABS.USERS), [userId, displayName, ROLES.MEMBER, '', true, now]);
+  _appendRow(getSheet_(TABS.USERS), [
+    userId,
+    displayName,
+    ROLES.MEMBER,
+    "",
+    true,
+    now,
+  ]);
 
   var vaultRow = [
     userId,
     String(payload.full_name || displayName).trim(),
     String(payload.student_id).trim(),
-    String(payload.payout_method || 'FPS').trim(),
-    String(payload.payout_handle || '').trim(),
-    now
+    String(payload.payout_method || "FPS").trim(),
+    String(payload.payout_handle || "").trim(),
+    now,
   ];
   var vaultSheet = getVaultSheet_();
   _appendRow(vaultSheet, vaultRow);
   // Force text format for ID / phone fields to preserve leading zeros
   var targetRow = vaultSheet.getLastRow();
-  vaultSheet.getRange(targetRow, COLS.Vault.student_id).setNumberFormat('@').setValue(vaultRow[2]);
-  vaultSheet.getRange(targetRow, COLS.Vault.payout_handle).setNumberFormat('@').setValue(vaultRow[4]);
+  vaultSheet
+    .getRange(targetRow, COLS.Vault.student_id)
+    .setNumberFormat("@")
+    .setValue(vaultRow[2]);
+  vaultSheet
+    .getRange(targetRow, COLS.Vault.payout_handle)
+    .setNumberFormat("@")
+    .setValue(vaultRow[4]);
 
-  Audit.append(operator.userId, 'User', userId, 'MEMBER_CREATE', { sid: String(payload.student_id).trim() });
-  return { user_id: userId, display_name: displayName, active: true };
+  Audit.append(operator.userId, "User", userId, "MEMBER_CREATE", {
+    sid: String(payload.student_id).trim(),
+  });
+  return { active: true, display_name: displayName, user_id: userId };
 }
 
 /**
@@ -665,17 +943,21 @@ function api_addMember(payload) {
 function api_reactivateMember(userId) {
   var operator = _requireOperator();
   var user = _findUserById(userId);
-  if (!user) throw new Error('Member not found');
+  if (!user) {
+    throw new Error("Member not found");
+  }
   if (user.values[COLS.Users.role - 1] !== ROLES.MEMBER) {
-    throw new Error('User is not a member');
+    throw new Error("User is not a member");
   }
   if (user.values[COLS.Users.active - 1] === true) {
-    throw new Error('Member is already active');
+    throw new Error("Member is already active");
   }
 
-  getSheet_(TABS.USERS).getRange(user.rowIndex, COLS.Users.active).setValue(true);
-  Audit.append(operator.userId, 'User', userId, 'MEMBER_REACTIVATE', {});
-  return { user_id: userId, active: true };
+  getSheet_(TABS.USERS)
+    .getRange(user.rowIndex, COLS.Users.active)
+    .setValue(true);
+  Audit.append(operator.userId, "User", userId, "MEMBER_REACTIVATE", {});
+  return { active: true, user_id: userId };
 }
 
 // ---------------------------------------------------------------------------
@@ -687,50 +969,88 @@ function api_reactivateMember(userId) {
  */
 function api_saveClaimDraft(payload) {
   var operator = _requireOperator();
-  if (!payload.claimantId) throw new Error('Claimant is required');
-  if (!payload.uuid) throw new Error('uuid is required');
+  if (!payload.claimantId) {
+    throw new Error("Claimant is required");
+  }
+  if (!payload.uuid) {
+    throw new Error("uuid is required");
+  }
 
   if (payload.claimId) {
-    var existing = Engine._loadRow('ExpenseClaim', payload.claimId);
-    if (!existing) throw new Error('Claim not found');
-    if (existing.values[COLS.ExpenseClaims.created_by - 1] !== operator.userId) {
-      throw new Error('Unauthorized');
+    var existing = Engine._loadRow("ExpenseClaim", payload.claimId);
+    if (!existing) {
+      throw new Error("Claim not found");
     }
-    if (existing.values[COLS.ExpenseClaims.status - 1] !== STATUS.ExpenseClaim.DRAFT) {
-      throw new Error('Only DRAFT claims can be updated as draft');
+    if (
+      existing.values[COLS.ExpenseClaims.created_by - 1] !== operator.userId
+    ) {
+      throw new Error("Unauthorized");
+    }
+    if (
+      existing.values[COLS.ExpenseClaims.status - 1] !==
+      STATUS.ExpenseClaim.DRAFT
+    ) {
+      throw new Error("Only DRAFT claims can be updated as draft");
     }
   }
 
-  var claimId = payload.claimId || Ids.nextId('ExpenseClaim');
+  var claimId = payload.claimId || Ids.nextId("ExpenseClaim");
   var now = Audit._nowIso();
   var c = COLS.ExpenseClaims;
   var lateFlag = _isLate(payload.expenseDate);
   var total = Number(payload.amount) || 0;
 
-  if (!payload.claimId) {
-    _appendRow(getSheet_(TABS.EXPENSE_CLAIMS), [
-      claimId, payload.claimantId, STATUS.ExpenseClaim.DRAFT, '', '', '', '', '',
-      '', '', total, lateFlag, false, payload.notes || '', payload.uuid, operator.userId,
-      payload.expenseDate || '', payload.semester || '', payload.eventId || '',
-      payload.payoutMethod || 'FPS', payload.payoutHandle || ''
-    ]);
-  } else {
-    var row = Engine._loadRow('ExpenseClaim', claimId);
+  if (payload.claimId) {
+    var row = Engine._loadRow("ExpenseClaim", claimId);
     var sheet = row.sheet;
     sheet.getRange(row.rowIndex, c.claimant_id).setValue(payload.claimantId);
     sheet.getRange(row.rowIndex, c.total_amount).setValue(total);
-    sheet.getRange(row.rowIndex, c.notes).setValue(payload.notes || '');
+    sheet.getRange(row.rowIndex, c.notes).setValue(payload.notes || "");
     sheet.getRange(row.rowIndex, c.late_flag).setValue(lateFlag);
-    sheet.getRange(row.rowIndex, c.expense_date).setValue(payload.expenseDate || '');
-    sheet.getRange(row.rowIndex, c.semester).setValue(payload.semester || '');
-    sheet.getRange(row.rowIndex, c.event_id).setValue(payload.eventId || '');
-    sheet.getRange(row.rowIndex, c.payout_method).setValue(payload.payoutMethod || 'FPS');
-    sheet.getRange(row.rowIndex, c.payout_handle).setValue(payload.payoutHandle || '');
+    sheet
+      .getRange(row.rowIndex, c.expense_date)
+      .setValue(payload.expenseDate || "");
+    sheet.getRange(row.rowIndex, c.semester).setValue(payload.semester || "");
+    sheet.getRange(row.rowIndex, c.event_id).setValue(payload.eventId || "");
+    sheet
+      .getRange(row.rowIndex, c.payout_method)
+      .setValue(payload.payoutMethod || "FPS");
+    sheet
+      .getRange(row.rowIndex, c.payout_handle)
+      .setValue(payload.payoutHandle || "");
+  } else {
+    _appendRow(getSheet_(TABS.EXPENSE_CLAIMS), [
+      claimId,
+      payload.claimantId,
+      STATUS.ExpenseClaim.DRAFT,
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      total,
+      lateFlag,
+      false,
+      payload.notes || "",
+      payload.uuid,
+      operator.userId,
+      payload.expenseDate || "",
+      payload.semester || "",
+      payload.eventId || "",
+      payload.payoutMethod || "FPS",
+      payload.payoutHandle || "",
+    ]);
   }
 
   // Upsert claim line item(s)
   var cliSheet = getSheet_(TABS.CLAIM_LINE_ITEMS);
-  var cliRows = Engine._findRowsByColumn(cliSheet, COLS.ClaimLineItems.claim_id, claimId);
+  var cliRows = Engine._findRowsByColumn(
+    cliSheet,
+    COLS.ClaimLineItems.claim_id,
+    claimId
+  );
 
   var receiptIds = payload.receiptIds || [];
   if (payload.receiptId && receiptIds.indexOf(payload.receiptId) === -1) {
@@ -753,21 +1073,45 @@ function api_saveClaimDraft(payload) {
     var perLineAmount = total / receiptIds.length;
     for (var ri = 0; ri < receiptIds.length; ri++) {
       // missing_receipt_flag is always false here: receiptIds present means we have receipts
-      var cliValues = [Ids.childId(claimId, ri + 1, 'CLAIMLINE'), claimId, payload.budgetLineId || '', receiptIds[ri] || '', perLineAmount, payload.notes || '', false];
+      var cliValues = [
+        Ids.childId(claimId, ri + 1, "CLAIMLINE"),
+        claimId,
+        payload.budgetLineId || "",
+        receiptIds[ri] || "",
+        perLineAmount,
+        payload.notes || "",
+        false,
+      ];
       _appendRow(cliSheet, cliValues);
     }
   } else {
     var missingReceipt = !payload.receiptId;
-    var cliValues = [Ids.childId(claimId, 1, 'CLAIMLINE'), claimId, payload.budgetLineId || '', payload.receiptId || '', total, payload.notes || '', missingReceipt];
+    var cliValues = [
+      Ids.childId(claimId, 1, "CLAIMLINE"),
+      claimId,
+      payload.budgetLineId || "",
+      payload.receiptId || "",
+      total,
+      payload.notes || "",
+      missingReceipt,
+    ];
     if (cliRows.length > 0) {
       var cliC = COLS.ClaimLineItems;
-      cliSheet.getRange(cliRows[0].rowIndex, 1, 1, cliValues.length).setValues([cliValues]);
+      cliSheet
+        .getRange(cliRows[0].rowIndex, 1, 1, cliValues.length)
+        .setValues([cliValues]);
     } else {
       _appendRow(cliSheet, cliValues);
     }
   }
 
-  Audit.append(operator.userId, 'ExpenseClaim', claimId, payload.claimId ? 'DRAFT_UPDATE' : 'DRAFT_CREATE', { uuid: payload.uuid });
+  Audit.append(
+    operator.userId,
+    "ExpenseClaim",
+    claimId,
+    payload.claimId ? "DRAFT_UPDATE" : "DRAFT_CREATE",
+    { uuid: payload.uuid }
+  );
   return { claim_id: claimId, status: STATUS.ExpenseClaim.DRAFT };
 }
 
@@ -778,34 +1122,58 @@ function api_saveClaimDraft(payload) {
  */
 function api_attachReceipts(claimId, receiptIds) {
   var operator = _requireOperator();
-  if (!receiptIds || !Array.isArray(receiptIds) || receiptIds.length === 0) {
-    throw new Error('receiptIds array is required');
+  if (!(receiptIds && Array.isArray(receiptIds)) || receiptIds.length === 0) {
+    throw new Error("receiptIds array is required");
   }
 
-  var existing = Engine._loadRow('ExpenseClaim', claimId);
-  if (!existing) throw new Error('Claim not found');
+  var existing = Engine._loadRow("ExpenseClaim", claimId);
+  if (!existing) {
+    throw new Error("Claim not found");
+  }
   if (existing.values[COLS.ExpenseClaims.created_by - 1] !== operator.userId) {
-    throw new Error('Unauthorized');
+    throw new Error("Unauthorized");
   }
 
-  var attachableStatuses = [STATUS.ExpenseClaim.DRAFT, STATUS.ExpenseClaim.SUBMITTED, STATUS.ExpenseClaim.NEEDS_INFO, STATUS.ExpenseClaim.VERIFIED];
+  var attachableStatuses = [
+    STATUS.ExpenseClaim.DRAFT,
+    STATUS.ExpenseClaim.SUBMITTED,
+    STATUS.ExpenseClaim.NEEDS_INFO,
+    STATUS.ExpenseClaim.VERIFIED,
+  ];
   var claimStatus = existing.values[COLS.ExpenseClaims.status - 1];
   if (attachableStatuses.indexOf(claimStatus) === -1) {
-    throw new Error('Receipts can only be attached to DRAFT, SUBMITTED, NEEDS_INFO, or VERIFIED claims');
+    throw new Error(
+      "Receipts can only be attached to DRAFT, SUBMITTED, NEEDS_INFO, or VERIFIED claims"
+    );
   }
 
   var cliSheet = getSheet_(TABS.CLAIM_LINE_ITEMS);
-  var existingLines = Engine._findRowsByColumn(cliSheet, COLS.ClaimLineItems.claim_id, claimId);
-  var budgetLineId = existingLines.length > 0 ? existingLines[0].values[COLS.ClaimLineItems.budget_line_id - 1] : '';
+  var existingLines = Engine._findRowsByColumn(
+    cliSheet,
+    COLS.ClaimLineItems.claim_id,
+    claimId
+  );
+  var budgetLineId =
+    existingLines.length > 0
+      ? existingLines[0].values[COLS.ClaimLineItems.budget_line_id - 1]
+      : "";
 
   for (var i = 0; i < receiptIds.length; i++) {
     var nextLineNum = existingLines.length + i + 1;
     _appendRow(cliSheet, [
-      Ids.childId(claimId, nextLineNum, 'CLAIMLINE'), claimId, budgetLineId, receiptIds[i], 0, '', false
+      Ids.childId(claimId, nextLineNum, "CLAIMLINE"),
+      claimId,
+      budgetLineId,
+      receiptIds[i],
+      0,
+      "",
+      false,
     ]);
   }
 
-  Audit.append(operator.userId, 'ExpenseClaim', claimId, 'RECEIPTS_ATTACHED', { receiptIds: receiptIds });
+  Audit.append(operator.userId, "ExpenseClaim", claimId, "RECEIPTS_ATTACHED", {
+    receiptIds,
+  });
   return { claim_id: claimId, status: claimStatus };
 }
 
@@ -814,18 +1182,34 @@ function api_attachReceipts(claimId, receiptIds) {
  */
 function api_submitDraftClaim(claimId) {
   var operator = _requireOperator();
-  var existing = Engine._loadRow('ExpenseClaim', claimId);
-  if (!existing) throw new Error('Claim not found');
-  if (existing.values[COLS.ExpenseClaims.created_by - 1] !== operator.userId) {
-    throw new Error('Unauthorized');
+  var existing = Engine._loadRow("ExpenseClaim", claimId);
+  if (!existing) {
+    throw new Error("Claim not found");
   }
-  if (existing.values[COLS.ExpenseClaims.status - 1] !== STATUS.ExpenseClaim.DRAFT) {
-    throw new Error('Only DRAFT claims can be submitted');
+  if (existing.values[COLS.ExpenseClaims.created_by - 1] !== operator.userId) {
+    throw new Error("Unauthorized");
+  }
+  if (
+    existing.values[COLS.ExpenseClaims.status - 1] !== STATUS.ExpenseClaim.DRAFT
+  ) {
+    throw new Error("Only DRAFT claims can be submitted");
   }
 
-  var result = Engine.transition('ExpenseClaim', claimId, 'SUBMIT', operator.userId, {});
-  if (!result.ok) throw new Error(result.reason);
-  return { claim_id: claimId, status: result.to, submitted_at: Audit._nowIso() };
+  var result = Engine.transition(
+    "ExpenseClaim",
+    claimId,
+    "SUBMIT",
+    operator.userId,
+    {}
+  );
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
+  return {
+    claim_id: claimId,
+    status: result.to,
+    submitted_at: Audit._nowIso(),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -841,7 +1225,11 @@ function api_getClaimsQueue(filters) {
   var c = COLS.ExpenseClaims;
   var out = [];
 
-  var queueStatuses = [STATUS.ExpenseClaim.SUBMITTED, STATUS.ExpenseClaim.NEEDS_INFO, STATUS.ExpenseClaim.VERIFIED];
+  var queueStatuses = [
+    STATUS.ExpenseClaim.SUBMITTED,
+    STATUS.ExpenseClaim.NEEDS_INFO,
+    STATUS.ExpenseClaim.VERIFIED,
+  ];
   var filterStatus = filters.status;
   var filterEvent = filters.eventId;
   var filterCreator = filters.creator;
@@ -876,23 +1264,35 @@ function api_getClaimsQueue(filters) {
 
   for (var i = 1; i < values.length; i++) {
     var status = values[i][c.status - 1];
-    if (queueStatuses.indexOf(status) === -1) continue;
-    if (filterStatus && status !== filterStatus) continue;
-    if (filterEvent && values[i][c.event_id - 1] !== filterEvent) continue;
-    if (filterCreator && values[i][c.created_by - 1] !== filterCreator) continue;
-    if (filterBudgetLine && !claimIdsByBudgetLine[values[i][c.claim_id - 1]]) continue;
-    if (filterSid && values[i][c.claimant_id - 1] !== userIdBySid) continue;
+    if (queueStatuses.indexOf(status) === -1) {
+      continue;
+    }
+    if (filterStatus && status !== filterStatus) {
+      continue;
+    }
+    if (filterEvent && values[i][c.event_id - 1] !== filterEvent) {
+      continue;
+    }
+    if (filterCreator && values[i][c.created_by - 1] !== filterCreator) {
+      continue;
+    }
+    if (filterBudgetLine && !claimIdsByBudgetLine[values[i][c.claim_id - 1]]) {
+      continue;
+    }
+    if (filterSid && values[i][c.claimant_id - 1] !== userIdBySid) {
+      continue;
+    }
 
     out.push({
       claim_id: values[i][c.claim_id - 1],
       claimant_id: values[i][c.claimant_id - 1],
-      status: status,
-      submitted_at: values[i][c.submitted_at - 1],
-      verified_at: values[i][c.verified_at - 1],
-      total_amount: values[i][c.total_amount - 1],
-      notes: values[i][c.notes - 1],
       created_by: values[i][c.created_by - 1],
-      event_id: values[i][c.event_id - 1]
+      event_id: values[i][c.event_id - 1],
+      notes: values[i][c.notes - 1],
+      status,
+      submitted_at: values[i][c.submitted_at - 1],
+      total_amount: values[i][c.total_amount - 1],
+      verified_at: values[i][c.verified_at - 1],
     });
   }
   return out;
@@ -905,8 +1305,16 @@ function api_verifyClaim(claimId, payload) {
   var operator = _requireOperator();
   payload = payload || {};
 
-  var result = Engine.transition('ExpenseClaim', claimId, 'VERIFY', operator.userId, payload);
-  if (!result.ok) throw new Error(result.reason);
+  var result = Engine.transition(
+    "ExpenseClaim",
+    claimId,
+    "VERIFY",
+    operator.userId,
+    payload
+  );
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
   return { claim_id: claimId, from: result.from, to: result.to };
 }
 
@@ -915,10 +1323,20 @@ function api_verifyClaim(claimId, payload) {
  */
 function api_rejectClaim(claimId, reason) {
   var operator = _requireOperator();
-  if (!reason || !String(reason).trim()) throw new Error('Rejection reason is required');
+  if (!(reason && String(reason).trim())) {
+    throw new Error("Rejection reason is required");
+  }
 
-  var result = Engine.transition('ExpenseClaim', claimId, 'REJECT', operator.userId, { decision_note: reason });
-  if (!result.ok) throw new Error(result.reason);
+  var result = Engine.transition(
+    "ExpenseClaim",
+    claimId,
+    "REJECT",
+    operator.userId,
+    { decision_note: reason }
+  );
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
   return { claim_id: claimId, from: result.from, to: result.to };
 }
 
@@ -927,10 +1345,20 @@ function api_rejectClaim(claimId, reason) {
  */
 function api_requestInfo(claimId, reason) {
   var operator = _requireOperator();
-  if (!reason || !String(reason).trim()) throw new Error('Request note is required');
+  if (!(reason && String(reason).trim())) {
+    throw new Error("Request note is required");
+  }
 
-  var result = Engine.transition('ExpenseClaim', claimId, 'REQUEST_INFO', operator.userId, { decision_note: reason });
-  if (!result.ok) throw new Error(result.reason);
+  var result = Engine.transition(
+    "ExpenseClaim",
+    claimId,
+    "REQUEST_INFO",
+    operator.userId,
+    { decision_note: reason }
+  );
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
   return { claim_id: claimId, from: result.from, to: result.to };
 }
 
@@ -940,14 +1368,24 @@ function api_requestInfo(claimId, reason) {
 function api_resubmitClaim(claimId) {
   var operator = _requireOperator();
 
-  var existing = Engine._loadRow('ExpenseClaim', claimId);
-  if (!existing) throw new Error('Claim not found');
+  var existing = Engine._loadRow("ExpenseClaim", claimId);
+  if (!existing) {
+    throw new Error("Claim not found");
+  }
   if (existing.values[COLS.ExpenseClaims.created_by - 1] !== operator.userId) {
-    throw new Error('Unauthorized');
+    throw new Error("Unauthorized");
   }
 
-  var result = Engine.transition('ExpenseClaim', claimId, 'RESUBMIT', operator.userId, {});
-  if (!result.ok) throw new Error(result.reason);
+  var result = Engine.transition(
+    "ExpenseClaim",
+    claimId,
+    "RESUBMIT",
+    operator.userId,
+    {}
+  );
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
   return { claim_id: claimId, from: result.from, to: result.to };
 }
 
@@ -969,17 +1407,19 @@ function api_getAccounts() {
   var c = COLS.FinanceAccounts;
   var out = [];
   for (var i = 1; i < values.length; i++) {
-    if (!values[i][c.account_id - 1]) continue;
+    if (!values[i][c.account_id - 1]) {
+      continue;
+    }
     out.push({
       account_id: values[i][c.account_id - 1],
+      created_at: values[i][c.created_at - 1] || "",
+      current_balance: Number(values[i][c.current_balance - 1]) || 0,
+      deactivated_at: values[i][c.deactivated_at - 1] || "",
       name: values[i][c.name - 1],
       opening_balance: Number(values[i][c.opening_balance - 1]) || 0,
-      current_balance: Number(values[i][c.current_balance - 1]) || 0,
       pending_income: Number(values[i][c.pending_income - 1]) || 0,
       reserved_payouts: Number(values[i][c.reserved_payouts - 1]) || 0,
       status: values[i][c.status - 1],
-      created_at: values[i][c.created_at - 1] || '',
-      deactivated_at: values[i][c.deactivated_at - 1] || ''
     });
   }
   return out;
@@ -990,20 +1430,38 @@ function api_getAccounts() {
  */
 function api_addAccount(payload) {
   var operator = _requireOperator();
-  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized');
-  if (!payload.name || !String(payload.name).trim()) throw new Error('Account name is required');
+  if (operator.role !== ROLES.TREASURER) {
+    throw new Error("Unauthorized");
+  }
+  if (!(payload.name && String(payload.name).trim())) {
+    throw new Error("Account name is required");
+  }
 
-  var accountId = Ids.nextId('FinanceAccount');
+  var accountId = Ids.nextId("FinanceAccount");
   var now = Audit._nowIso();
   var c = COLS.FinanceAccounts;
   var openingBalance = Number(payload.opening_balance) || 0;
   _appendRow(getSheet_(TABS.FINANCE_ACCOUNTS), [
-    accountId, String(payload.name).trim(), openingBalance, openingBalance,
-    0, 0, STATUS.FinanceAccount.ACTIVE, now, ''
+    accountId,
+    String(payload.name).trim(),
+    openingBalance,
+    openingBalance,
+    0,
+    0,
+    STATUS.FinanceAccount.ACTIVE,
+    now,
+    "",
   ]);
 
-  Audit.append(operator.userId, 'FinanceAccount', accountId, 'CREATE', { name: payload.name, openingBalance: openingBalance });
-  return { account_id: accountId, name: String(payload.name).trim(), status: STATUS.FinanceAccount.ACTIVE };
+  Audit.append(operator.userId, "FinanceAccount", accountId, "CREATE", {
+    name: payload.name,
+    openingBalance,
+  });
+  return {
+    account_id: accountId,
+    name: String(payload.name).trim(),
+    status: STATUS.FinanceAccount.ACTIVE,
+  };
 }
 
 /**
@@ -1011,17 +1469,29 @@ function api_addAccount(payload) {
  */
 function api_renameAccount(accountId, newName) {
   var operator = _requireOperator();
-  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized');
-  if (!newName || !String(newName).trim()) throw new Error('Account name is required');
-
-  var row = Engine._loadRow('FinanceAccount', accountId);
-  if (!row) throw new Error('Account not found');
-  if (row.values[COLS.FinanceAccounts.status - 1] !== STATUS.FinanceAccount.ACTIVE) {
-    throw new Error('Only active accounts can be renamed');
+  if (operator.role !== ROLES.TREASURER) {
+    throw new Error("Unauthorized");
+  }
+  if (!(newName && String(newName).trim())) {
+    throw new Error("Account name is required");
   }
 
-  row.sheet.getRange(row.rowIndex, COLS.FinanceAccounts.name).setValue(String(newName).trim());
-  Audit.append(operator.userId, 'FinanceAccount', accountId, 'RENAME', { newName: newName });
+  var row = Engine._loadRow("FinanceAccount", accountId);
+  if (!row) {
+    throw new Error("Account not found");
+  }
+  if (
+    row.values[COLS.FinanceAccounts.status - 1] !== STATUS.FinanceAccount.ACTIVE
+  ) {
+    throw new Error("Only active accounts can be renamed");
+  }
+
+  row.sheet
+    .getRange(row.rowIndex, COLS.FinanceAccounts.name)
+    .setValue(String(newName).trim());
+  Audit.append(operator.userId, "FinanceAccount", accountId, "RENAME", {
+    newName,
+  });
   return { account_id: accountId, name: String(newName).trim() };
 }
 
@@ -1030,18 +1500,28 @@ function api_renameAccount(accountId, newName) {
  */
 function api_deactivateAccount(accountId) {
   var operator = _requireOperator();
-  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized');
+  if (operator.role !== ROLES.TREASURER) {
+    throw new Error("Unauthorized");
+  }
 
-  var row = Engine._loadRow('FinanceAccount', accountId);
-  if (!row) throw new Error('Account not found');
-  if (row.values[COLS.FinanceAccounts.status - 1] !== STATUS.FinanceAccount.ACTIVE) {
-    throw new Error('Account is already inactive');
+  var row = Engine._loadRow("FinanceAccount", accountId);
+  if (!row) {
+    throw new Error("Account not found");
+  }
+  if (
+    row.values[COLS.FinanceAccounts.status - 1] !== STATUS.FinanceAccount.ACTIVE
+  ) {
+    throw new Error("Account is already inactive");
   }
 
   var now = Audit._nowIso();
-  row.sheet.getRange(row.rowIndex, COLS.FinanceAccounts.status).setValue(STATUS.FinanceAccount.INACTIVE);
-  row.sheet.getRange(row.rowIndex, COLS.FinanceAccounts.deactivated_at).setValue(now);
-  Audit.append(operator.userId, 'FinanceAccount', accountId, 'DEACTIVATE', {});
+  row.sheet
+    .getRange(row.rowIndex, COLS.FinanceAccounts.status)
+    .setValue(STATUS.FinanceAccount.INACTIVE);
+  row.sheet
+    .getRange(row.rowIndex, COLS.FinanceAccounts.deactivated_at)
+    .setValue(now);
+  Audit.append(operator.userId, "FinanceAccount", accountId, "DEACTIVATE", {});
   return { account_id: accountId, status: STATUS.FinanceAccount.INACTIVE };
 }
 
@@ -1055,19 +1535,33 @@ function api_deactivateAccount(accountId) {
  */
 function api_recordIncome(payload) {
   var operator = _requireOperator();
-  if (!payload.date) throw new Error('Date is required');
-  if (!payload.categoryId) throw new Error('Category is required');
-  if (!payload.amount || Number(payload.amount) <= 0) throw new Error('Amount must be positive');
+  if (!payload.date) {
+    throw new Error("Date is required");
+  }
+  if (!payload.categoryId) {
+    throw new Error("Category is required");
+  }
+  if (!payload.amount || Number(payload.amount) <= 0) {
+    throw new Error("Amount must be positive");
+  }
   if (!payload.accountId && payload.proposedAccountId) {
     payload.accountId = payload.proposedAccountId;
   }
 
   var result = Engine.recordIncome(
-    payload.date, payload.categoryId, Number(payload.amount),
-    payload.sourceRef || '', payload.eventId || '', payload.notes || '',
-    operator.userId, payload.accountId || '', payload.uuid || ''
+    payload.date,
+    payload.categoryId,
+    Number(payload.amount),
+    payload.sourceRef || "",
+    payload.eventId || "",
+    payload.notes || "",
+    operator.userId,
+    payload.accountId || "",
+    payload.uuid || ""
   );
-  if (!result.ok) throw new Error(result.reason || 'Failed to record income');
+  if (!result.ok) {
+    throw new Error(result.reason || "Failed to record income");
+  }
   return { income_id: result.incomeId, status: STATUS.Income.PENDING };
 }
 
@@ -1085,21 +1579,23 @@ function api_getPendingIncome() {
   var queueStatuses = [STATUS.Income.PENDING, STATUS.Income.NEEDS_INFO];
   for (var i = 1; i < values.length; i++) {
     var status = values[i][c.status - 1];
-    if (queueStatuses.indexOf(status) === -1) continue;
+    if (queueStatuses.indexOf(status) === -1) {
+      continue;
+    }
     out.push({
-      income_id: values[i][c.income_id - 1],
-      date: values[i][c.date - 1],
-      category_id: values[i][c.category_id - 1],
+      account_id: values[i][c.account_id - 1] || "",
       amount: Number(values[i][c.amount - 1]) || 0,
+      category_id: values[i][c.category_id - 1],
+      date: values[i][c.date - 1],
+      decided_at: values[i][c.decided_at - 1] || "",
+      decided_by: values[i][c.decided_by - 1] || "",
+      decision_note: values[i][c.decision_note - 1] || "",
+      event_id: values[i][c.event_id - 1] || "",
+      income_id: values[i][c.income_id - 1],
+      notes: values[i][c.notes - 1] || "",
       received_by: values[i][c.received_by - 1],
-      source_ref: values[i][c.source_ref - 1] || '',
-      event_id: values[i][c.event_id - 1] || '',
-      notes: values[i][c.notes - 1] || '',
-      account_id: values[i][c.account_id - 1] || '',
-      status: status,
-      decided_by: values[i][c.decided_by - 1] || '',
-      decided_at: values[i][c.decided_at - 1] || '',
-      decision_note: values[i][c.decision_note - 1] || ''
+      source_ref: values[i][c.source_ref - 1] || "",
+      status,
     });
   }
   return out;
@@ -1110,11 +1606,19 @@ function api_getPendingIncome() {
  */
 function api_confirmIncome(incomeId, accountId) {
   var operator = _requireOperator();
-  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized');
+  if (operator.role !== ROLES.TREASURER) {
+    throw new Error("Unauthorized");
+  }
 
   var result = Engine.confirmIncome(incomeId, accountId, operator.userId);
-  if (!result.ok) throw new Error(result.reason);
-  return { income_id: incomeId, status: STATUS.Income.CONFIRMED, account_id: result.accountId };
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
+  return {
+    account_id: result.accountId,
+    income_id: incomeId,
+    status: STATUS.Income.CONFIRMED,
+  };
 }
 
 /**
@@ -1122,11 +1626,17 @@ function api_confirmIncome(incomeId, accountId) {
  */
 function api_rejectIncome(incomeId, reason) {
   var operator = _requireOperator();
-  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized');
-  if (!reason || !String(reason).trim()) throw new Error('Rejection reason is required');
+  if (operator.role !== ROLES.TREASURER) {
+    throw new Error("Unauthorized");
+  }
+  if (!(reason && String(reason).trim())) {
+    throw new Error("Rejection reason is required");
+  }
 
   var result = Engine.rejectIncome(incomeId, operator.userId, reason);
-  if (!result.ok) throw new Error(result.reason);
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
   return { income_id: incomeId, status: STATUS.Income.REJECTED };
 }
 
@@ -1135,11 +1645,17 @@ function api_rejectIncome(incomeId, reason) {
  */
 function api_requestIncomeInfo(incomeId, reason) {
   var operator = _requireOperator();
-  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized');
-  if (!reason || !String(reason).trim()) throw new Error('Note is required');
+  if (operator.role !== ROLES.TREASURER) {
+    throw new Error("Unauthorized");
+  }
+  if (!(reason && String(reason).trim())) {
+    throw new Error("Note is required");
+  }
 
   var result = Engine.requestIncomeInfo(incomeId, operator.userId, reason);
-  if (!result.ok) throw new Error(result.reason);
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
   return { income_id: incomeId, status: STATUS.Income.NEEDS_INFO };
 }
 
@@ -1149,14 +1665,30 @@ function api_requestIncomeInfo(incomeId, reason) {
  */
 function api_recordAdjustment(payload) {
   var operator = _requireOperator();
-  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized');
-  if (!payload.amount || Number(payload.amount) <= 0) throw new Error('Amount must be positive');
-  if (payload.direction !== 'CREDIT' && payload.direction !== 'DEBIT') throw new Error('Direction must be CREDIT or DEBIT');
-  if (!payload.reason || !String(payload.reason).trim()) throw new Error('Reason is required');
+  if (operator.role !== ROLES.TREASURER) {
+    throw new Error("Unauthorized");
+  }
+  if (!payload.amount || Number(payload.amount) <= 0) {
+    throw new Error("Amount must be positive");
+  }
+  if (payload.direction !== "CREDIT" && payload.direction !== "DEBIT") {
+    throw new Error("Direction must be CREDIT or DEBIT");
+  }
+  if (!(payload.reason && String(payload.reason).trim())) {
+    throw new Error("Reason is required");
+  }
 
-  var result = Engine.adjustAccount(payload.accountId, Number(payload.amount), payload.direction, payload.reason, operator.userId);
-  if (!result.ok) throw new Error(result.reason);
-  return { adjustment_id: result.adjustmentId, account_id: payload.accountId };
+  var result = Engine.adjustAccount(
+    payload.accountId,
+    Number(payload.amount),
+    payload.direction,
+    payload.reason,
+    operator.userId
+  );
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
+  return { account_id: payload.accountId, adjustment_id: result.adjustmentId };
 }
 
 /**
@@ -1164,13 +1696,31 @@ function api_recordAdjustment(payload) {
  */
 function api_recordTransfer(payload) {
   var operator = _requireOperator();
-  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized');
-  if (!payload.amount || Number(payload.amount) <= 0) throw new Error('Amount must be positive');
-  if (!payload.reason || !String(payload.reason).trim()) throw new Error('Reason is required');
+  if (operator.role !== ROLES.TREASURER) {
+    throw new Error("Unauthorized");
+  }
+  if (!payload.amount || Number(payload.amount) <= 0) {
+    throw new Error("Amount must be positive");
+  }
+  if (!(payload.reason && String(payload.reason).trim())) {
+    throw new Error("Reason is required");
+  }
 
-  var result = Engine.transferBetweenAccounts(payload.fromAccountId, payload.toAccountId, Number(payload.amount), payload.reason, operator.userId);
-  if (!result.ok) throw new Error(result.reason);
-  return { transfer_id: result.transferId, from: payload.fromAccountId, to: payload.toAccountId };
+  var result = Engine.transferBetweenAccounts(
+    payload.fromAccountId,
+    payload.toAccountId,
+    Number(payload.amount),
+    payload.reason,
+    operator.userId
+  );
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
+  return {
+    from: payload.fromAccountId,
+    to: payload.toAccountId,
+    transfer_id: result.transferId,
+  };
 }
 
 /**
@@ -1183,15 +1733,17 @@ function api_getTransfers() {
   var c = COLS.AccountTransfers;
   var out = [];
   for (var i = 1; i < values.length; i++) {
-    if (!values[i][c.transfer_id - 1]) continue;
+    if (!values[i][c.transfer_id - 1]) {
+      continue;
+    }
     out.push({
-      transfer_id: values[i][c.transfer_id - 1],
-      from_account_id: values[i][c.from_account_id - 1],
-      to_account_id: values[i][c.to_account_id - 1],
       amount: Number(values[i][c.amount - 1]) || 0,
-      reason: values[i][c.reason - 1] || '',
+      from_account_id: values[i][c.from_account_id - 1],
+      reason: values[i][c.reason - 1] || "",
+      to_account_id: values[i][c.to_account_id - 1],
+      transfer_id: values[i][c.transfer_id - 1],
+      transferred_at: values[i][c.transferred_at - 1],
       transferred_by: values[i][c.transferred_by - 1],
-      transferred_at: values[i][c.transferred_at - 1]
     });
   }
   return out;
@@ -1207,16 +1759,20 @@ function api_getAdjustments(accountId) {
   var c = COLS.AccountAdjustments;
   var out = [];
   for (var i = 1; i < values.length; i++) {
-    if (!values[i][c.adjustment_id - 1]) continue;
-    if (accountId && values[i][c.account_id - 1] !== accountId) continue;
+    if (!values[i][c.adjustment_id - 1]) {
+      continue;
+    }
+    if (accountId && values[i][c.account_id - 1] !== accountId) {
+      continue;
+    }
     out.push({
-      adjustment_id: values[i][c.adjustment_id - 1],
       account_id: values[i][c.account_id - 1],
+      adjusted_at: values[i][c.adjusted_at - 1],
+      adjusted_by: values[i][c.adjusted_by - 1],
+      adjustment_id: values[i][c.adjustment_id - 1],
       amount: Number(values[i][c.amount - 1]) || 0,
       direction: values[i][c.direction - 1],
-      reason: values[i][c.reason - 1] || '',
-      adjusted_by: values[i][c.adjusted_by - 1],
-      adjusted_at: values[i][c.adjusted_at - 1]
+      reason: values[i][c.reason - 1] || "",
     });
   }
   return out;
@@ -1232,13 +1788,25 @@ function api_getAdjustments(accountId) {
  */
 function api_approvePayout(claimId, accountId) {
   var operator = _requireOperator();
-  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized');
+  if (operator.role !== ROLES.TREASURER) {
+    throw new Error("Unauthorized");
+  }
 
   var payload = {};
-  if (accountId) payload.account_id = accountId;
+  if (accountId) {
+    payload.account_id = accountId;
+  }
 
-  var result = Engine.transition('ExpenseClaim', claimId, 'APPROVE_PAYOUT', operator.userId, payload);
-  if (!result.ok) throw new Error(result.reason);
+  var result = Engine.transition(
+    "ExpenseClaim",
+    claimId,
+    "APPROVE_PAYOUT",
+    operator.userId,
+    payload
+  );
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
   return { claim_id: claimId, from: result.from, to: result.to };
 }
 
@@ -1255,18 +1823,20 @@ function api_getQueuedPayouts() {
   var relevantStatuses = [STATUS.Payout.QUEUED, STATUS.Payout.FAILED];
   for (var i = 1; i < values.length; i++) {
     var status = values[i][c.status - 1];
-    if (relevantStatuses.indexOf(status) === -1) continue;
+    if (relevantStatuses.indexOf(status) === -1) {
+      continue;
+    }
     out.push({
-      payout_id: values[i][c.payout_id - 1],
-      claim_id: values[i][c.claim_id - 1],
-      payee_user_id: values[i][c.payee_user_id - 1],
+      account_id: values[i][c.account_id - 1] || "",
       amount: Number(values[i][c.amount - 1]) || 0,
-      method: values[i][c.method - 1] || '',
-      txn_reference: values[i][c.txn_reference - 1] || '',
-      status: status,
-      account_id: values[i][c.account_id - 1] || '',
-      failure_reason: values[i][c.failure_reason - 1] || '',
-      parent_payout_id: values[i][c.parent_payout_id - 1] || ''
+      claim_id: values[i][c.claim_id - 1],
+      failure_reason: values[i][c.failure_reason - 1] || "",
+      method: values[i][c.method - 1] || "",
+      parent_payout_id: values[i][c.parent_payout_id - 1] || "",
+      payee_user_id: values[i][c.payee_user_id - 1],
+      payout_id: values[i][c.payout_id - 1],
+      status,
+      txn_reference: values[i][c.txn_reference - 1] || "",
     });
   }
   return out;
@@ -1277,17 +1847,36 @@ function api_getQueuedPayouts() {
  */
 function api_markPayoutSent(payoutId, payload) {
   var operator = _requireOperator();
-  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized');
-  var payoutRow = Engine._loadRow('Payout', payoutId);
-  if (!payoutRow) throw new Error('Payout not found');
+  if (operator.role !== ROLES.TREASURER) {
+    throw new Error("Unauthorized");
+  }
+  var payoutRow = Engine._loadRow("Payout", payoutId);
+  if (!payoutRow) {
+    throw new Error("Payout not found");
+  }
   var c = COLS.Payouts;
   var method = payload.method || payoutRow.values[c.method - 1];
-  if (!method) throw new Error('Payment method is required');
-  var sentAmount = payload.amount != null ? Number(payload.amount) : Number(payoutRow.values[c.amount - 1]) || 0;
-  if (sentAmount <= 0) throw new Error('Amount must be positive');
+  if (!method) {
+    throw new Error("Payment method is required");
+  }
+  var sentAmount =
+    payload.amount == null
+      ? Number(payoutRow.values[c.amount - 1]) || 0
+      : Number(payload.amount);
+  if (sentAmount <= 0) {
+    throw new Error("Amount must be positive");
+  }
 
-  var result = Payouts.markPayoutSent(payoutId, sentAmount, method, payload.txnReference || '', operator.userId);
-  if (!result.ok) throw new Error(result.reason);
+  var result = Payouts.markPayoutSent(
+    payoutId,
+    sentAmount,
+    method,
+    payload.txnReference || "",
+    operator.userId
+  );
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
   return { payout_id: payoutId, status: STATUS.Payout.SENT };
 }
 
@@ -1296,11 +1885,21 @@ function api_markPayoutSent(payoutId, payload) {
  */
 function api_recordPayoutFailed(payoutId, failureReason) {
   var operator = _requireOperator();
-  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized');
-  if (!failureReason || !String(failureReason).trim()) throw new Error('Failure reason is required');
+  if (operator.role !== ROLES.TREASURER) {
+    throw new Error("Unauthorized");
+  }
+  if (!(failureReason && String(failureReason).trim())) {
+    throw new Error("Failure reason is required");
+  }
 
-  var result = Payouts.recordPayoutFailed(payoutId, failureReason, operator.userId);
-  if (!result.ok) throw new Error(result.reason);
+  var result = Payouts.recordPayoutFailed(
+    payoutId,
+    failureReason,
+    operator.userId
+  );
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
   return { payout_id: payoutId, status: STATUS.Payout.FAILED };
 }
 
@@ -1309,10 +1908,14 @@ function api_recordPayoutFailed(payoutId, failureReason) {
  */
 function api_retryPayout(payoutId) {
   var operator = _requireOperator();
-  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized');
+  if (operator.role !== ROLES.TREASURER) {
+    throw new Error("Unauthorized");
+  }
 
   var result = Payouts.retryPayout(payoutId, operator.userId);
-  if (!result.ok) throw new Error(result.reason);
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
   return { payout_id: result.newPayoutId, status: STATUS.Payout.QUEUED };
 }
 
@@ -1353,7 +1956,11 @@ function api_getDashboardSummary() {
   var failedPayouts = [];
   var pendingRequests = [];
 
-  var activeClaimStatuses = [STATUS.ExpenseClaim.SUBMITTED, STATUS.ExpenseClaim.NEEDS_INFO, STATUS.ExpenseClaim.VERIFIED];
+  var activeClaimStatuses = [
+    STATUS.ExpenseClaim.SUBMITTED,
+    STATUS.ExpenseClaim.NEEDS_INFO,
+    STATUS.ExpenseClaim.VERIFIED,
+  ];
   var unresolvedRequestStatuses = [STATUS.BudgetRequest.PENDING];
 
   // Build budget line remaining lookup
@@ -1372,12 +1979,15 @@ function api_getDashboardSummary() {
       for (var cj = 1; cj < claimsValues.length; cj++) {
         if (claimsValues[cj][cc.claim_id - 1] === claimId) {
           var cStatus = claimsValues[cj][cc.status - 1];
-          if (cStatus !== STATUS.ExpenseClaim.DRAFT && cStatus !== STATUS.ExpenseClaim.REJECTED) {
+          if (
+            cStatus !== STATUS.ExpenseClaim.DRAFT &&
+            cStatus !== STATUS.ExpenseClaim.REJECTED
+          ) {
             missingReceipt.push({
               claim_id: claimId,
               claim_status: cStatus,
               notes: claimsValues[cj][cc.notes - 1],
-              total_amount: Number(claimsValues[cj][cc.total_amount - 1]) || 0
+              total_amount: Number(claimsValues[cj][cc.total_amount - 1]) || 0,
             });
           }
           break;
@@ -1389,14 +1999,16 @@ function api_getDashboardSummary() {
   // Check claims for over-budget lines and needs-info
   for (var i = 1; i < claimsValues.length; i++) {
     var status = claimsValues[i][cc.status - 1];
-    if (!status) continue;
+    if (!status) {
+      continue;
+    }
 
     if (status === STATUS.ExpenseClaim.NEEDS_INFO) {
       needsInfo.push({
         claim_id: claimsValues[i][cc.claim_id - 1],
         notes: claimsValues[i][cc.notes - 1],
+        submitted_at: claimsValues[i][cc.submitted_at - 1],
         total_amount: Number(claimsValues[i][cc.total_amount - 1]) || 0,
-        submitted_at: claimsValues[i][cc.submitted_at - 1]
       });
     }
 
@@ -1409,7 +2021,9 @@ function api_getDashboardSummary() {
         if (cliValues[j][cliC.claim_id - 1] === claimId) {
           var blId = cliValues[j][cliC.budget_line_id - 1];
           if (blId) {
-            claimedByLine[blId] = (claimedByLine[blId] || 0) + (Number(cliValues[j][cliC.amount - 1]) || 0);
+            claimedByLine[blId] =
+              (claimedByLine[blId] || 0) +
+              (Number(cliValues[j][cliC.amount - 1]) || 0);
           }
         }
       }
@@ -1417,11 +2031,11 @@ function api_getDashboardSummary() {
         var remaining = budgetLineRemaining[bl];
         if (remaining !== undefined && claimedByLine[bl] > remaining) {
           overBudget.push({
-            claim_id: claimId,
             budget_line_id: bl,
+            claim_id: claimId,
+            claim_status: status,
             claimed: claimedByLine[bl],
-            remaining: remaining,
-            claim_status: status
+            remaining,
           });
         }
       }
@@ -1432,40 +2046,47 @@ function api_getDashboardSummary() {
   for (var pi = 1; pi < payoutValues.length; pi++) {
     if (payoutValues[pi][pc.status - 1] === STATUS.Payout.FAILED) {
       failedPayouts.push({
-        payout_id: payoutValues[pi][pc.payout_id - 1],
-        claim_id: payoutValues[pi][pc.claim_id - 1],
         amount: Number(payoutValues[pi][pc.amount - 1]) || 0,
-        failure_reason: payoutValues[pi][pc.failure_reason - 1] || ''
+        claim_id: payoutValues[pi][pc.claim_id - 1],
+        failure_reason: payoutValues[pi][pc.failure_reason - 1] || "",
+        payout_id: payoutValues[pi][pc.payout_id - 1],
       });
     }
   }
 
   // Pending budget requests
   for (var ri = 1; ri < requestValues.length; ri++) {
-    if (unresolvedRequestStatuses.indexOf(requestValues[ri][rc.status - 1]) >= 0) {
+    if (
+      unresolvedRequestStatuses.indexOf(requestValues[ri][rc.status - 1]) >= 0
+    ) {
       pendingRequests.push({
         request_id: requestValues[ri][rc.request_id - 1],
-        title: requestValues[ri][rc.title - 1],
+        requester_id: requestValues[ri][rc.requester_id - 1],
         submitted_at: requestValues[ri][rc.submitted_at - 1],
-        requester_id: requestValues[ri][rc.requester_id - 1]
+        title: requestValues[ri][rc.title - 1],
       });
     }
   }
 
   return {
-    missing_receipts: missingReceipt,
-    over_budget_claims: overBudget,
-    needs_info_claims: needsInfo,
-    failed_payouts: failedPayouts,
-    pending_requests: pendingRequests,
     counts: {
-      missing_receipts: missingReceipt.length,
-      over_budget: overBudget.length,
-      needs_info: needsInfo.length,
       failed_payouts: failedPayouts.length,
+      missing_receipts: missingReceipt.length,
+      needs_info: needsInfo.length,
+      over_budget: overBudget.length,
       pending_requests: pendingRequests.length,
-      total_attention: missingReceipt.length + overBudget.length + needsInfo.length + failedPayouts.length + pendingRequests.length
-    }
+      total_attention:
+        missingReceipt.length +
+        overBudget.length +
+        needsInfo.length +
+        failedPayouts.length +
+        pendingRequests.length,
+    },
+    failed_payouts: failedPayouts,
+    missing_receipts: missingReceipt,
+    needs_info_claims: needsInfo,
+    over_budget_claims: overBudget,
+    pending_requests: pendingRequests,
   };
 }
 
@@ -1479,18 +2100,18 @@ function api_getReportsData(reportType, filters) {
   filters = filters || {};
 
   switch (reportType) {
-    case 'claims':
+    case "claims":
       return _buildClaimsReport(filters);
-    case 'budget':
+    case "budget":
       return _buildBudgetReport(filters);
-    case 'income':
+    case "income":
       return _buildIncomeReport(filters);
-    case 'payouts':
+    case "payouts":
       return _buildPayoutsReport(filters);
-    case 'accounts':
+    case "accounts":
       return _buildAccountsReport();
     default:
-      throw new Error('Unknown report type: ' + reportType);
+      throw new Error("Unknown report type: " + reportType);
   }
 }
 
@@ -1499,11 +2120,11 @@ function _buildClaimsReport(filters) {
   var values = sheet.getDataRange().getValues();
   var c = COLS.ExpenseClaims;
   var out = [];
-  var fromDate = filters.fromDate || '';
-  var toDate = filters.toDate || '';
-  var filterStatus = filters.status || '';
-  var filterEvent = filters.eventId || '';
-  var filterBudgetLine = filters.budgetLine || '';
+  var fromDate = filters.fromDate || "";
+  var toDate = filters.toDate || "";
+  var filterStatus = filters.status || "";
+  var filterEvent = filters.eventId || "";
+  var filterBudgetLine = filters.budgetLine || "";
 
   // Pre-filter by budget line if needed
   var claimIdsByLine = null;
@@ -1521,34 +2142,48 @@ function _buildClaimsReport(filters) {
 
   for (var i = 1; i < values.length; i++) {
     var status = values[i][c.status - 1];
-    if (!status) continue;
-    if (status === STATUS.ExpenseClaim.DRAFT) continue;
-    if (filterStatus && status !== filterStatus) continue;
-    if (filterEvent && values[i][c.event_id - 1] !== filterEvent) continue;
-    if (filterBudgetLine && !claimIdsByLine[values[i][c.claim_id - 1]]) continue;
+    if (!status) {
+      continue;
+    }
+    if (status === STATUS.ExpenseClaim.DRAFT) {
+      continue;
+    }
+    if (filterStatus && status !== filterStatus) {
+      continue;
+    }
+    if (filterEvent && values[i][c.event_id - 1] !== filterEvent) {
+      continue;
+    }
+    if (filterBudgetLine && !claimIdsByLine[values[i][c.claim_id - 1]]) {
+      continue;
+    }
 
-    var submittedAt = String(values[i][c.submitted_at - 1] || '');
-    if (fromDate && submittedAt < fromDate) continue;
-    if (toDate && submittedAt > toDate) continue;
+    var submittedAt = String(values[i][c.submitted_at - 1] || "");
+    if (fromDate && submittedAt < fromDate) {
+      continue;
+    }
+    if (toDate && submittedAt > toDate) {
+      continue;
+    }
 
     out.push({
+      approved_at: values[i][c.approved_at - 1] || "",
       claim_id: values[i][c.claim_id - 1],
       claimant_id: values[i][c.claimant_id - 1],
-      status: status,
-      submitted_at: submittedAt,
-      verified_at: values[i][c.verified_at - 1] || '',
-      approved_at: values[i][c.approved_at - 1] || '',
-      paid_at: values[i][c.paid_at - 1] || '',
-      total_amount: Number(values[i][c.total_amount - 1]) || 0,
-      notes: values[i][c.notes - 1] || '',
       created_by: values[i][c.created_by - 1],
-      event_id: values[i][c.event_id - 1] || '',
-      semester: values[i][c.semester - 1] || '',
-      expense_date: values[i][c.expense_date - 1] || '',
-      payout_method: values[i][c.payout_method - 1] || ''
+      event_id: values[i][c.event_id - 1] || "",
+      expense_date: values[i][c.expense_date - 1] || "",
+      notes: values[i][c.notes - 1] || "",
+      paid_at: values[i][c.paid_at - 1] || "",
+      payout_method: values[i][c.payout_method - 1] || "",
+      semester: values[i][c.semester - 1] || "",
+      status,
+      submitted_at: submittedAt,
+      total_amount: Number(values[i][c.total_amount - 1]) || 0,
+      verified_at: values[i][c.verified_at - 1] || "",
     });
   }
-  return { type: 'claims', rows: out, count: out.length };
+  return { count: out.length, rows: out, type: "claims" };
 }
 
 function _buildBudgetReport(filters) {
@@ -1560,36 +2195,50 @@ function _buildBudgetReport(filters) {
   var lineValues = lineSheet.getDataRange().getValues();
   var lc = COLS.BudgetRequestLines;
 
-  var filterStatus = filters.status || '';
-  var fromDate = filters.fromDate || '';
-  var toDate = filters.toDate || '';
+  var filterStatus = filters.status || "";
+  var fromDate = filters.fromDate || "";
+  var toDate = filters.toDate || "";
 
   var requestLines = {};
   for (var i = 1; i < lineValues.length; i++) {
     var reqId = lineValues[i][lc.request_id - 1];
-    if (!reqId) continue;
-    if (!requestLines[reqId]) requestLines[reqId] = [];
+    if (!reqId) {
+      continue;
+    }
+    if (!requestLines[reqId]) {
+      requestLines[reqId] = [];
+    }
     requestLines[reqId].push({
-      line_id: lineValues[i][lc.line_id - 1],
+      approved_amount: Number(lineValues[i][lc.approved_amount - 1]) || 0,
       category_id: lineValues[i][lc.category_id - 1],
       description: lineValues[i][lc.description - 1],
-      requested_amount: Number(lineValues[i][lc.requested_amount - 1]) || 0,
-      approved_amount: Number(lineValues[i][lc.approved_amount - 1]) || 0,
+      line_id: lineValues[i][lc.line_id - 1],
       line_status: lineValues[i][lc.line_status - 1],
-      remaining: Number(lineValues[i][lc.remaining - 1]) || 0
+      remaining: Number(lineValues[i][lc.remaining - 1]) || 0,
+      requested_amount: Number(lineValues[i][lc.requested_amount - 1]) || 0,
     });
   }
 
   var out = [];
   for (var j = 1; j < reqValues.length; j++) {
     var status = reqValues[j][rc.status - 1];
-    if (!status) continue;
-    if (status === STATUS.BudgetRequest.DRAFT) continue;
-    if (filterStatus && status !== filterStatus) continue;
+    if (!status) {
+      continue;
+    }
+    if (status === STATUS.BudgetRequest.DRAFT) {
+      continue;
+    }
+    if (filterStatus && status !== filterStatus) {
+      continue;
+    }
 
-    var submittedAt = String(reqValues[j][rc.submitted_at - 1] || '');
-    if (fromDate && submittedAt < fromDate) continue;
-    if (toDate && submittedAt > toDate) continue;
+    var submittedAt = String(reqValues[j][rc.submitted_at - 1] || "");
+    if (fromDate && submittedAt < fromDate) {
+      continue;
+    }
+    if (toDate && submittedAt > toDate) {
+      continue;
+    }
 
     var id = reqValues[j][rc.request_id - 1];
     var lines = requestLines[id] || [];
@@ -1601,17 +2250,17 @@ function _buildBudgetReport(filters) {
     }
 
     out.push({
+      decided_at: reqValues[j][rc.decided_at - 1] || "",
+      lines,
       request_id: id,
-      title: reqValues[j][rc.title - 1],
-      status: status,
+      status,
       submitted_at: submittedAt,
-      decided_at: reqValues[j][rc.decided_at - 1] || '',
-      total_requested: totalRequested,
+      title: reqValues[j][rc.title - 1],
       total_approved: totalApproved,
-      lines: lines
+      total_requested: totalRequested,
     });
   }
-  return { type: 'budget', rows: out, count: out.length };
+  return { count: out.length, rows: out, type: "budget" };
 }
 
 function _buildIncomeReport(filters) {
@@ -1619,32 +2268,40 @@ function _buildIncomeReport(filters) {
   var values = sheet.getDataRange().getValues();
   var c = COLS.Income;
   var out = [];
-  var filterStatus = filters.status || '';
-  var fromDate = filters.fromDate || '';
-  var toDate = filters.toDate || '';
+  var filterStatus = filters.status || "";
+  var fromDate = filters.fromDate || "";
+  var toDate = filters.toDate || "";
 
   for (var i = 1; i < values.length; i++) {
-    if (!values[i][c.income_id - 1]) continue;
+    if (!values[i][c.income_id - 1]) {
+      continue;
+    }
     var status = values[i][c.status - 1];
-    if (filterStatus && status !== filterStatus) continue;
+    if (filterStatus && status !== filterStatus) {
+      continue;
+    }
 
-    var date = String(values[i][c.date - 1] || '');
-    if (fromDate && date < fromDate) continue;
-    if (toDate && date > toDate) continue;
+    var date = String(values[i][c.date - 1] || "");
+    if (fromDate && date < fromDate) {
+      continue;
+    }
+    if (toDate && date > toDate) {
+      continue;
+    }
 
     out.push({
-      income_id: values[i][c.income_id - 1],
-      date: date,
-      category_id: values[i][c.category_id - 1],
+      account_id: values[i][c.account_id - 1] || "",
       amount: Number(values[i][c.amount - 1]) || 0,
+      category_id: values[i][c.category_id - 1],
+      date,
+      income_id: values[i][c.income_id - 1],
+      notes: values[i][c.notes - 1] || "",
       received_by: values[i][c.received_by - 1],
-      source_ref: values[i][c.source_ref - 1] || '',
-      notes: values[i][c.notes - 1] || '',
-      account_id: values[i][c.account_id - 1] || '',
-      status: status
+      source_ref: values[i][c.source_ref - 1] || "",
+      status,
     });
   }
-  return { type: 'income', rows: out, count: out.length };
+  return { count: out.length, rows: out, type: "income" };
 }
 
 function _buildPayoutsReport(filters) {
@@ -1652,33 +2309,41 @@ function _buildPayoutsReport(filters) {
   var values = sheet.getDataRange().getValues();
   var c = COLS.Payouts;
   var out = [];
-  var filterStatus = filters.status || '';
-  var fromDate = filters.fromDate || '';
-  var toDate = filters.toDate || '';
+  var filterStatus = filters.status || "";
+  var fromDate = filters.fromDate || "";
+  var toDate = filters.toDate || "";
 
   for (var i = 1; i < values.length; i++) {
-    if (!values[i][c.payout_id - 1]) continue;
+    if (!values[i][c.payout_id - 1]) {
+      continue;
+    }
     var status = values[i][c.status - 1];
-    if (filterStatus && status !== filterStatus) continue;
+    if (filterStatus && status !== filterStatus) {
+      continue;
+    }
 
-    var paidAt = String(values[i][c.paid_at - 1] || '');
-    if (fromDate && paidAt < fromDate) continue;
-    if (toDate && paidAt > toDate) continue;
+    var paidAt = String(values[i][c.paid_at - 1] || "");
+    if (fromDate && paidAt < fromDate) {
+      continue;
+    }
+    if (toDate && paidAt > toDate) {
+      continue;
+    }
 
     out.push({
-      payout_id: values[i][c.payout_id - 1],
-      claim_id: values[i][c.claim_id - 1],
+      account_id: values[i][c.account_id - 1] || "",
       amount: Number(values[i][c.amount - 1]) || 0,
-      method: values[i][c.method - 1] || '',
-      txn_reference: values[i][c.txn_reference - 1] || '',
-      status: status,
-      account_id: values[i][c.account_id - 1] || '',
+      claim_id: values[i][c.claim_id - 1],
+      confirmed_at: values[i][c.confirmed_at - 1] || "",
+      failure_reason: values[i][c.failure_reason - 1] || "",
+      method: values[i][c.method - 1] || "",
       paid_at: paidAt,
-      confirmed_at: values[i][c.confirmed_at - 1] || '',
-      failure_reason: values[i][c.failure_reason - 1] || ''
+      payout_id: values[i][c.payout_id - 1],
+      status,
+      txn_reference: values[i][c.txn_reference - 1] || "",
     });
   }
-  return { type: 'payouts', rows: out, count: out.length };
+  return { count: out.length, rows: out, type: "payouts" };
 }
 
 function _buildAccountsReport() {
@@ -1687,13 +2352,14 @@ function _buildAccountsReport() {
   var adjustments = api_getAdjustments();
 
   return {
-    type: 'accounts',
-    accounts: accounts,
-    transfers: transfers,
-    adjustments: adjustments,
-    total_current_balance: accounts.reduce(function(sum, a) {
-      return sum + (Number(a.current_balance) || 0);
-    }, 0)
+    accounts,
+    adjustments,
+    total_current_balance: accounts.reduce(
+      (sum, a) => sum + (Number(a.current_balance) || 0),
+      0
+    ),
+    transfers,
+    type: "accounts",
   };
 }
 
@@ -1705,47 +2371,139 @@ function api_exportCsv(reportType, filters) {
   _requireOperator();
   var data = api_getReportsData(reportType, filters);
   var rows = data.rows || [];
-  if (rows.length === 0) return '';
+  if (rows.length === 0) {
+    return "";
+  }
 
   var headers;
   switch (reportType) {
-    case 'claims':
-      headers = ['Claim ID', 'Claimant', 'Status', 'Submitted', 'Verified', 'Paid', 'Amount', 'Notes', 'Event', 'Semester', 'Expense Date', 'Method'];
-      return _csvRows(headers, rows.map(function(r) {
-        return [r.claim_id, r.claimant_id, r.status, r.submitted_at, r.verified_at, r.paid_at, r.total_amount, _csvEscape(r.notes), r.event_id, r.semester, r.expense_date, r.payout_method];
-      }));
-    case 'budget':
-      headers = ['Request ID', 'Title', 'Status', 'Submitted', 'Decided', 'Total Requested', 'Total Approved'];
-      return _csvRows(headers, rows.map(function(r) {
-        return [r.request_id, r.title, r.status, r.submitted_at, r.decided_at, r.total_requested, r.total_approved];
-      }));
-    case 'income':
-      headers = ['Income ID', 'Date', 'Category', 'Amount', 'Received By', 'Source', 'Notes', 'Account', 'Status'];
-      return _csvRows(headers, rows.map(function(r) {
-        return [r.income_id, r.date, r.category_id, r.amount, r.received_by, r.source_ref, _csvEscape(r.notes), r.account_id, r.status];
-      }));
-    case 'payouts':
-      headers = ['Payout ID', 'Claim ID', 'Amount', 'Method', 'TXN Ref', 'Status', 'Account', 'Paid', 'Confirmed', 'Failure Reason'];
-      return _csvRows(headers, rows.map(function(r) {
-        return [r.payout_id, r.claim_id, r.amount, r.method, r.txn_reference, r.status, r.account_id, r.paid_at, r.confirmed_at, _csvEscape(r.failure_reason)];
-      }));
+    case "claims":
+      headers = [
+        "Claim ID",
+        "Claimant",
+        "Status",
+        "Submitted",
+        "Verified",
+        "Paid",
+        "Amount",
+        "Notes",
+        "Event",
+        "Semester",
+        "Expense Date",
+        "Method",
+      ];
+      return _csvRows(
+        headers,
+        rows.map((r) => [
+          r.claim_id,
+          r.claimant_id,
+          r.status,
+          r.submitted_at,
+          r.verified_at,
+          r.paid_at,
+          r.total_amount,
+          _csvEscape(r.notes),
+          r.event_id,
+          r.semester,
+          r.expense_date,
+          r.payout_method,
+        ])
+      );
+    case "budget":
+      headers = [
+        "Request ID",
+        "Title",
+        "Status",
+        "Submitted",
+        "Decided",
+        "Total Requested",
+        "Total Approved",
+      ];
+      return _csvRows(
+        headers,
+        rows.map((r) => [
+          r.request_id,
+          r.title,
+          r.status,
+          r.submitted_at,
+          r.decided_at,
+          r.total_requested,
+          r.total_approved,
+        ])
+      );
+    case "income":
+      headers = [
+        "Income ID",
+        "Date",
+        "Category",
+        "Amount",
+        "Received By",
+        "Source",
+        "Notes",
+        "Account",
+        "Status",
+      ];
+      return _csvRows(
+        headers,
+        rows.map((r) => [
+          r.income_id,
+          r.date,
+          r.category_id,
+          r.amount,
+          r.received_by,
+          r.source_ref,
+          _csvEscape(r.notes),
+          r.account_id,
+          r.status,
+        ])
+      );
+    case "payouts":
+      headers = [
+        "Payout ID",
+        "Claim ID",
+        "Amount",
+        "Method",
+        "TXN Ref",
+        "Status",
+        "Account",
+        "Paid",
+        "Confirmed",
+        "Failure Reason",
+      ];
+      return _csvRows(
+        headers,
+        rows.map((r) => [
+          r.payout_id,
+          r.claim_id,
+          r.amount,
+          r.method,
+          r.txn_reference,
+          r.status,
+          r.account_id,
+          r.paid_at,
+          r.confirmed_at,
+          _csvEscape(r.failure_reason),
+        ])
+      );
     default:
-      return '';
+      return "";
   }
 }
 
 function _csvRows(headers, rows) {
-  var out = headers.join(',') + '\n';
+  var out = headers.join(",") + "\n";
   for (var i = 0; i < rows.length; i++) {
-    out += rows[i].join(',') + '\n';
+    out += rows[i].join(",") + "\n";
   }
   return out;
 }
 
 function _csvEscape(val) {
-  if (val === null || val === undefined) return '';
+  if (val === null || val === undefined) {
+    return "";
+  }
   var s = String(val);
-  if (s.indexOf(',') >= 0 || s.indexOf('"') >= 0 || s.indexOf('\n') >= 0) {
+  if (s.indexOf(",") >= 0 || s.indexOf('"') >= 0 || s.indexOf("\n") >= 0) {
     return '"' + s.replace(/"/g, '""') + '"';
   }
   return s;
@@ -1776,8 +2534,15 @@ function api_suggestSemester(expenseDate) {
  */
 function api_correctSemester(entityType, entityId, newSemester) {
   var operator = _requireOperator();
-  var result = Engine.correctSemester(entityType, entityId, newSemester, operator.userId);
-  if (!result.ok) throw new Error(result.reason);
+  var result = Engine.correctSemester(
+    entityType,
+    entityId,
+    newSemester,
+    operator.userId
+  );
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
   return result;
 }
 
@@ -1786,10 +2551,14 @@ function api_correctSemester(entityType, entityId, newSemester) {
  */
 function api_closeSemester() {
   var operator = _requireOperator();
-  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized: Treasurer only');
-  var currentSemester = Config.getOptional('CURRENT_SEMESTER') || '26A';
+  if (operator.role !== ROLES.TREASURER) {
+    throw new Error("Unauthorized: Treasurer only");
+  }
+  var currentSemester = Config.getOptional("CURRENT_SEMESTER") || "26A";
   var result = Engine.closeSemester(currentSemester, operator.userId);
-  if (!result.ok) throw new Error(result.reason);
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
   return result;
 }
 
@@ -1819,9 +2588,13 @@ function api_getMigrationPreview() {
  */
 function api_startMigration() {
   var operator = _requireOperator();
-  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized: Treasurer only');
+  if (operator.role !== ROLES.TREASURER) {
+    throw new Error("Unauthorized: Treasurer only");
+  }
   var result = Migration.startMigration(operator.userId);
-  if (!result.ok) throw new Error(result.reason);
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
   return result;
 }
 
@@ -1831,9 +2604,13 @@ function api_startMigration() {
  */
 function api_setMigrationSelections(selections) {
   var operator = _requireOperator();
-  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized: Treasurer only');
+  if (operator.role !== ROLES.TREASURER) {
+    throw new Error("Unauthorized: Treasurer only");
+  }
   var result = Migration.setSelections(operator.userId, selections);
-  if (!result.ok) throw new Error(result.reason);
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
   return result;
 }
 
@@ -1851,9 +2628,13 @@ function api_getMigrationSelections() {
  */
 function api_executeMigration() {
   var operator = _requireOperator();
-  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized: Treasurer only');
+  if (operator.role !== ROLES.TREASURER) {
+    throw new Error("Unauthorized: Treasurer only");
+  }
   var result = Migration.executeMigration(operator.userId);
-  if (!result.ok) throw new Error(result.reason);
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
   return result;
 }
 
@@ -1863,9 +2644,13 @@ function api_executeMigration() {
  */
 function api_activateMigration() {
   var operator = _requireOperator();
-  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized: Treasurer only');
+  if (operator.role !== ROLES.TREASURER) {
+    throw new Error("Unauthorized: Treasurer only");
+  }
   var result = Migration.activateMigration(operator.userId);
-  if (!result.ok) throw new Error(result.reason);
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
   return result;
 }
 
@@ -1875,29 +2660,76 @@ function api_activateMigration() {
  */
 function api_cancelMigration() {
   var operator = _requireOperator();
-  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized: Treasurer only');
+  if (operator.role !== ROLES.TREASURER) {
+    throw new Error("Unauthorized: Treasurer only");
+  }
   var result = Migration.cancelMigration(operator.userId);
-  if (!result.ok) throw new Error(result.reason);
+  if (!result.ok) {
+    throw new Error(result.reason);
+  }
   return result;
 }
 
-if (typeof module !== 'undefined') {
+if (typeof module !== "undefined") {
   module.exports = {
-    api_resolveSession, api_getMyClaims, api_uploadReceipt, api_submitClaim, api_editClaim,
-    api_getMyBudgetRequests, api_saveBudgetRequestDraft, api_submitBudgetRequest,
-    api_discardBudgetRequest, api_getPendingBudgetRequests, api_decisionBudgetRequest,
-    api_getMembers, api_addMember, api_reactivateMember, api_saveClaimDraft, api_submitDraftClaim,
-    api_deleteOrphanedReceipt, api_attachReceipts,
-    api_getClaimsQueue, api_verifyClaim, api_rejectClaim, api_requestInfo, api_resubmitClaim, api_approvePayout,
-    api_getAccounts, api_addAccount, api_renameAccount, api_deactivateAccount,
-    api_recordIncome, api_getPendingIncome, api_confirmIncome, api_rejectIncome, api_requestIncomeInfo,
-    api_recordAdjustment, api_recordTransfer, api_getTransfers, api_getAdjustments,
-    api_getQueuedPayouts, api_markPayoutSent, api_recordPayoutFailed, api_retryPayout,
-    api_getDashboardSummary, api_getReportsData, api_exportCsv,
-    api_getSemesterStatus, api_suggestSemester, api_correctSemester, api_closeSemester,
-    api_getMigrationState, api_getMigrationPreview, api_startMigration,
-    api_setMigrationSelections, api_getMigrationSelections,
-    api_executeMigration, api_activateMigration, api_cancelMigration,
-    _sha256Hex, _isLate, _resolveUser
+    _isLate,
+    _resolveUser,
+    _sha256Hex,
+    api_activateMigration,
+    api_addAccount,
+    api_addMember,
+    api_approvePayout,
+    api_attachReceipts,
+    api_cancelMigration,
+    api_closeSemester,
+    api_confirmIncome,
+    api_correctSemester,
+    api_deactivateAccount,
+    api_decisionBudgetRequest,
+    api_deleteOrphanedReceipt,
+    api_discardBudgetRequest,
+    api_editClaim,
+    api_executeMigration,
+    api_exportCsv,
+    api_getAccounts,
+    api_getAdjustments,
+    api_getClaimsQueue,
+    api_getDashboardSummary,
+    api_getMembers,
+    api_getMigrationPreview,
+    api_getMigrationSelections,
+    api_getMigrationState,
+    api_getMyBudgetRequests,
+    api_getMyClaims,
+    api_getPendingBudgetRequests,
+    api_getPendingIncome,
+    api_getQueuedPayouts,
+    api_getReportsData,
+    api_getSemesterStatus,
+    api_getTransfers,
+    api_markPayoutSent,
+    api_reactivateMember,
+    api_recordAdjustment,
+    api_recordIncome,
+    api_recordPayoutFailed,
+    api_recordTransfer,
+    api_rejectClaim,
+    api_rejectIncome,
+    api_renameAccount,
+    api_requestIncomeInfo,
+    api_requestInfo,
+    api_resolveSession,
+    api_resubmitClaim,
+    api_retryPayout,
+    api_saveBudgetRequestDraft,
+    api_saveClaimDraft,
+    api_setMigrationSelections,
+    api_startMigration,
+    api_submitBudgetRequest,
+    api_submitClaim,
+    api_submitDraftClaim,
+    api_suggestSemester,
+    api_uploadReceipt,
+    api_verifyClaim,
   };
 }

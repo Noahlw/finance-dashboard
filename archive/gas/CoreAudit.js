@@ -1,14 +1,21 @@
+"use strict";
 var CoreAudit = {
-  calculateHash: function(prevHash, rowDataStr) {
-    var raw = prevHash + '|' + rowDataStr;
-    if (typeof Utilities !== 'undefined') {
-      // GAS environment
-      var signature = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, raw);
-      return signature.map(function(b) { return (b < 0 ? b + 256 : b).toString(16).padStart(2, '0'); }).join('');
-    } else {
+  calculateHash(prevHash, rowDataStr) {
+    var raw = prevHash + "|" + rowDataStr;
+    if (typeof Utilities === "undefined") {
       // Node environment
-      return require('crypto').createHash('sha256').update(raw).digest('hex');
+      return require("crypto").createHash("sha256").update(raw).digest("hex");
     }
-  }
+    // GAS environment
+    var signature = Utilities.computeDigest(
+      Utilities.DigestAlgorithm.SHA_256,
+      raw
+    );
+    return signature
+      .map((b) => (b < 0 ? b + 256 : b).toString(16).padStart(2, "0"))
+      .join("");
+  },
 };
-if (typeof module !== 'undefined') { module.exports = { CoreAudit }; }
+if (typeof module !== "undefined") {
+  module.exports = { CoreAudit };
+}

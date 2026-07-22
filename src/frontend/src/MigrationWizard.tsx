@@ -1,17 +1,25 @@
-import { useEffect, useState } from 'react';
-import { apiService } from './services/api';
-import type { MigrationState, MigrationPreview, MigrationSelections } from './types';
+import { useEffect, useState } from "react";
+import { apiService } from "./services/api";
+import type {
+  MigrationPreview,
+  MigrationSelections,
+  MigrationState,
+} from "./types";
 
 export default function MigrationWizard() {
   const [state, setState] = useState<MigrationState | null>(null);
   const [preview, setPreview] = useState<MigrationPreview | null>(null);
   const [selections, setSelections] = useState<MigrationSelections>({
-    memberIds: [], accountIds: [], categoryIds: [], eventIds: [],
-    accountBalances: {}, balanceReasons: {}
+    accountBalances: {},
+    accountIds: [],
+    balanceReasons: {},
+    categoryIds: [],
+    eventIds: [],
+    memberIds: [],
   });
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [actionLoading, setActionLoading] = useState('');
+  const [error, setError] = useState("");
+  const [actionLoading, setActionLoading] = useState("");
 
   useEffect(() => {
     loadAll();
@@ -23,11 +31,13 @@ export default function MigrationWizard() {
       const [s, p, sel] = await Promise.all([
         apiService.getMigrationState(),
         apiService.getMigrationPreview(),
-        apiService.getMigrationSelections()
+        apiService.getMigrationSelections(),
       ]);
       setState(s);
       setPreview(p);
-      if (sel) setSelections(prev => ({ ...prev, ...sel }));
+      if (sel) {
+        setSelections((prev) => ({ ...prev, ...sel }));
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -36,84 +46,137 @@ export default function MigrationWizard() {
   };
 
   const handleStartMigration = async () => {
-    setActionLoading('starting');
+    setActionLoading("starting");
     try {
       await apiService.startMigration();
-      alert('Migration started! Year folder and spreadsheet created.');
+      alert("Migration started! Year folder and spreadsheet created.");
       loadAll();
     } catch (e) {
-      setError('Start failed: ' + (e as Error).message);
+      setError("Start failed: " + (e as Error).message);
     } finally {
-      setActionLoading('');
+      setActionLoading("");
     }
   };
 
-  const toggleSelection = (list: string[], id: string, setter: (ids: string[]) => void) => {
-    if (list.includes(id)) setter(list.filter(x => x !== id));
-    else setter([...list, id]);
+  const toggleSelection = (
+    list: string[],
+    id: string,
+    setter: (ids: string[]) => void
+  ) => {
+    if (list.includes(id)) {
+      setter(list.filter((x) => x !== id));
+    } else {
+      setter([...list, id]);
+    }
   };
 
   const handleConfirmSelections = async () => {
     if (selections.memberIds.length === 0) {
-      setError('At least one member must be selected');
+      setError("At least one member must be selected");
       return;
     }
-    setActionLoading('configuring');
+    setActionLoading("configuring");
     try {
       await apiService.setMigrationSelections(selections);
-      alert('Selections saved! Review the selections.');
+      alert("Selections saved! Review the selections.");
       loadAll();
     } catch (e) {
-      setError('Save failed: ' + (e as Error).message);
+      setError("Save failed: " + (e as Error).message);
     } finally {
-      setActionLoading('');
+      setActionLoading("");
     }
   };
 
   const handleExecute = async () => {
-    if (!confirm('Execute migration? This will create the new spreadsheet with selected data.')) return;
-    setActionLoading('executing');
+    if (
+      !confirm(
+        "Execute migration? This will create the new spreadsheet with selected data."
+      )
+    ) {
+      return;
+    }
+    setActionLoading("executing");
     try {
       await apiService.executeMigration();
-      alert('Migration executed! Review the new spreadsheet before activating.');
+      alert(
+        "Migration executed! Review the new spreadsheet before activating."
+      );
       loadAll();
     } catch (e) {
-      setError('Execution failed: ' + (e as Error).message);
+      setError("Execution failed: " + (e as Error).message);
     } finally {
-      setActionLoading('');
+      setActionLoading("");
     }
   };
 
   const handleActivate = async () => {
-    if (!confirm('Activate migration? This will switch production to the new spreadsheet. The old one will be archived.')) return;
-    setActionLoading('activating');
+    if (
+      !confirm(
+        "Activate migration? This will switch production to the new spreadsheet. The old one will be archived."
+      )
+    ) {
+      return;
+    }
+    setActionLoading("activating");
     try {
       await apiService.activateMigration();
-      alert('Migration activated! The new spreadsheet is now the active ledger. Refresh to see changes.');
+      alert(
+        "Migration activated! The new spreadsheet is now the active ledger. Refresh to see changes."
+      );
       window.location.reload();
     } catch (e) {
-      setError('Activation failed: ' + (e as Error).message);
+      setError("Activation failed: " + (e as Error).message);
     } finally {
-      setActionLoading('');
+      setActionLoading("");
     }
   };
 
   const handleCancel = async () => {
-    if (!confirm('Cancel migration? This will delete the created folder and spreadsheet.')) return;
-    setActionLoading('cancelling');
+    if (
+      !confirm(
+        "Cancel migration? This will delete the created folder and spreadsheet."
+      )
+    ) {
+      return;
+    }
+    setActionLoading("cancelling");
     try {
       await apiService.cancelMigration();
-      alert('Migration cancelled.');
+      alert("Migration cancelled.");
       loadAll();
     } catch (e) {
-      setError('Cancel failed: ' + (e as Error).message);
+      setError("Cancel failed: " + (e as Error).message);
     } finally {
-      setActionLoading('');
+      setActionLoading("");
     }
   };
 
-  if (loading) return <div className="glass-card"><div className="loader" style={{ margin: '2rem auto' }} /></div>;
-  if (error) return <div className="glass-card"><div className="alert error">{error}<button className="btn btn-secondary" style={{ marginTop: '0.5rem' }} onClick={() => { setError(''); loadAll(); }}>Retry</button></div></div>;
+  if (loading) {
+    return (
+      <div className="glass-card">
+        <div className="loader" style={{ margin: "2rem auto" }} />
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="glass-card">
+        <div className="alert error">
+          {error}
+          <button
+            className="btn btn-secondary"
+            onClick={() => {
+              setError("");
+              loadAll();
+            }}
+            style={{ marginTop: "0.5rem" }}
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const hasActiveMigration = state && state.active;
 
@@ -123,21 +186,33 @@ export default function MigrationWizard() {
       <div className="migration-wizard">
         <section className="glass-card">
           <h2>Annual Migration</h2>
-          <p className="muted-text">Create a new annual spreadsheet and carry forward selected members, accounts, categories, and events.</p>
+          <p className="muted-text">
+            Create a new annual spreadsheet and carry forward selected members,
+            accounts, categories, and events.
+          </p>
           {preview && (
-            <div style={{ marginTop: '1rem' }}>
-              <p>Year Label: <strong>{preview.year_label}</strong></p>
+            <div style={{ marginTop: "1rem" }}>
+              <p>
+                Year Label: <strong>{preview.year_label}</strong>
+              </p>
               <p>Active Members: {preview.active_members.length}</p>
               <p>Finance Accounts: {preview.accounts.length}</p>
               <p>Categories: {preview.categories.length}</p>
               <p>Events: {preview.events.length}</p>
               {!preview.has_treasurer && (
-                <p className="alert warning" style={{ marginTop: '0.5rem' }}>No active Treasurer found. Migration requires at least one Treasurer.</p>
+                <p className="alert warning" style={{ marginTop: "0.5rem" }}>
+                  No active Treasurer found. Migration requires at least one
+                  Treasurer.
+                </p>
               )}
             </div>
           )}
-          <div style={{ marginTop: '1rem' }}>
-            <button className="primary-btn" onClick={handleStartMigration} disabled={!!actionLoading || !preview?.has_treasurer}>
+          <div style={{ marginTop: "1rem" }}>
+            <button
+              className="primary-btn"
+              disabled={!!actionLoading || !preview?.has_treasurer}
+              onClick={handleStartMigration}
+            >
               Start Migration
             </button>
           </div>
@@ -147,13 +222,20 @@ export default function MigrationWizard() {
   }
 
   // Stage: CONFIGURE — select what to migrate
-  if (state.stage === 'CONFIGURE') {
+  if (state.stage === "CONFIGURE") {
     return (
       <div className="migration-wizard">
         <section className="glass-card">
           <h2>Configure Migration — {state.year_label}</h2>
-          <p className="muted-text">Select what to carry forward to the new annual file.</p>
-          <button className="danger-btn" style={{ marginTop: '0.5rem' }} onClick={handleCancel} disabled={!!actionLoading}>
+          <p className="muted-text">
+            Select what to carry forward to the new annual file.
+          </p>
+          <button
+            className="danger-btn"
+            disabled={!!actionLoading}
+            onClick={handleCancel}
+            style={{ marginTop: "0.5rem" }}
+          >
             Cancel Migration
           </button>
         </section>
@@ -164,22 +246,45 @@ export default function MigrationWizard() {
               <h3>Members ({selections.memberIds.length} selected)</h3>
               <div className="table-scroll">
                 <table className="data-table">
-                  <thead><tr><th>Select</th><th>ID</th><th>Name</th><th>Role</th><th>Active</th></tr></thead>
+                  <thead>
+                    <tr>
+                      <th>Select</th>
+                      <th>ID</th>
+                      <th>Name</th>
+                      <th>Role</th>
+                      <th>Active</th>
+                    </tr>
+                  </thead>
                   <tbody>
-                    {preview.operators.map(o => (
+                    {preview.operators.map((o) => (
                       <tr key={o.user_id}>
-                        <td><input type="checkbox" checked disabled /></td>
+                        <td>
+                          <input checked disabled type="checkbox" />
+                        </td>
                         <td className="mono">{o.user_id}</td>
                         <td>{o.display_name}</td>
                         <td>{o.role}</td>
-                        <td>{o.active ? '✓' : ''}</td>
+                        <td>{o.active ? "✓" : ""}</td>
                       </tr>
                     ))}
-                    {preview.active_members.map(m => (
+                    {preview.active_members.map((m) => (
                       <tr key={m.user_id}>
                         <td>
-                          <input type="checkbox" checked={selections.memberIds.includes(m.user_id)}
-                            onChange={() => toggleSelection(selections.memberIds, m.user_id, ids => setSelections(s => ({ ...s, memberIds: ids })))} />
+                          <input
+                            checked={selections.memberIds.includes(m.user_id)}
+                            onChange={() =>
+                              toggleSelection(
+                                selections.memberIds,
+                                m.user_id,
+                                (ids) =>
+                                  setSelections((s) => ({
+                                    ...s,
+                                    memberIds: ids,
+                                  }))
+                              )
+                            }
+                            type="checkbox"
+                          />
                         </td>
                         <td className="mono">{m.user_id}</td>
                         <td>{m.display_name}</td>
@@ -187,11 +292,24 @@ export default function MigrationWizard() {
                         <td>✓</td>
                       </tr>
                     ))}
-                    {preview.inactive_members.map(m => (
+                    {preview.inactive_members.map((m) => (
                       <tr key={m.user_id} style={{ opacity: 0.6 }}>
                         <td>
-                          <input type="checkbox" checked={selections.memberIds.includes(m.user_id)}
-                            onChange={() => toggleSelection(selections.memberIds, m.user_id, ids => setSelections(s => ({ ...s, memberIds: ids })))} />
+                          <input
+                            checked={selections.memberIds.includes(m.user_id)}
+                            onChange={() =>
+                              toggleSelection(
+                                selections.memberIds,
+                                m.user_id,
+                                (ids) =>
+                                  setSelections((s) => ({
+                                    ...s,
+                                    memberIds: ids,
+                                  }))
+                              )
+                            }
+                            type="checkbox"
+                          />
                         </td>
                         <td className="mono">{m.user_id}</td>
                         <td>{m.display_name}</td>
@@ -205,27 +323,66 @@ export default function MigrationWizard() {
             </section>
 
             <section className="glass-card">
-              <h3>Finance Accounts ({selections.accountIds.length} selected)</h3>
+              <h3>
+                Finance Accounts ({selections.accountIds.length} selected)
+              </h3>
               <div className="table-scroll">
                 <table className="data-table">
-                  <thead><tr><th>Select</th><th>ID</th><th>Name</th><th>Current Balance</th><th>Opening Balance</th></tr></thead>
+                  <thead>
+                    <tr>
+                      <th>Select</th>
+                      <th>ID</th>
+                      <th>Name</th>
+                      <th>Current Balance</th>
+                      <th>Opening Balance</th>
+                    </tr>
+                  </thead>
                   <tbody>
-                    {preview.accounts.map(a => (
+                    {preview.accounts.map((a) => (
                       <tr key={a.account_id}>
                         <td>
-                          <input type="checkbox" checked={selections.accountIds.includes(a.account_id)}
-                            onChange={() => toggleSelection(selections.accountIds, a.account_id, ids => setSelections(s => ({ ...s, accountIds: ids })))} />
+                          <input
+                            checked={selections.accountIds.includes(
+                              a.account_id
+                            )}
+                            onChange={() =>
+                              toggleSelection(
+                                selections.accountIds,
+                                a.account_id,
+                                (ids) =>
+                                  setSelections((s) => ({
+                                    ...s,
+                                    accountIds: ids,
+                                  }))
+                              )
+                            }
+                            type="checkbox"
+                          />
                         </td>
                         <td className="mono">{a.account_id}</td>
                         <td>{a.name}</td>
-                        <td className="amount">HKD {a.current_balance.toFixed(2)}</td>
+                        <td className="amount">
+                          HKD {a.current_balance.toFixed(2)}
+                        </td>
                         <td>
-                          <input type="number" className="filter-date" style={{ width: '120px' }}
-                            value={selections.accountBalances[a.account_id] ?? a.current_balance}
-                            onChange={e => setSelections(s => ({
-                              ...s,
-                              accountBalances: { ...s.accountBalances, [a.account_id]: Number(e.target.value) }
-                            }))} />
+                          <input
+                            className="filter-date"
+                            onChange={(e) =>
+                              setSelections((s) => ({
+                                ...s,
+                                accountBalances: {
+                                  ...s.accountBalances,
+                                  [a.account_id]: Number(e.target.value),
+                                },
+                              }))
+                            }
+                            style={{ width: "120px" }}
+                            type="number"
+                            value={
+                              selections.accountBalances[a.account_id] ??
+                              a.current_balance
+                            }
+                          />
                         </td>
                       </tr>
                     ))}
@@ -235,27 +392,65 @@ export default function MigrationWizard() {
             </section>
 
             <section className="glass-card">
-              <h3>Categories ({selections.categoryIds.length} selected) & Events ({selections.eventIds.length} selected)</h3>
+              <h3>
+                Categories ({selections.categoryIds.length} selected) & Events (
+                {selections.eventIds.length} selected)
+              </h3>
               <div className="table-scroll">
                 <table className="data-table">
-                  <thead><tr><th>Select</th><th>Type</th><th>ID</th><th>Name</th></tr></thead>
+                  <thead>
+                    <tr>
+                      <th>Select</th>
+                      <th>Type</th>
+                      <th>ID</th>
+                      <th>Name</th>
+                    </tr>
+                  </thead>
                   <tbody>
-                    {preview.categories.map(c => (
+                    {preview.categories.map((c) => (
                       <tr key={c.category_id}>
                         <td>
-                          <input type="checkbox" checked={selections.categoryIds.includes(c.category_id)}
-                            onChange={() => toggleSelection(selections.categoryIds, c.category_id, ids => setSelections(s => ({ ...s, categoryIds: ids })))} />
+                          <input
+                            checked={selections.categoryIds.includes(
+                              c.category_id
+                            )}
+                            onChange={() =>
+                              toggleSelection(
+                                selections.categoryIds,
+                                c.category_id,
+                                (ids) =>
+                                  setSelections((s) => ({
+                                    ...s,
+                                    categoryIds: ids,
+                                  }))
+                              )
+                            }
+                            type="checkbox"
+                          />
                         </td>
                         <td>Category</td>
                         <td className="mono">{c.category_id}</td>
                         <td>{c.name}</td>
                       </tr>
                     ))}
-                    {preview.events.map(e => (
+                    {preview.events.map((e) => (
                       <tr key={e.event_id}>
                         <td>
-                          <input type="checkbox" checked={selections.eventIds.includes(e.event_id)}
-                            onChange={() => toggleSelection(selections.eventIds, e.event_id, ids => setSelections(s => ({ ...s, eventIds: ids })))} />
+                          <input
+                            checked={selections.eventIds.includes(e.event_id)}
+                            onChange={() =>
+                              toggleSelection(
+                                selections.eventIds,
+                                e.event_id,
+                                (ids) =>
+                                  setSelections((s) => ({
+                                    ...s,
+                                    eventIds: ids,
+                                  }))
+                              )
+                            }
+                            type="checkbox"
+                          />
                         </td>
                         <td>Event</td>
                         <td className="mono">{e.event_id}</td>
@@ -268,22 +463,36 @@ export default function MigrationWizard() {
             </section>
 
             <section className="glass-card">
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <button className="primary-btn" onClick={handleConfirmSelections} disabled={!!actionLoading}>
-                  {actionLoading === 'configuring' ? 'Saving...' : 'Confirm Selections'}
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <button
+                  className="primary-btn"
+                  disabled={!!actionLoading}
+                  onClick={handleConfirmSelections}
+                >
+                  {actionLoading === "configuring"
+                    ? "Saving..."
+                    : "Confirm Selections"}
                 </button>
-                <button className="secondary-btn" onClick={() => {
-                  if (preview) {
-                    setSelections({
-                      memberIds: [...preview.operators.map(o => o.user_id), ...preview.active_members.map(m => m.user_id)],
-                      accountIds: preview.accounts.map(a => a.account_id),
-                      categoryIds: preview.categories.filter(c => c.active).map(c => c.category_id),
-                      eventIds: preview.events.map(e => e.event_id),
-                      accountBalances: {},
-                      balanceReasons: {}
-                    });
-                  }
-                }}>
+                <button
+                  className="secondary-btn"
+                  onClick={() => {
+                    if (preview) {
+                      setSelections({
+                        accountBalances: {},
+                        accountIds: preview.accounts.map((a) => a.account_id),
+                        balanceReasons: {},
+                        categoryIds: preview.categories
+                          .filter((c) => c.active)
+                          .map((c) => c.category_id),
+                        eventIds: preview.events.map((e) => e.event_id),
+                        memberIds: [
+                          ...preview.operators.map((o) => o.user_id),
+                          ...preview.active_members.map((m) => m.user_id),
+                        ],
+                      });
+                    }
+                  }}
+                >
                   Select All
                 </button>
               </div>
@@ -295,21 +504,42 @@ export default function MigrationWizard() {
   }
 
   // Stage: REVIEW — execute and activate
-  if (state.stage === 'REVIEW') {
+  if (state.stage === "REVIEW") {
     return (
       <div className="migration-wizard">
         <section className="glass-card">
           <h2>Review Migration — {state.year_label}</h2>
-          <p className="muted-text">Target spreadsheet: <code>{state.target_spreadsheet_id}</code></p>
-          <p>Selected: {selections.memberIds.length} members, {selections.accountIds.length} accounts, {selections.categoryIds.length} categories, {selections.eventIds.length} events</p>
-          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
-            <button className="warning-btn" onClick={handleExecute} disabled={!!actionLoading}>
-              {actionLoading === 'executing' ? 'Executing...' : 'Execute Migration'}
+          <p className="muted-text">
+            Target spreadsheet: <code>{state.target_spreadsheet_id}</code>
+          </p>
+          <p>
+            Selected: {selections.memberIds.length} members,{" "}
+            {selections.accountIds.length} accounts,{" "}
+            {selections.categoryIds.length} categories,{" "}
+            {selections.eventIds.length} events
+          </p>
+          <div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem" }}>
+            <button
+              className="warning-btn"
+              disabled={!!actionLoading}
+              onClick={handleExecute}
+            >
+              {actionLoading === "executing"
+                ? "Executing..."
+                : "Execute Migration"}
             </button>
-            <button className="primary-btn" onClick={handleActivate} disabled={!!actionLoading}>
-              {actionLoading === 'activating' ? 'Activating...' : 'Activate'}
+            <button
+              className="primary-btn"
+              disabled={!!actionLoading}
+              onClick={handleActivate}
+            >
+              {actionLoading === "activating" ? "Activating..." : "Activate"}
             </button>
-            <button className="danger-btn" onClick={handleCancel} disabled={!!actionLoading}>
+            <button
+              className="danger-btn"
+              disabled={!!actionLoading}
+              onClick={handleCancel}
+            >
               Cancel
             </button>
           </div>
@@ -323,8 +553,13 @@ export default function MigrationWizard() {
     <div className="migration-wizard">
       <section className="glass-card">
         <h2>Migration Complete</h2>
-        <p>The annual migration to <strong>{state.year_label}</strong> has been activated.</p>
-        <p className="muted-text">The previous annual file is now archived and read-only.</p>
+        <p>
+          The annual migration to <strong>{state.year_label}</strong> has been
+          activated.
+        </p>
+        <p className="muted-text">
+          The previous annual file is now archived and read-only.
+        </p>
       </section>
     </div>
   );

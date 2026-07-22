@@ -1,3 +1,4 @@
+"use strict";
 /**
  * Setup.gs — idempotent builder for the whole Google-side footprint:
  * CF-Ledger tabs, CF-Vault, Drive folders, Config seed, Category seed,
@@ -17,7 +18,10 @@
  */
 function setupAll() {
   var ledger = SpreadsheetApp.getActive();
-  PropertiesService.getScriptProperties().setProperty('LEDGER_ID', ledger.getId());
+  PropertiesService.getScriptProperties().setProperty(
+    "LEDGER_ID",
+    ledger.getId()
+  );
 
   Setup_clearAllData(ledger); // WARNING: Wipes all data (except Config) on every run
 
@@ -32,51 +36,65 @@ function setupAll() {
 
   var configSeeded = Setup_ensureConfigSeeded();
   if (configSeeded.created) {
-    Audit.append('SYSTEM', 'Config', 'CONFIG', 'CREATE', { keys: configSeeded.keys });
+    Audit.append("SYSTEM", "Config", "CONFIG", "CREATE", {
+      keys: configSeeded.keys,
+    });
   }
 
   var categoriesSeeded = Setup_ensureCategoriesSeeded();
   if (categoriesSeeded.created) {
-    Audit.append('SYSTEM', 'Category', 'CATEGORIES', 'CREATE', { count: categoriesSeeded.count });
+    Audit.append("SYSTEM", "Category", "CATEGORIES", "CREATE", {
+      count: categoriesSeeded.count,
+    });
   }
 
   var treasurerSeeded = Setup_ensureTreasurerUserSeeded();
   if (treasurerSeeded.created) {
-    Audit.append('SYSTEM', 'User', treasurerSeeded.userId, 'CREATE', { role: ROLES.TREASURER });
+    Audit.append("SYSTEM", "User", treasurerSeeded.userId, "CREATE", {
+      role: ROLES.TREASURER,
+    });
   }
 
   var configConsistency = Setup_verifyConfigConsistency();
 
   var incomeSeeded = Setup_ensureOpeningBalanceSeeded();
   if (incomeSeeded.created) {
-    Audit.append('SYSTEM', 'Income', incomeSeeded.incomeId, 'CREATE', {
-      amount: incomeSeeded.amount, notes: 'Opening balance per SEM A Statement.xlsx'
+    Audit.append("SYSTEM", "Income", incomeSeeded.incomeId, "CREATE", {
+      amount: incomeSeeded.amount,
+      notes: "Opening balance per SEM A Statement.xlsx",
     });
   }
 
   var accountsSeeded = Setup_ensureFinanceAccountsSeeded();
   if (accountsSeeded.created) {
-    Audit.append('SYSTEM', 'FinanceAccount', accountsSeeded.accountId, 'CREATE', {
-      name: accountsSeeded.name, openingBalance: accountsSeeded.openingBalance
-    });
+    Audit.append(
+      "SYSTEM",
+      "FinanceAccount",
+      accountsSeeded.accountId,
+      "CREATE",
+      {
+        name: accountsSeeded.name,
+        openingBalance: accountsSeeded.openingBalance,
+      }
+    );
   }
 
   SpreadsheetApp.flush(); // Crucial so a subsequent call in a separate execution (e.g. clasp run) doesn't race a stale read of what was just seeded.
 
   return {
-    ledgerId: ledger.getId(),
-    ledgerUrl: ledger.getUrl(),
-    vaultId: vaultInfo.id,
-    vaultUrl: vaultInfo.url,
+    categoriesSeeded,
+    configConsistency,
+    configSeeded,
     dashboardId: dashboardInfo.id,
     dashboardUrl: dashboardInfo.url,
-    tabsCreated: createdTabs,
     folders: folderInfo,
-    configSeeded: configSeeded,
-    categoriesSeeded: categoriesSeeded,
-    treasurerSeeded: treasurerSeeded,
-    configConsistency: configConsistency,
-    incomeSeeded: incomeSeeded
+    incomeSeeded,
+    ledgerId: ledger.getId(),
+    ledgerUrl: ledger.getUrl(),
+    tabsCreated: createdTabs,
+    treasurerSeeded,
+    vaultId: vaultInfo.id,
+    vaultUrl: vaultInfo.url,
   };
 }
 
@@ -87,21 +105,36 @@ function setupAll() {
  */
 function Setup_ensureAllTabsExist(ledger) {
   var ledgerTabNames = [
-    TABS.USERS, TABS.CATEGORIES, TABS.EVENTS, TABS.BUDGET_REQUESTS,
-    TABS.BUDGET_REQUEST_LINES, TABS.EXPENSE_CLAIMS, TABS.CLAIM_LINE_ITEMS,
-    TABS.RECEIPTS, TABS.INCOME, TABS.PAYOUTS, TABS.AUDIT_LOG,
-    TABS.APPROVALS, TABS.CONFIG, TABS.COUNTERS,
-    TABS.FINANCE_ACCOUNTS, TABS.ACCOUNT_TRANSFERS, TABS.ACCOUNT_ADJUSTMENTS
+    TABS.USERS,
+    TABS.CATEGORIES,
+    TABS.EVENTS,
+    TABS.BUDGET_REQUESTS,
+    TABS.BUDGET_REQUEST_LINES,
+    TABS.EXPENSE_CLAIMS,
+    TABS.CLAIM_LINE_ITEMS,
+    TABS.RECEIPTS,
+    TABS.INCOME,
+    TABS.PAYOUTS,
+    TABS.AUDIT_LOG,
+    TABS.APPROVALS,
+    TABS.CONFIG,
+    TABS.COUNTERS,
+    TABS.FINANCE_ACCOUNTS,
+    TABS.ACCOUNT_TRANSFERS,
+    TABS.ACCOUNT_ADJUSTMENTS,
   ];
   var created = [];
 
   var allSheets = ledger.getSheets();
   for (var j = 0; j < allSheets.length; j++) {
     var sheetName = allSheets[j].getName();
-    if (ledgerTabNames.indexOf(sheetName) === -1) {
-      if (ledger.getSheets().length > 1) {
-        try { ledger.deleteSheet(allSheets[j]); } catch (e) {}
-      }
+    if (
+      ledgerTabNames.indexOf(sheetName) === -1 &&
+      ledger.getSheets().length > 1
+    ) {
+      try {
+        ledger.deleteSheet(allSheets[j]);
+      } catch (e) {}
     }
   }
 
@@ -112,7 +145,7 @@ function Setup_ensureAllTabsExist(ledger) {
       sheet = ledger.insertSheet(name);
       created.push(name);
     }
-    
+
     var headers = Object.keys(COLS[name]);
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     sheet.setFrozenRows(1);
@@ -128,21 +161,27 @@ function Setup_ensureAllTabsExist(ledger) {
  */
 function Setup_installArrayFormulas(ledger) {
   var sheet = ledger.getSheetByName(TABS.BUDGET_REQUEST_LINES);
-  if (!sheet) return;
+  if (!sheet) {
+    return;
+  }
   var claimedCol = COLS.BudgetRequestLines.claimed_amount;
   var remainingCol = COLS.BudgetRequestLines.remaining;
-  
-  var claimedFormula = '={"claimed_amount"; MAP(A2:A, LAMBDA(id, IF(ISBLANK(id), "", SUMIF(ClaimLineItems!C:C, id, ClaimLineItems!E:E))))}';
+
+  var claimedFormula =
+    '={"claimed_amount"; MAP(A2:A, LAMBDA(id, IF(ISBLANK(id), "", SUMIF(ClaimLineItems!C:C, id, ClaimLineItems!E:E))))}';
   sheet.getRange(1, claimedCol).setFormula(claimedFormula);
-  
-  var remainingFormula = '={"remaining"; ARRAYFORMULA(IF(ISBLANK(A2:A), "", F2:F - H2:H))}';
+
+  var remainingFormula =
+    '={"remaining"; ARRAYFORMULA(IF(ISBLANK(A2:A), "", F2:F - H2:H))}';
   sheet.getRange(1, remainingCol).setFormula(remainingFormula);
 }
 
 /** Hide the Counters tab — it's implementation detail, not for humans to edit. */
 function Setup_hideCountersTab(ledger) {
   var sheet = ledger.getSheetByName(TABS.COUNTERS);
-  if (sheet && !sheet.isSheetHidden()) sheet.hideSheet();
+  if (sheet && !sheet.isSheetHidden()) {
+    sheet.hideSheet();
+  }
 }
 
 /**
@@ -152,22 +191,76 @@ function Setup_hideCountersTab(ledger) {
  * @param {Spreadsheet} ledger
  */
 function Setup_applyValidationsAndProtections(ledger) {
-  Setup_applyDropdown(ledger, TABS.BUDGET_REQUESTS, COLS.BudgetRequests.status, Object.keys(STATUS.BudgetRequest).map(function (k) { return STATUS.BudgetRequest[k]; }));
-  Setup_applyDropdown(ledger, TABS.BUDGET_REQUEST_LINES, COLS.BudgetRequestLines.line_status, Setup_values(STATUS.BudgetRequestLine));
-  Setup_applyDropdown(ledger, TABS.EXPENSE_CLAIMS, COLS.ExpenseClaims.status, Setup_values(STATUS.ExpenseClaim));
-  Setup_applyDropdown(ledger, TABS.PAYOUTS, COLS.Payouts.status, Setup_values(STATUS.Payout));
-  Setup_applyDropdown(ledger, TABS.FINANCE_ACCOUNTS, COLS.FinanceAccounts.status, Setup_values(STATUS.FinanceAccount));
-  Setup_applyDropdown(ledger, TABS.INCOME, COLS.Income.status, Setup_values(STATUS.Income));
+  Setup_applyDropdown(
+    ledger,
+    TABS.BUDGET_REQUESTS,
+    COLS.BudgetRequests.status,
+    Object.keys(STATUS.BudgetRequest).map((k) => STATUS.BudgetRequest[k])
+  );
+  Setup_applyDropdown(
+    ledger,
+    TABS.BUDGET_REQUEST_LINES,
+    COLS.BudgetRequestLines.line_status,
+    Setup_values(STATUS.BudgetRequestLine)
+  );
+  Setup_applyDropdown(
+    ledger,
+    TABS.EXPENSE_CLAIMS,
+    COLS.ExpenseClaims.status,
+    Setup_values(STATUS.ExpenseClaim)
+  );
+  Setup_applyDropdown(
+    ledger,
+    TABS.PAYOUTS,
+    COLS.Payouts.status,
+    Setup_values(STATUS.Payout)
+  );
+  Setup_applyDropdown(
+    ledger,
+    TABS.FINANCE_ACCOUNTS,
+    COLS.FinanceAccounts.status,
+    Setup_values(STATUS.FinanceAccount)
+  );
+  Setup_applyDropdown(
+    ledger,
+    TABS.INCOME,
+    COLS.Income.status,
+    Setup_values(STATUS.Income)
+  );
   Setup_applyDropdown(ledger, TABS.USERS, COLS.Users.role, Setup_values(ROLES));
-  Setup_applyDropdown(ledger, TABS.CATEGORIES, COLS.Categories.kind, ['EXPENSE', 'INCOME']);
-  Setup_applyDropdown(ledger, TABS.APPROVALS, COLS.Approvals.action, Setup_values(ACTIONS));
+  Setup_applyDropdown(ledger, TABS.CATEGORIES, COLS.Categories.kind, [
+    "EXPENSE",
+    "INCOME",
+  ]);
+  Setup_applyDropdown(
+    ledger,
+    TABS.APPROVALS,
+    COLS.Approvals.action,
+    Setup_values(ACTIONS)
+  );
 
   Setup_applyCheckbox(ledger, TABS.USERS, COLS.Users.active);
   Setup_applyCheckbox(ledger, TABS.CATEGORIES, COLS.Categories.active);
-  Setup_applyCheckbox(ledger, TABS.BUDGET_REQUESTS, COLS.BudgetRequests.self_approved);
-  Setup_applyCheckbox(ledger, TABS.EXPENSE_CLAIMS, COLS.ExpenseClaims.self_approved);
-  Setup_applyCheckbox(ledger, TABS.EXPENSE_CLAIMS, COLS.ExpenseClaims.late_flag);
-  Setup_applyCheckbox(ledger, TABS.CLAIM_LINE_ITEMS, COLS.ClaimLineItems.missing_receipt_flag);
+  Setup_applyCheckbox(
+    ledger,
+    TABS.BUDGET_REQUESTS,
+    COLS.BudgetRequests.self_approved
+  );
+  Setup_applyCheckbox(
+    ledger,
+    TABS.EXPENSE_CLAIMS,
+    COLS.ExpenseClaims.self_approved
+  );
+  Setup_applyCheckbox(
+    ledger,
+    TABS.EXPENSE_CLAIMS,
+    COLS.ExpenseClaims.late_flag
+  );
+  Setup_applyCheckbox(
+    ledger,
+    TABS.CLAIM_LINE_ITEMS,
+    COLS.ClaimLineItems.missing_receipt_flag
+  );
   Setup_applyCheckbox(ledger, TABS.APPROVALS, COLS.Approvals.confirm);
 
   var ownerOnlyTabs = [TABS.AUDIT_LOG, TABS.CONFIG, TABS.COUNTERS];
@@ -176,10 +269,19 @@ function Setup_applyValidationsAndProtections(ledger) {
   }
 
   var warnOnlyTabs = [
-    TABS.USERS, TABS.CATEGORIES, TABS.EVENTS, TABS.BUDGET_REQUESTS,
-    TABS.BUDGET_REQUEST_LINES, TABS.EXPENSE_CLAIMS, TABS.CLAIM_LINE_ITEMS,
-    TABS.RECEIPTS, TABS.INCOME, TABS.PAYOUTS,
-    TABS.FINANCE_ACCOUNTS, TABS.ACCOUNT_TRANSFERS, TABS.ACCOUNT_ADJUSTMENTS
+    TABS.USERS,
+    TABS.CATEGORIES,
+    TABS.EVENTS,
+    TABS.BUDGET_REQUESTS,
+    TABS.BUDGET_REQUEST_LINES,
+    TABS.EXPENSE_CLAIMS,
+    TABS.CLAIM_LINE_ITEMS,
+    TABS.RECEIPTS,
+    TABS.INCOME,
+    TABS.PAYOUTS,
+    TABS.FINANCE_ACCOUNTS,
+    TABS.ACCOUNT_TRANSFERS,
+    TABS.ACCOUNT_ADJUSTMENTS,
   ];
   for (var j = 0; j < warnOnlyTabs.length; j++) {
     Setup_protectWarnOnly(ledger.getSheetByName(warnOnlyTabs[j]));
@@ -190,7 +292,7 @@ function Setup_applyValidationsAndProtections(ledger) {
 
 /** @return {string[]} the values of an enum-like object, in declaration order */
 function Setup_values(obj) {
-  return Object.keys(obj).map(function (k) { return obj[k]; });
+  return Object.keys(obj).map((k) => obj[k]);
 }
 
 /**
@@ -202,8 +304,13 @@ function Setup_values(obj) {
  */
 function Setup_applyDropdown(ledger, tabName, col1Indexed, values) {
   var sheet = ledger.getSheetByName(tabName);
-  if (!sheet) return;
-  var rule = SpreadsheetApp.newDataValidation().requireValueInList(values, true).setAllowInvalid(false).build();
+  if (!sheet) {
+    return;
+  }
+  var rule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(values, true)
+    .setAllowInvalid(false)
+    .build();
   sheet.getRange(2, col1Indexed, 999, 1).setDataValidation(rule);
 }
 
@@ -215,7 +322,9 @@ function Setup_applyDropdown(ledger, tabName, col1Indexed, values) {
  */
 function Setup_applyCheckbox(ledger, tabName, col1Indexed) {
   var sheet = ledger.getSheetByName(tabName);
-  if (!sheet) return;
+  if (!sheet) {
+    return;
+  }
   var rule = SpreadsheetApp.newDataValidation().requireCheckbox().build();
   sheet.getRange(2, col1Indexed, 999, 1).setDataValidation(rule);
 }
@@ -227,16 +336,26 @@ function Setup_applyCheckbox(ledger, tabName, col1Indexed) {
  * @param {?Sheet} sheet
  */
 function Setup_protectOwnerOnly(sheet) {
-  if (!sheet) return;
+  if (!sheet) {
+    return;
+  }
   var existing = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET);
-  if (existing.length > 0) return;
-  var protection = sheet.protect().setDescription('owner-only: ' + sheet.getName());
+  if (existing.length > 0) {
+    return;
+  }
+  var protection = sheet
+    .protect()
+    .setDescription("owner-only: " + sheet.getName());
   var me = Session.getEffectiveUser();
   var editors = protection.getEditors();
   for (var i = 0; i < editors.length; i++) {
-    if (editors[i].getEmail() !== me.getEmail()) protection.removeEditor(editors[i]);
+    if (editors[i].getEmail() !== me.getEmail()) {
+      protection.removeEditor(editors[i]);
+    }
   }
-  if (protection.canDomainEdit()) protection.setDomainEdit(false);
+  if (protection.canDomainEdit()) {
+    protection.setDomainEdit(false);
+  }
 }
 
 /**
@@ -245,10 +364,16 @@ function Setup_protectOwnerOnly(sheet) {
  * @param {?Sheet} sheet
  */
 function Setup_protectWarnOnly(sheet) {
-  if (!sheet) return;
+  if (!sheet) {
+    return;
+  }
   var existing = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET);
-  if (existing.length > 0) return;
-  var protection = sheet.protect().setDescription('warn-only: ' + sheet.getName());
+  if (existing.length > 0) {
+    return;
+  }
+  var protection = sheet
+    .protect()
+    .setDescription("warn-only: " + sheet.getName());
   protection.setWarningOnly(true);
 }
 
@@ -260,10 +385,16 @@ function Setup_protectWarnOnly(sheet) {
  * @param {?Sheet} sheet
  */
 function Setup_protectApprovalsIntentOnly(sheet) {
-  if (!sheet) return;
+  if (!sheet) {
+    return;
+  }
   var existing = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET);
-  if (existing.length > 0) return;
-  var protection = sheet.protect().setDescription('Approvals: intent columns only editable');
+  if (existing.length > 0) {
+    return;
+  }
+  var protection = sheet
+    .protect()
+    .setDescription("Approvals: intent columns only editable");
   var c = COLS.Approvals;
   var firstIntentCol = c.action;
   var lastIntentCol = c.intent_actor_email;
@@ -279,14 +410,16 @@ function Setup_protectApprovalsIntentOnly(sheet) {
  */
 function Setup_ensureVaultSpreadsheet() {
   var props = PropertiesService.getScriptProperties();
-  var existingId = props.getProperty('VAULT_ID');
+  var existingId = props.getProperty("VAULT_ID");
   var vault;
   if (existingId) {
-    try { vault = SpreadsheetApp.openById(existingId); } catch (e) {}
+    try {
+      vault = SpreadsheetApp.openById(existingId);
+    } catch (e) {}
   }
   if (!vault) {
-    vault = SpreadsheetApp.create('CF-Vault');
-    props.setProperty('VAULT_ID', vault.getId());
+    vault = SpreadsheetApp.create("CF-Vault");
+    props.setProperty("VAULT_ID", vault.getId());
   }
   var sheet = vault.getSheetByName(TABS.VAULT);
   if (!sheet) {
@@ -298,13 +431,19 @@ function Setup_ensureVaultSpreadsheet() {
   }
   var protections = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET);
   if (protections.length === 0) {
-    var protection = sheet.protect().setDescription('CF-Vault: treasurer-only, PII');
+    var protection = sheet
+      .protect()
+      .setDescription("CF-Vault: treasurer-only, PII");
     var me = Session.getEffectiveUser();
     var editors = protection.getEditors();
     for (var i = 0; i < editors.length; i++) {
-      if (editors[i].getEmail() !== me.getEmail()) protection.removeEditor(editors[i]);
+      if (editors[i].getEmail() !== me.getEmail()) {
+        protection.removeEditor(editors[i]);
+      }
     }
-    if (protection.canDomainEdit()) protection.setDomainEdit(false);
+    if (protection.canDomainEdit()) {
+      protection.setDomainEdit(false);
+    }
   }
   return { id: vault.getId(), url: vault.getUrl() };
 }
@@ -317,7 +456,7 @@ function Setup_ensureVaultSpreadsheet() {
  */
 function Setup_ensureDashboardSpreadsheet() {
   var props = PropertiesService.getScriptProperties();
-  var existingId = props.getProperty('DASHBOARD_ID');
+  var existingId = props.getProperty("DASHBOARD_ID");
   var dash;
   if (existingId) {
     try {
@@ -326,13 +465,14 @@ function Setup_ensureDashboardSpreadsheet() {
       dash = null;
     }
   }
-  
+
   if (!dash) {
-    dash = SpreadsheetApp.create('CF-Budget-Dashboard');
-    props.setProperty('DASHBOARD_ID', dash.getId());
-    
-    var ledgerId = props.getProperty('LEDGER_ID') || SpreadsheetApp.getActive().getId();
-    
+    dash = SpreadsheetApp.create("CF-Budget-Dashboard");
+    props.setProperty("DASHBOARD_ID", dash.getId());
+
+    var ledgerId =
+      props.getProperty("LEDGER_ID") || SpreadsheetApp.getActive().getId();
+
     var tabs = [TABS.BUDGET_REQUESTS, TABS.EXPENSE_CLAIMS, TABS.INCOME];
     for (var i = 0; i < tabs.length; i++) {
       var tabName = tabs[i];
@@ -346,25 +486,33 @@ function Setup_ensureDashboardSpreadsheet() {
         }
       }
       var formula = '=IMPORTRANGE("' + ledgerId + '", "' + tabName + '!A:Z")';
-      sheet.getRange('A1').setFormula(formula);
+      sheet.getRange("A1").setFormula(formula);
     }
-    
+
     var sheets = dash.getSheets();
     for (var j = 0; j < sheets.length; j++) {
       if (tabs.indexOf(sheets[j].getName()) === -1) {
-        try { dash.deleteSheet(sheets[j]); } catch (e) {}
+        try {
+          dash.deleteSheet(sheets[j]);
+        } catch (e) {}
       }
     }
-    
+
     var allSheets = dash.getSheets();
     var me = Session.getEffectiveUser();
     for (var k = 0; k < allSheets.length; k++) {
-      var p = allSheets[k].protect().setDescription('Dashboard is read-only IMPORTRANGE');
+      var p = allSheets[k]
+        .protect()
+        .setDescription("Dashboard is read-only IMPORTRANGE");
       var editors = p.getEditors();
       for (var e = 0; e < editors.length; e++) {
-        if (editors[e].getEmail() !== me.getEmail()) p.removeEditor(editors[e]);
+        if (editors[e].getEmail() !== me.getEmail()) {
+          p.removeEditor(editors[e]);
+        }
       }
-      if (p.canDomainEdit()) p.setDomainEdit(false);
+      if (p.canDomainEdit()) {
+        p.setDomainEdit(false);
+      }
     }
   }
   return { id: dash.getId(), url: dash.getUrl() };
@@ -377,13 +525,13 @@ function Setup_ensureDashboardSpreadsheet() {
  */
 function Setup_ensureDriveFolders() {
   var props = PropertiesService.getScriptProperties();
-  var root = Setup_getOrCreateFolder(DriveApp.getRootFolder(), 'CF-Finance');
-  props.setProperty('CF_FINANCE_FOLDER_ID', root.getId());
-  var names = ['Receipts', 'Snapshots', 'Statements', 'Archive'];
+  var root = Setup_getOrCreateFolder(DriveApp.getRootFolder(), "CF-Finance");
+  props.setProperty("CF_FINANCE_FOLDER_ID", root.getId());
+  var names = ["Receipts", "Snapshots", "Statements", "Archive"];
   var ids = { CF_Finance: root.getId() };
   for (var i = 0; i < names.length; i++) {
     var folder = Setup_getOrCreateFolder(root, names[i]);
-    var propKey = names[i].toUpperCase() + '_FOLDER_ID';
+    var propKey = names[i].toUpperCase() + "_FOLDER_ID";
     props.setProperty(propKey, folder.getId());
     ids[names[i]] = folder.getId();
   }
@@ -397,7 +545,9 @@ function Setup_ensureDriveFolders() {
  */
 function Setup_getOrCreateFolder(parent, name) {
   var it = parent.getFoldersByName(name);
-  if (it.hasNext()) return it.next();
+  if (it.hasNext()) {
+    return it.next();
+  }
   return parent.createFolder(name);
 }
 
@@ -410,33 +560,35 @@ function Setup_getOrCreateFolder(parent, name) {
 function Setup_ensureConfigSeeded() {
   var sheet = getSheet_(TABS.CONFIG);
   var defaults = {
-    CURRENT_SEMESTER: '26A',
-    TREASURER_USER_ID: 'USER-0001',
-    TREASURY_WEBHOOK_URL: 'PASTE_ME',
-    STATUS_WEBHOOK_URL: 'PASTE_ME',
-    PUBLIC_SHOW_AMOUNTS: 'FALSE',
-    CLAIM_DEADLINE_DAYS: '30',
-    SEMESTER_HARD_STOP_DAYS: '14',
-    MISSING_RECEIPT_CAP: '200',
-    MISSING_RECEIPT_MAX_PER_SEM: '2',
-    APPROVAL_SLA_HOURS: '72',
-    PAYOUT_AUTOCONFIRM_HOURS: '72',
-    LOCK_AFTER_PAID_HOURS: '24',
-    BACKUP_ACCOUNT_EMAIL: 'PASTE_ME',
-    NEEDS_INFO_ROLE_ID: '',
-    SEM_A_START: '2026-09-01',
-    SEM_A_END: '2026-12-31',
-    SEM_B_START: '2027-01-01',
-    SEM_B_END: '2027-05-31',
-    SUMMER_START: '2027-06-01',
-    SUMMER_END: '2027-08-31'
+    APPROVAL_SLA_HOURS: "72",
+    BACKUP_ACCOUNT_EMAIL: "PASTE_ME",
+    CLAIM_DEADLINE_DAYS: "30",
+    CURRENT_SEMESTER: "26A",
+    LOCK_AFTER_PAID_HOURS: "24",
+    MISSING_RECEIPT_CAP: "200",
+    MISSING_RECEIPT_MAX_PER_SEM: "2",
+    NEEDS_INFO_ROLE_ID: "",
+    PAYOUT_AUTOCONFIRM_HOURS: "72",
+    PUBLIC_SHOW_AMOUNTS: "FALSE",
+    SEM_A_END: "2026-12-31",
+    SEM_A_START: "2026-09-01",
+    SEM_B_END: "2027-05-31",
+    SEM_B_START: "2027-01-01",
+    SEMESTER_HARD_STOP_DAYS: "14",
+    STATUS_WEBHOOK_URL: "PASTE_ME",
+    SUMMER_END: "2027-08-31",
+    SUMMER_START: "2027-06-01",
+    TREASURER_USER_ID: "USER-0001",
+    TREASURY_WEBHOOK_URL: "PASTE_ME",
   };
   var lastRow = sheet.getLastRow();
   var existingKeys = {};
   if (lastRow > 1) {
     var values = sheet.getRange(2, COLS.Config.key, lastRow - 1, 1).getValues();
     for (var i = 0; i < values.length; i++) {
-      if (values[i][0]) existingKeys[values[i][0]] = true;
+      if (values[i][0]) {
+        existingKeys[values[i][0]] = true;
+      }
     }
   }
   var added = [];
@@ -446,7 +598,9 @@ function Setup_ensureConfigSeeded() {
       added.push(key);
     }
   }
-  if (added.length > 0) Config.invalidate();
+  if (added.length > 0) {
+    Config.invalidate();
+  }
   return { created: added.length > 0, keys: added };
 }
 
@@ -460,31 +614,44 @@ function Setup_ensureConfigSeeded() {
  * @return {{ok: boolean, corrected: boolean, issue: ?string}}
  */
 function Setup_verifyConfigConsistency() {
-  var configuredId = Config.getOptional('TREASURER_USER_ID');
+  var configuredId = Config.getOptional("TREASURER_USER_ID");
   var usersValues = getSheet_(TABS.USERS).getDataRange().getValues();
   var c = COLS.Users;
   var treasurerUserIds = [];
   for (var i = 1; i < usersValues.length; i++) {
     var userId = usersValues[i][c.user_id - 1];
-    if (userId && usersValues[i][c.role - 1] === ROLES.TREASURER) treasurerUserIds.push(userId);
+    if (userId && usersValues[i][c.role - 1] === ROLES.TREASURER) {
+      treasurerUserIds.push(userId);
+    }
   }
 
-  var resolution = CoreDecisions.resolveTreasurerIdDrift(configuredId, treasurerUserIds);
+  var resolution = CoreDecisions.resolveTreasurerIdDrift(
+    configuredId,
+    treasurerUserIds
+  );
 
-  if (resolution.action === 'ok') {
-    return { ok: true, corrected: false, issue: null };
+  if (resolution.action === "ok") {
+    return { corrected: false, issue: null, ok: true };
   }
-  if (resolution.action === 'correct') {
-    Setup_setConfigValue_('TREASURER_USER_ID', resolution.correctedId);
-    var issue = 'Config.TREASURER_USER_ID (' + (configuredId || '(unset)') +
-      ') did not resolve to a real Users row; auto-corrected to ' + resolution.correctedId + '.';
-    Discord.postTreasury('⚠️ ' + issue);
-    return { ok: true, corrected: true, issue: issue };
+  if (resolution.action === "correct") {
+    Setup_setConfigValue_("TREASURER_USER_ID", resolution.correctedId);
+    var issue =
+      "Config.TREASURER_USER_ID (" +
+      (configuredId || "(unset)") +
+      ") did not resolve to a real Users row; auto-corrected to " +
+      resolution.correctedId +
+      ".";
+    Discord.postTreasury("⚠️ " + issue);
+    return { corrected: true, issue, ok: true };
   }
-  var unresolvableIssue = 'Config.TREASURER_USER_ID (' + (configuredId || '(unset)') + ') does not resolve, and ' +
-    treasurerUserIds.length + ' TREASURER-role Users exist (need exactly 1 to auto-correct). Fix manually in the Config tab.';
-  Discord.postTreasury('🚨 ' + unresolvableIssue);
-  return { ok: false, corrected: false, issue: unresolvableIssue };
+  var unresolvableIssue =
+    "Config.TREASURER_USER_ID (" +
+    (configuredId || "(unset)") +
+    ") does not resolve, and " +
+    treasurerUserIds.length +
+    " TREASURER-role Users exist (need exactly 1 to auto-correct). Fix manually in the Config tab.";
+  Discord.postTreasury("🚨 " + unresolvableIssue);
+  return { corrected: false, issue: unresolvableIssue, ok: false };
 }
 
 /**
@@ -514,26 +681,33 @@ function Setup_setConfigValue_(key, value) {
  */
 function Setup_ensureCategoriesSeeded() {
   var sheet = getSheet_(TABS.CATEGORIES);
-  var values = sheet.getRange(2, 1, Math.max(1, sheet.getMaxRows() - 1), 1).getValues();
+  var values = sheet
+    .getRange(2, 1, Math.max(1, sheet.getMaxRows() - 1), 1)
+    .getValues();
   var hasContent = false;
   for (var i = 0; i < values.length; i++) {
-    if (values[i][0]) { hasContent = true; break; }
+    if (values[i][0]) {
+      hasContent = true;
+      break;
+    }
   }
-  if (hasContent) return { created: false, count: 0 };
+  if (hasContent) {
+    return { count: 0, created: false };
+  }
 
   var rows = [
-    ['CAT-ACT', 'Activities', 'EXPENSE', '', true],
-    ['CAT-FOOD', 'Food', 'EXPENSE', '', true],
-    ['CAT-TRAN', 'Transportation', 'EXPENSE', '', true],
-    ['CAT-CAMP', 'Camp', 'EXPENSE', '', true],
-    ['CAT-ADMIN', 'Admin', 'EXPENSE', '', true],
-    ['CAT-DON', 'Donations', 'INCOME', '', true],
-    ['CAT-RET', 'Retained Earnings', 'INCOME', '', true],
-    ['CAT-FEE', 'Camp Fees', 'INCOME', '', true],
-    ['CAT-OTH', 'Other', 'INCOME', '', true]
+    ["CAT-ACT", "Activities", "EXPENSE", "", true],
+    ["CAT-FOOD", "Food", "EXPENSE", "", true],
+    ["CAT-TRAN", "Transportation", "EXPENSE", "", true],
+    ["CAT-CAMP", "Camp", "EXPENSE", "", true],
+    ["CAT-ADMIN", "Admin", "EXPENSE", "", true],
+    ["CAT-DON", "Donations", "INCOME", "", true],
+    ["CAT-RET", "Retained Earnings", "INCOME", "", true],
+    ["CAT-FEE", "Camp Fees", "INCOME", "", true],
+    ["CAT-OTH", "Other", "INCOME", "", true],
   ];
   sheet.getRange(2, 1, rows.length, rows[0].length).setValues(rows);
-  return { created: true, count: rows.length };
+  return { count: rows.length, created: true };
 }
 
 /**
@@ -542,28 +716,38 @@ function Setup_ensureCategoriesSeeded() {
  */
 function Setup_ensureTreasurerUserSeeded() {
   var sheet = getSheet_(TABS.USERS);
-  var values = sheet.getRange(2, 1, Math.max(1, sheet.getMaxRows() - 1), 1).getValues();
+  var values = sheet
+    .getRange(2, 1, Math.max(1, sheet.getMaxRows() - 1), 1)
+    .getValues();
   var insertRow = 2;
   for (var i = 0; i < values.length; i++) {
-    if (values[i][0] === 'USER-0001') {
-      Setup_registerCounter('User', 1);
-      return { created: false, userId: 'USER-0001' };
+    if (values[i][0] === "USER-0001") {
+      Setup_registerCounter("User", 1);
+      return { created: false, userId: "USER-0001" };
     }
-    if (values[i][0]) insertRow = i + 3;
+    if (values[i][0]) {
+      insertRow = i + 3;
+    }
   }
-  var email = '';
+  var email = "";
   try {
-    email = Session.getActiveUser().getEmail() || '';
+    email = Session.getActiveUser().getEmail() || "";
   } catch (e) {
-    email = '';
+    email = "";
   }
-  var userId = 'USER-0001';
-  var now = Utilities.formatDate(new Date(), 'Asia/Hong_Kong', "yyyy-MM-dd'T'HH:mm:ssXXX");
-  sheet.getRange(insertRow, 1, 1, 6).setValues([[userId, 'Treasurer', ROLES.TREASURER, email, true, now]]);
+  var userId = "USER-0001";
+  var now = Utilities.formatDate(
+    new Date(),
+    "Asia/Hong_Kong",
+    "yyyy-MM-dd'T'HH:mm:ssXXX"
+  );
+  sheet
+    .getRange(insertRow, 1, 1, 6)
+    .setValues([[userId, "Treasurer", ROLES.TREASURER, email, true, now]]);
   // USER-0001 is seeded directly, bypassing Ids.nextId — register it in
   // Counters so the next real nextId('User') call starts at 2, not 1.
-  Setup_registerCounter('User', 1);
-  return { created: true, userId: userId };
+  Setup_registerCounter("User", 1);
+  return { created: true, userId };
 }
 
 /**
@@ -579,7 +763,9 @@ function Setup_registerCounter(entityType, n) {
   for (var i = 1; i < values.length; i++) {
     if (values[i][COLS.Counters.entity - 1] === entityType) {
       var current = Number(values[i][COLS.Counters.last_n - 1]) || 0;
-      if (current < n) sheet.getRange(i + 1, COLS.Counters.last_n).setValue(n);
+      if (current < n) {
+        sheet.getRange(i + 1, COLS.Counters.last_n).setValue(n);
+      }
       return;
     }
   }
@@ -593,20 +779,36 @@ function Setup_registerCounter(entityType, n) {
  */
 function Setup_ensureOpeningBalanceSeeded() {
   var sheet = getSheet_(TABS.INCOME);
-  var values = sheet.getRange(2, 1, Math.max(1, sheet.getMaxRows() - 1), 1).getValues();
+  var values = sheet
+    .getRange(2, 1, Math.max(1, sheet.getMaxRows() - 1), 1)
+    .getValues();
   var insertRow = 2;
   for (var i = 0; i < values.length; i++) {
-    if (values[i][0]) insertRow = i + 3;
+    if (values[i][0]) {
+      insertRow = i + 3;
+    }
   }
-  if (insertRow > 2) return { created: false, incomeId: null, amount: null };
-  var incomeId = Ids.nextId('Income');
-  var today = Utilities.formatDate(new Date(), 'Asia/Hong_Kong', 'yyyy-MM-dd');
-  var amount = 10167.35;
-  sheet.getRange(insertRow, 1, 1, 8).setValues([[
-    incomeId, today, 'CAT-RET', amount, 'USER-0001',
-    'Opening balance import', '', 'Opening balance per SEM A Statement.xlsx'
-  ]]);
-  return { created: true, incomeId: incomeId, amount: amount };
+  if (insertRow > 2) {
+    return { amount: null, created: false, incomeId: null };
+  }
+  var incomeId = Ids.nextId("Income");
+  var today = Utilities.formatDate(new Date(), "Asia/Hong_Kong", "yyyy-MM-dd");
+  var amount = 10_167.35;
+  sheet
+    .getRange(insertRow, 1, 1, 8)
+    .setValues([
+      [
+        incomeId,
+        today,
+        "CAT-RET",
+        amount,
+        "USER-0001",
+        "Opening balance import",
+        "",
+        "Opening balance per SEM A Statement.xlsx",
+      ],
+    ]);
+  return { amount, created: true, incomeId };
 }
 
 /**
@@ -617,17 +819,47 @@ function Setup_ensureOpeningBalanceSeeded() {
  */
 function Setup_ensureFinanceAccountsSeeded() {
   var sheet = getSheet_(TABS.FINANCE_ACCOUNTS);
-  var values = sheet.getRange(2, 1, Math.max(1, sheet.getMaxRows() - 1), 1).getValues();
+  var values = sheet
+    .getRange(2, 1, Math.max(1, sheet.getMaxRows() - 1), 1)
+    .getValues();
   for (var i = 0; i < values.length; i++) {
-    if (values[i][0]) return { created: false, accountId: null, name: null, openingBalance: null };
+    if (values[i][0]) {
+      return {
+        accountId: null,
+        created: false,
+        name: null,
+        openingBalance: null,
+      };
+    }
   }
-  var accountId = Ids.nextId('FinanceAccount');
-  var now = Utilities.formatDate(new Date(), 'Asia/Hong_Kong', "yyyy-MM-dd'T'HH:mm:ssXXX");
+  var accountId = Ids.nextId("FinanceAccount");
+  var now = Utilities.formatDate(
+    new Date(),
+    "Asia/Hong_Kong",
+    "yyyy-MM-dd'T'HH:mm:ssXXX"
+  );
   var c = COLS.FinanceAccounts;
-  sheet.getRange(2, 1, 1, Object.keys(c).length).setValues([[
-    accountId, 'Main Checking', 10167.35, 10167.35, 0, 0, STATUS.FinanceAccount.ACTIVE, now, ''
-  ]]);
-  return { created: true, accountId: accountId, name: 'Main Checking', openingBalance: 10167.35 };
+  sheet
+    .getRange(2, 1, 1, Object.keys(c).length)
+    .setValues([
+      [
+        accountId,
+        "Main Checking",
+        10_167.35,
+        10_167.35,
+        0,
+        0,
+        STATUS.FinanceAccount.ACTIVE,
+        now,
+        "",
+      ],
+    ]);
+  return {
+    accountId,
+    created: true,
+    name: "Main Checking",
+    openingBalance: 10_167.35,
+  };
 }
 
 /**
@@ -636,28 +868,47 @@ function Setup_ensureFinanceAccountsSeeded() {
  */
 function Setup_clearAllData(ledger) {
   var tabsToClear = [
-    TABS.USERS, TABS.CATEGORIES, TABS.EVENTS, TABS.BUDGET_REQUESTS,
-    TABS.BUDGET_REQUEST_LINES, TABS.EXPENSE_CLAIMS, TABS.CLAIM_LINE_ITEMS,
-    TABS.RECEIPTS, TABS.INCOME, TABS.PAYOUTS, TABS.AUDIT_LOG,
-    TABS.APPROVALS, TABS.COUNTERS,
-    TABS.FINANCE_ACCOUNTS, TABS.ACCOUNT_TRANSFERS, TABS.ACCOUNT_ADJUSTMENTS
+    TABS.USERS,
+    TABS.CATEGORIES,
+    TABS.EVENTS,
+    TABS.BUDGET_REQUESTS,
+    TABS.BUDGET_REQUEST_LINES,
+    TABS.EXPENSE_CLAIMS,
+    TABS.CLAIM_LINE_ITEMS,
+    TABS.RECEIPTS,
+    TABS.INCOME,
+    TABS.PAYOUTS,
+    TABS.AUDIT_LOG,
+    TABS.APPROVALS,
+    TABS.COUNTERS,
+    TABS.FINANCE_ACCOUNTS,
+    TABS.ACCOUNT_TRANSFERS,
+    TABS.ACCOUNT_ADJUSTMENTS,
   ];
   for (var i = 0; i < tabsToClear.length; i++) {
     var sheet = ledger.getSheetByName(tabsToClear[i]);
     if (sheet && sheet.getMaxRows() > 1) {
-      sheet.getRange(2, 1, sheet.getMaxRows() - 1, sheet.getMaxColumns()).clearContent();
+      sheet
+        .getRange(2, 1, sheet.getMaxRows() - 1, sheet.getMaxColumns())
+        .clearContent();
     }
   }
 
-  var vaultId = PropertiesService.getScriptProperties().getProperty('VAULT_ID');
+  var vaultId = PropertiesService.getScriptProperties().getProperty("VAULT_ID");
   if (vaultId) {
     try {
       var vault = SpreadsheetApp.openById(vaultId);
       var vaultSheet = vault.getSheetByName(TABS.VAULT);
       if (vaultSheet && vaultSheet.getMaxRows() > 1) {
-        vaultSheet.getRange(2, 1, vaultSheet.getMaxRows() - 1, vaultSheet.getMaxColumns()).clearContent();
+        vaultSheet
+          .getRange(
+            2,
+            1,
+            vaultSheet.getMaxRows() - 1,
+            vaultSheet.getMaxColumns()
+          )
+          .clearContent();
       }
     } catch (e) {}
   }
 }
-
