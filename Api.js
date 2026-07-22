@@ -81,6 +81,7 @@ function api_getMyClaims() {
 
 /**
  * Handle Base64 file uploads to Google Drive.
+ * Idempotent: same SHA-256 + same user returns existing receiptId.
  */
 function api_uploadReceipt(fileName, mimeType, base64Data, vendor, receiptDate, receiptTotal) {
   var email = Session.getActiveUser().getEmail();
@@ -89,6 +90,15 @@ function api_uploadReceipt(fileName, mimeType, base64Data, vendor, receiptDate, 
   if (user.isUnknown) throw new Error('Unregistered user');
 
   var bytes = Utilities.base64Decode(base64Data);
+
+  // Validate file size (5 MB max)
+  var maxBytes = 5 * 1024 * 1024;
+  if (bytes.length > maxBytes) throw new Error('File exceeds 5 MB limit.');
+
+  // Validate MIME type
+  var allowedMime = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'application/pdf'];
+  if (allowedMime.indexOf(mimeType) === -1) throw new Error('Unsupported file type. Allowed: PNG, JPEG, GIF, PDF.');
+
   var sha256 = _sha256Hex(bytes);
 
   var receiptSheet = getSheet_(TABS.RECEIPTS);
@@ -119,6 +129,39 @@ function api_uploadReceipt(fileName, mimeType, base64Data, vendor, receiptDate, 
 
   _appendRow(receiptSheet, [receiptId, driveFileId, sha256, user.userId, now, vendor, receiptDate, Number(receiptTotal), fileLink]);
   return { receiptId: receiptId };
+}
+
+/**
+ * Delete an orphaned receipt (Drive file + Receipts row).
+ * Used for rollback when a claim save fails after receipt upload.
+ * Only the original uploader may delete.
+ */
+function api_deleteOrphanedReceipt(receiptId) {
+  var email = Session.getActiveUser().getEmail();
+  if (!email) throw new Error('Not authenticated');
+  var user = _resolveUser(email);
+  if (user.isUnknown) throw new Error('Unregistered user');
+
+  var receiptRow = Engine._loadRow('Receipt', receiptId);
+  if (!receiptRow) throw new Error('Receipt not found');
+
+  if (receiptRow.values[COLS.Receipts.uploaded_by - 1] !== user.userId) {
+    throw new Error('Unauthorized: only the uploader can delete this receipt');
+  }
+
+  var driveFileId = receiptRow.values[COLS.Receipts.drive_file_id - 1];
+  if (driveFileId) {
+    try {
+      DriveApp.getFileById(driveFileId).setTrashed(true);
+    } catch (e) {
+      // File may already be deleted; continue
+    }
+  }
+
+  var sheet = receiptRow.sheet || getSheet_(TABS.RECEIPTS);
+  sheet.deleteRow(receiptRow.rowIndex);
+  Audit.append(user.userId, 'Receipt', receiptId, 'DELETE_ORPHANED', {});
+  return { success: true };
 }
 
 /**
@@ -677,16 +720,42 @@ function api_saveClaimDraft(payload) {
     sheet.getRange(row.rowIndex, c.payout_handle).setValue(payload.payoutHandle || '');
   }
 
-  // Upsert single claim line item
+  // Upsert claim line item(s)
   var cliSheet = getSheet_(TABS.CLAIM_LINE_ITEMS);
   var cliRows = Engine._findRowsByColumn(cliSheet, COLS.ClaimLineItems.claim_id, claimId);
-  var missingReceipt = !payload.receiptId;
-  var cliValues = [Ids.childId(claimId, 1, 'CLAIMLINE'), claimId, payload.budgetLineId || '', payload.receiptId || '', total, payload.notes || '', missingReceipt];
-  if (cliRows.length > 0) {
-    var cliC = COLS.ClaimLineItems;
-    cliSheet.getRange(cliRows[0].rowIndex, 1, 1, cliValues.length).setValues([cliValues]);
+
+  var receiptIds = payload.receiptIds || [];
+  if (payload.receiptId && receiptIds.indexOf(payload.receiptId) === -1) {
+    receiptIds.push(payload.receiptId);
+  }
+
+  if (receiptIds.length === 0 && payload.receiptId) {
+    receiptIds = [payload.receiptId];
+  }
+
+  // Clear existing lines if receiptIds are provided (update path)
+  if (cliRows.length > 0 && payload.receiptIds) {
+    for (var ci = cliRows.length - 1; ci >= 0; ci--) {
+      cliSheet.deleteRow(cliRows[ci].rowIndex);
+    }
+    cliRows = [];
+  }
+
+  if (receiptIds.length > 0) {
+    var perLineAmount = total / receiptIds.length;
+    for (var ri = 0; ri < receiptIds.length; ri++) {
+      var cliValues = [Ids.childId(claimId, ri + 1, 'CLAIMLINE'), claimId, payload.budgetLineId || '', receiptIds[ri] || '', perLineAmount, payload.notes || '', false];
+      _appendRow(cliSheet, cliValues);
+    }
   } else {
-    _appendRow(cliSheet, cliValues);
+    var missingReceipt = !payload.receiptId;
+    var cliValues = [Ids.childId(claimId, 1, 'CLAIMLINE'), claimId, payload.budgetLineId || '', payload.receiptId || '', total, payload.notes || '', missingReceipt];
+    if (cliRows.length > 0) {
+      var cliC = COLS.ClaimLineItems;
+      cliSheet.getRange(cliRows[0].rowIndex, 1, 1, cliValues.length).setValues([cliValues]);
+    } else {
+      _appendRow(cliSheet, cliValues);
+    }
   }
 
   Audit.append(operator.userId, 'ExpenseClaim', claimId, payload.claimId ? 'DRAFT_UPDATE' : 'DRAFT_CREATE', { uuid: payload.uuid });
@@ -718,6 +787,7 @@ if (typeof module !== 'undefined') {
     api_getMyBudgetRequests, api_saveBudgetRequestDraft, api_submitBudgetRequest,
     api_discardBudgetRequest, api_getPendingBudgetRequests, api_decisionBudgetRequest,
     api_getMembers, api_addMember, api_reactivateMember, api_saveClaimDraft, api_submitDraftClaim,
+    api_deleteOrphanedReceipt,
     _sha256Hex, _isLate, _resolveUser
   };
 }

@@ -12,8 +12,8 @@ global.COLS = {
   BudgetRequests: { request_id: 1, requester_id: 2, event_id: 3, title: 4, justification: 5, needed_by: 6, status: 7, submitted_at: 8, decided_at: 9, decided_by: 10, decision_note: 11, self_approved: 12, processed_response_id: 13 },
   BudgetRequestLines: { line_id: 1, request_id: 2, category_id: 3, description: 4, requested_amount: 5, approved_amount: 6, line_status: 7, claimed_amount: 8, remaining: 9 },
   Users: { user_id: 1, display_name: 2, role: 3, email: 4, active: 5, created_at: 6 },
-  ClaimLineItems: { claim_id: 2, amount: 5, description: 6 },
-  Receipts: { receipt_id: 1, file_id: 2, sha256: 3, uploaded_by: 4 },
+  ClaimLineItems: { claim_id: 2, claim_line_id: 1, budget_line_id: 3, receipt_id: 4, amount: 5, description: 6, missing_receipt_flag: 7 },
+  Receipts: { receipt_id: 1, drive_file_id: 2, sha256: 3, uploaded_by: 4, uploaded_at: 5, vendor: 6, receipt_date: 7, receipt_total: 8, file_link: 9 },
   Vault: { user_id: 1, full_name: 2, student_id: 3, payout_method: 4, payout_handle: 5, consent_ts: 6 },
   Counters: { entity: 1, last_n: 2 }
 };
@@ -26,6 +26,21 @@ global.ROLES = { COMMITTEE: 'COMMITTEE', TREASURER: 'TREASURER', MEMBER: 'MEMBER
 global.Discord = { postStatus: jest.fn() };
 global.Audit = { _nowIso: jest.fn(() => '2026-07-21T12:00:00Z'), append: jest.fn() };
 global.Ids = { nextId: jest.fn(() => 'BUDGET-26A-001'), childId: jest.fn(() => 'BUDGETLINE-26A-001-01') };
+global.Utilities = {
+  base64Decode: jest.fn(() => [116, 101, 115, 116, 32, 98, 121, 116, 101, 115]),
+  computeDigest: jest.fn(() => [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]),
+  newBlob: jest.fn(() => ({ setName: jest.fn() }))
+};
+global.DriveApp = {
+  getFolderById: jest.fn(() => ({
+    createFile: jest.fn(() => ({ getId: () => 'drive-file-123' }))
+  }))
+};
+global.PropertiesService = {
+  getScriptProperties: jest.fn(() => ({
+    getProperty: jest.fn(() => 'RECEIPTS-FOLDER-123')
+  }))
+};
 global.Engine._loadRow = jest.fn();
 global.Engine._sumBudgetRequestLines = jest.fn(() => 0);
 global.Engine.transition = jest.fn((entityType, entityId, action, actorUserId, payload) => {
@@ -44,6 +59,22 @@ describe('Api.js', () => {
     global.Session.getActiveUser.mockReturnValue({ getEmail: () => testUserEmail });
     global.Audit = { _nowIso: jest.fn(() => '2026-07-21T12:00:00Z'), append: jest.fn() };
     global.Ids = { nextId: jest.fn(() => 'BUDGET-26A-001'), childId: jest.fn(() => 'BUDGETLINE-26A-001-01') };
+    global.Utilities = {
+      DigestAlgorithm: { SHA_256: 'SHA_256' },
+      base64Decode: jest.fn(() => [116, 101, 115, 116, 32, 98, 121, 116, 101, 115]),
+      computeDigest: jest.fn(() => [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]),
+      newBlob: jest.fn(() => ({ setName: jest.fn() }))
+    };
+    global.DriveApp = {
+      getFolderById: jest.fn(() => ({
+        createFile: jest.fn(() => ({ getId: () => 'drive-file-123' }))
+      }))
+    };
+    global.PropertiesService = {
+      getScriptProperties: jest.fn(() => ({
+        getProperty: jest.fn(() => 'RECEIPTS-FOLDER-123')
+      }))
+    };
     global.getVaultSheet_ = jest.fn(() => ({ getDataRange: () => ({ getValues: () => [[]] }), appendRow: jest.fn(), getLastRow: () => 1, getRange: jest.fn(() => ({ setNumberFormat: jest.fn().mockReturnThis(), setValue: jest.fn() })) }));
     const mockUsersData = [
       ['user_id', 'display_name', 'role', 'email', 'active', 'created_at'],
@@ -575,6 +606,220 @@ describe('Api.js', () => {
       const result = api_submitDraftClaim('CLAIM-26A-001');
       expect(result.status).toBe('SUBMITTED');
       expect(global.Engine.transition).toHaveBeenCalledWith('ExpenseClaim', 'CLAIM-26A-001', 'SUBMIT', 'U-001', {});
+    });
+  });
+
+  describe('api_uploadReceipt', () => {
+    it('should upload a receipt successfully', () => {
+      global.Ids.nextId.mockReturnValueOnce('RECEIPT-001');
+      const sheet = { getDataRange: jest.fn(() => ({ getValues: () => [['receipt_id', 'drive_file_id', 'sha256', 'uploaded_by']] })), getRange: jest.fn(() => ({ getValues: jest.fn(() => [['']]), setValues: jest.fn() })), getMaxRows: jest.fn(() => 100), insertRowAfter: jest.fn() };
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        if (tab === 'Receipts') return sheet;
+        return { getRange: jest.fn(() => ({ setValue: jest.fn(), setValues: jest.fn(), getValues: jest.fn(() => [['']]) })), getMaxRows: jest.fn(() => 100) };
+      });
+      const { api_uploadReceipt } = require('../Api.js');
+      const result = api_uploadReceipt('receipt.png', 'image/png', 'base64data', 'Vendor Co', '2026-07-15', 100.50);
+      expect(result.receiptId).toBe('RECEIPT-001');
+      expect(global.Utilities.newBlob).toHaveBeenCalled();
+      expect(global.DriveApp.getFolderById).toHaveBeenCalledWith('RECEIPTS-FOLDER-123');
+      expect(sheet.getRange).toHaveBeenCalled();
+    });
+
+    it('should reject unsupported MIME type', () => {
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        return { getRange: jest.fn(() => ({ setValue: jest.fn(), setValues: jest.fn(), getValues: jest.fn(() => [['']]) })), getMaxRows: jest.fn(() => 100) };
+      });
+      const { api_uploadReceipt } = require('../Api.js');
+      expect(() => api_uploadReceipt('file.txt', 'text/plain', 'base64data', '', '', 0)).toThrow('Unsupported file type');
+    });
+
+    it('should return existing receiptId for same-user duplicate hash', () => {
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        if (tab === 'Receipts') return {
+          getDataRange: () => ({
+            getValues: () => [
+              ['receipt_id', 'drive_file_id', 'sha256', 'uploaded_by'],
+              ['RECEIPT-001', 'DRIVE-001', '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f', 'U-001']
+            ]
+          })
+        };
+        return { getRange: jest.fn(() => ({ setValue: jest.fn(), setValues: jest.fn(), getValues: jest.fn(() => [['']]) })), getMaxRows: jest.fn(() => 100) };
+      });
+      const { api_uploadReceipt } = require('../Api.js');
+      const result = api_uploadReceipt('dupe.png', 'image/png', 'base64data', '', '', 0);
+      expect(result.receiptId).toBe('RECEIPT-001');
+    });
+
+    it('should throw for cross-operator duplicate hash', () => {
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        if (tab === 'Receipts') return {
+          getDataRange: () => ({
+            getValues: () => [
+              ['receipt_id', 'drive_file_id', 'sha256', 'uploaded_by'],
+              ['RECEIPT-001', 'DRIVE-001', '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f', 'U-OTHER']
+            ]
+          })
+        };
+        return { getRange: jest.fn(() => ({ setValue: jest.fn(), setValues: jest.fn(), getValues: jest.fn(() => [['']]) })), getMaxRows: jest.fn(() => 100) };
+      });
+      const { api_uploadReceipt } = require('../Api.js');
+      expect(() => api_uploadReceipt('dupe.png', 'image/png', 'base64data', '', '', 0)).toThrow('Duplicate receipt detected');
+    });
+
+    it('should reject files over 5 MB', () => {
+      global.Utilities.base64Decode.mockReturnValueOnce(new Array(6 * 1024 * 1024).fill(0));
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        return { getRange: jest.fn(() => ({ setValue: jest.fn(), setValues: jest.fn(), getValues: jest.fn(() => [['']]) })), getMaxRows: jest.fn(() => 100) };
+      });
+      const { api_uploadReceipt } = require('../Api.js');
+      expect(() => api_uploadReceipt('large.png', 'image/png', 'bigbase64', '', '', 0)).toThrow('5 MB limit');
+    });
+  });
+
+  describe('api_deleteOrphanedReceipt', () => {
+    it('should delete a receipt and log audit', () => {
+      const receiptSheet = { deleteRow: jest.fn() };
+      global.Engine._loadRow.mockReturnValueOnce({
+        rowIndex: 3,
+        sheet: receiptSheet,
+        values: ['RECEIPT-001', 'DRIVE-001', 'hash', 'U-001', '2026-07-21', '', '', 0, '']
+      });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        return {};
+      });
+      const { api_deleteOrphanedReceipt } = require('../Api.js');
+      const result = api_deleteOrphanedReceipt('RECEIPT-001');
+      expect(result.success).toBe(true);
+      expect(receiptSheet.deleteRow).toHaveBeenCalledWith(3);
+      expect(global.Audit.append).toHaveBeenCalled();
+    });
+
+    it('should throw for unauthorized user', () => {
+      global.Engine._loadRow.mockReturnValueOnce({
+        rowIndex: 3,
+        values: ['RECEIPT-001', 'DRIVE-001', 'hash', 'U-OTHER', '2026-07-21', '', '', 0, '']
+      });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        return {};
+      });
+      const { api_deleteOrphanedReceipt } = require('../Api.js');
+      expect(() => api_deleteOrphanedReceipt('RECEIPT-001')).toThrow('Unauthorized');
+    });
+
+    it('should throw for not found receipt', () => {
+      global.Engine._loadRow.mockReturnValueOnce(null);
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        return {};
+      });
+      const { api_deleteOrphanedReceipt } = require('../Api.js');
+      expect(() => api_deleteOrphanedReceipt('RECEIPT-999')).toThrow('Receipt not found');
+    });
+  });
+
+  describe('api_saveClaimDraft with receiptIds', () => {
+    it('should create a claim draft with multiple receipt IDs', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.Ids.nextId.mockReturnValueOnce('CLAIM-26A-002');
+      global.Ids.childId.mockReturnValueOnce('CLAIMLINE-26A-002-01').mockReturnValueOnce('CLAIMLINE-26A-002-02');
+      global.Config = { getNum: () => 14 };
+
+      const expenseSheet = {
+        getRange: jest.fn(() => ({ getValues: jest.fn(() => [['']]), setValues: jest.fn() })),
+        getLastRow: () => 1,
+        getMaxRows: () => 10,
+        insertRowAfter: jest.fn()
+      };
+      const cliSheet = { appendRow: jest.fn(), deleteRow: jest.fn(), getRange: jest.fn(() => ({ setValues: jest.fn(), getValues: jest.fn(() => [['']]) })), getLastRow: () => 1, getMaxRows: () => 10, insertRowAfter: jest.fn() };
+
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [[], ['USER-1', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        if (tab === 'ExpenseClaims') return expenseSheet;
+        if (tab === 'ClaimLineItems') return cliSheet;
+        return { getRange: jest.fn(() => ({ setValue: jest.fn(), setValues: jest.fn(), getValues: jest.fn(() => [['']]) })) };
+      });
+
+      // Mock no existing cli rows
+      global.Engine._findRowsByColumn.mockReturnValueOnce([]);
+
+      const { api_saveClaimDraft } = require('../Api.js');
+      const result = api_saveClaimDraft({
+        uuid: 'draft-2', claimantId: 'M-001', amount: 200, notes: 'Multi receipt',
+        receiptIds: ['RECEIPT-001', 'RECEIPT-002'], expenseDate: '2026-07-15',
+        payoutMethod: 'FPS', payoutHandle: '91234567'
+      });
+      expect(result.claim_id).toBe('CLAIM-26A-002');
+      // _appendRow is called once per receipt (uses setValues, not appendRow)
+      expect(cliSheet.getRange).toHaveBeenCalledTimes(4); // 2 calls per receipt (getRange("A:A") + getRange(pos))
+      // Verify setValues was called on the range objects
+      const setValuesCalls = cliSheet.getRange.mock.results.filter(r => r.value.setValues.mock.calls.length > 0);
+      expect(setValuesCalls.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  describe('api_saveClaimDraft with receiptIds replacing existing lines', () => {
+    it('should delete existing lines and create new ones per receiptId', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.Ids.nextId.mockReturnValueOnce('CLAIM-26A-003');
+      global.Ids.childId = jest.fn(() => 'CLAIMLINE-26A-003-N');
+      global.Config = { getNum: () => 14 };
+
+      // Mock _loadRow for the existing claim lookup (first call in check)
+      global.Engine._loadRow
+        .mockReturnValueOnce({
+          rowIndex: 2,
+          sheet: { getRange: jest.fn(() => ({ setValue: jest.fn(), setValues: jest.fn() })) },
+          values: ['CLAIM-26A-003', 'M-001', 'DRAFT', '', '', '', '', '', '', '', 200, false, false, 'Note', 'uuid-3', 'USER-1', '2026-07-15', '26A', '', 'FPS', '91234567']
+        })
+        // Second call for the update path (row.sheet access)
+        .mockReturnValueOnce({
+          rowIndex: 2,
+          sheet: {
+            getRange: jest.fn(() => ({ setValue: jest.fn(), setValues: jest.fn() }))
+          },
+          values: ['CLAIM-26A-003', 'M-001', 'DRAFT', '', '', '', '', '', '', '', 200, false, false, 'Note', 'uuid-3', 'USER-1', '2026-07-15', '26A', '', 'FPS', '91234567']
+        });
+
+      const cliSheet = {
+        appendRow: jest.fn(),
+        deleteRow: jest.fn(),
+        getRange: jest.fn(() => ({ setValues: jest.fn(), getValues: jest.fn(() => [['']]) })),
+        getLastRow: () => 5,
+        getMaxRows: () => 10,
+        insertRowAfter: jest.fn()
+      };
+
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [[], ['USER-1', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        if (tab === 'ExpenseClaims') return { getRange: jest.fn(() => ({ setValues: jest.fn(), getValues: jest.fn(() => [['']]) })), getLastRow: () => 1, getMaxRows: () => 10, insertRowAfter: jest.fn() };
+        if (tab === 'ClaimLineItems') return cliSheet;
+        return { getRange: jest.fn(() => ({ setValue: jest.fn(), setValues: jest.fn(), getValues: jest.fn(() => [['']]) })) };
+      });
+
+      global.Engine._findRowsByColumn.mockReturnValueOnce([
+        { rowIndex: 3, values: ['CLAIMLINE-1', 'CLAIM-26A-003', '', 'RECEIPT-001', 100, 'note', false] },
+        { rowIndex: 4, values: ['CLAIMLINE-2', 'CLAIM-26A-003', '', 'RECEIPT-002', 100, 'note', false] }
+      ]);
+
+      const { api_saveClaimDraft } = require('../Api.js');
+      const result = api_saveClaimDraft({
+        uuid: 'draft-3', claimId: 'CLAIM-26A-003', claimantId: 'M-001',
+        amount: 200, notes: 'Update receipts',
+        receiptIds: ['RECEIPT-003', 'RECEIPT-004'], expenseDate: '2026-07-15',
+        payoutMethod: 'FPS', payoutHandle: '91234567'
+      });
+      expect(result.status).toBe('DRAFT');
+      expect(cliSheet.deleteRow).toHaveBeenCalledTimes(2);
+      // _appendRow is called per receipt via setValues
+      const setValuesCalls = cliSheet.getRange.mock.results.filter(r => r.value.setValues.mock.calls.length > 0);
+      expect(setValuesCalls.length).toBeGreaterThanOrEqual(2);
     });
   });
 });

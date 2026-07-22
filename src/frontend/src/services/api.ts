@@ -1,4 +1,4 @@
-import type { MyClaimsResponse, ClaimPayload, EditClaimPayload, SessionResponse, BudgetRequest, BudgetRequestDraftPayload, PendingBudgetRequest, BudgetDecisionPayload, Member, AddMemberPayload, ClaimDraftPayload } from '../types';
+import type { MyClaimsResponse, ClaimPayload, EditClaimPayload, SessionResponse, BudgetRequest, BudgetRequestDraftPayload, PendingBudgetRequest, BudgetDecisionPayload, Member, AddMemberPayload, ClaimDraftPayload, UploadReceiptResponse } from '../types';
 
 export const apiService = {
   resolveSession: (): Promise<SessionResponse> => {
@@ -95,7 +95,7 @@ export const apiService = {
     });
   },
 
-  uploadReceipt: (fileName: string, mimeType: string, base64Data: string, vendor: string, receiptDate: string, receiptTotal: number): Promise<{ receiptId: string }> => {
+  uploadReceipt: (fileName: string, mimeType: string, base64Data: string, vendor: string, receiptDate: string, receiptTotal: number): Promise<UploadReceiptResponse> => {
     return new Promise((resolve, reject) => {
       if (typeof google === 'undefined' || !google.script) {
         setTimeout(() => {
@@ -181,6 +181,21 @@ export const apiService = {
       google.script.run
         .withSuccessHandler(resolve)
         .api_submitDraftClaim(claimId);
+    });
+  },
+
+  deleteOrphanedReceipt: (receiptId: string): Promise<{ success: boolean }> => {
+    return new Promise((resolve, reject) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => {
+          resolve({ success: true });
+        }, 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        .api_deleteOrphanedReceipt(receiptId);
     });
   },
 

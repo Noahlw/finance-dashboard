@@ -741,3 +741,100 @@ button {
   color: var(--text-main);
   font-family: inherit;
 }
+
+/* Receipt upload zone */
+.uploaded-receipts {
+  margin-bottom: 1rem;
+}
+
+.uploaded-receipts h4 {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
+}
+
+.receipt-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.receipt-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.receipt-filename {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-main);
+  word-break: break-all;
+}
+
+.receipt-meta {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.receipt-status-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+.receipt-id-label {
+  font-size: 0.75rem;
+}
+
+.receipt-upload-zone {
+  border: 1px dashed var(--card-border);
+  border-radius: 12px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.receipt-upload-zone h4 {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-bottom: 0.75rem;
+}
+
+.receipt-meta-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.receipt-meta-fields .form-group {
+  margin-bottom: 0;
+}
+
+.small-btn {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+@media (max-width: 600px) {
+  .receipt-meta-fields {
+    grid-template-columns: 1fr;
+  }
+  .receipt-item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .receipt-status-group {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}

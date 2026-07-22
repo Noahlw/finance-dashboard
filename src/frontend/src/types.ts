@@ -54,6 +54,7 @@ export interface ClaimPayload {
   expenseDate: string;
   budgetLineId?: string;
   receiptId?: string;
+  receiptIds?: string[];
   semester?: string;
   eventId?: string;
   payoutMethod: 'FPS' | 'PAYME' | 'BANK' | 'CASH' | 'OTHER';
@@ -143,6 +144,22 @@ export interface AddMemberPayload {
 }
 
 // Claim intake types
+export interface UploadingReceipt {
+  fileName: string;
+  mimeType: string;
+  base64Data: string;
+  vendor: string;
+  receiptDate: string;
+  receiptTotal: number;
+  status: 'pending' | 'uploading' | 'done' | 'error';
+  receiptId?: string;
+  error?: string;
+}
+
+export interface UploadReceiptResponse {
+  receiptId: string;
+}
+
 export interface ClaimDraftPayload {
   uuid: string;
   claimId?: string;
@@ -151,6 +168,7 @@ export interface ClaimDraftPayload {
   notes: string;
   budgetLineId?: string;
   receiptId?: string;
+  receiptIds?: string[];
   expenseDate?: string;
   semester?: string;
   eventId?: string;
@@ -167,4 +185,5 @@ export interface Claim {
   notes: string;
   missingReceipt?: boolean;
   payout_method?: string;
+  receiptIds?: string[];
 }
