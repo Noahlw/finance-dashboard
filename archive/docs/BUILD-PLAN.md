@@ -1,4 +1,6 @@
-# BUILD-PLAN.md — Subagent Execution Plan: CF Fellowship Finance System (Tier 2)
+# BUILD-PLAN.md — Subagent Execution Plan: CF Fellowship Finance System (Tier 2)  [SUPERSEDED]
+
+> **This document is superseded.** AppSheet and the Tier-2 build plan have been abandoned. See [Committee Finance Web App Specification](../../docs/specs/committee-finance-web-app.md) for the current architecture. This document is retained for historical reference only.
 
 **Audience:** an execution subagent (Claude Sonnet 5, medium effort) working inside this repo, plus Noah (the human treasurer) who performs all Google-console/click work at marked checkpoints.
 **How to use:** invoke the subagent once per phase with the prompt template in §1.4. Do not give the whole build to one invocation.

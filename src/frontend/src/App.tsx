@@ -9,6 +9,8 @@ import BudgetRequestsView from './BudgetRequestsView';
 import MembersView from './MembersView';
 import ClaimsView from './ClaimsView';
 import ReviewDashboard from './ReviewDashboard';
+import DashboardView from './DashboardView';
+import ReportsView from './ReportsView';
 import FinanceAccountsView from './FinanceAccountsView';
 import PayoutsView from './PayoutsView';
 
@@ -94,9 +96,15 @@ function WorkspaceShell({ session }: { session: SessionInfo }) {
       case 'claims': return <ClaimsView members={members} budgetLines={budgetLines} />;
       case 'members': return <MembersView />;
       case 'budget-requests': return <BudgetRequestsView role={session.role} />;
-      case 'review': return <ReviewDashboard role={session.role} members={members} />;
+      case 'review': return (
+        <>
+          <DashboardView role={session.role} />
+          <ReviewDashboard role={session.role} members={members} />
+        </>
+      );
       case 'income': return <FinanceAccountsView role={session.role} />;
       case 'payouts': return <PayoutsView role={session.role} />;
+      case 'reports': return <ReportsView role={session.role} />;
       default: return <PlaceholderView view={activeView} />;
     }
   };

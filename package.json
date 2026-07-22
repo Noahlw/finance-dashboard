@@ -11,7 +11,12 @@
     "puppeteer": "^25.3.0"
   },
   "scripts": {
-    "test": "jest"
+    "test": "jest",
+    "build": "cd src/frontend && npm run build",
+    "lint": "cd src/frontend && npm run lint",
+    "verify": "npm test && npm run build && npm run lint",
+    "push": "npx clasp push",
+    "deploy": "npx clasp deploy"
   },
   "jest": {
     "testPathIgnorePatterns": [

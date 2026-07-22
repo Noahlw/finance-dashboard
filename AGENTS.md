@@ -12,10 +12,20 @@ The root contains the Google Apps Script backend (`Api.js`, `Engine.js`, `Config
 - `cd src/frontend && npm run dev` starts the Vite development server.
 - `cd src/frontend && npm run build` type-checks and builds the Vite client into the repository root.
 - `cd src/frontend && npm run lint` runs Oxlint.
+- `npx clasp push` deploys GAS modules and generated `index.html` to the bound Apps Script project.
+- `npx clasp deploy` creates a versioned deployment of the Apps Script web app.
+
+## Staging and Production
+
+- Staging and production use separate Apps Script projects, spreadsheets, Drive folders, and Script Properties.
+- Configure the staging project by copying `.clasp.json` to `.clasp.staging.json` with a separate `scriptId`.
+- Production deployment requires explicit approval: build (`npm run build`), push (`npx clasp push`), and create a new deployment version.
+- Automated tests must never mutate production data; staging browser tests use a dedicated test spreadsheet and folder.
+- See `DEPLOY.md` for the full release checklist including rollback/disable guidance.
 
 ## Coding Style & Naming
 
-Use two-space indentation, semicolons, and small, focused JavaScript functions. Use `camelCase` for functions and variables, `PascalCase` for React components and TypeScript types, and descriptive module filenames such as `AppSheetApi.js`. Keep shared sheet names, columns, statuses, and IDs in the existing constants/config modules rather than duplicating string literals.
+Use two-space indentation, semicolons, and small, focused JavaScript functions. Use `camelCase` for functions and variables, `PascalCase` for React components and TypeScript types, and descriptive module filenames such as `CoreAudit.js`. Keep shared sheet names, columns, statuses, and IDs in the existing constants/config modules rather than duplicating string literals.
 
 ## Testing Guidelines
 

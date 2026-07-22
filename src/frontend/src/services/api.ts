@@ -1,4 +1,4 @@
-import type { MyClaimsResponse, ClaimPayload, EditClaimPayload, SessionResponse, BudgetRequest, BudgetRequestDraftPayload, PendingBudgetRequest, BudgetDecisionPayload, Member, AddMemberPayload, ClaimDraftPayload, UploadReceiptResponse, ClaimQueueItem, ClaimQueueFilters, TransitionResult, FinanceAccount, AddAccountPayload, IncomeItem, RecordIncomePayload, AccountTransfer, AccountAdjustment, PayoutQueueItem } from '../types';
+import type { MyClaimsResponse, ClaimPayload, EditClaimPayload, SessionResponse, BudgetRequest, BudgetRequestDraftPayload, PendingBudgetRequest, BudgetDecisionPayload, Member, AddMemberPayload, ClaimDraftPayload, UploadReceiptResponse, ClaimQueueItem, ClaimQueueFilters, TransitionResult, FinanceAccount, AddAccountPayload, IncomeItem, RecordIncomePayload, AccountTransfer, AccountAdjustment, PayoutQueueItem, DashboardSummary, ReportType, ReportFilters, ReportData, MigrationState, MigrationPreview, MigrationSelections } from '../types';
 
 export const apiService = {
   resolveSession: (): Promise<SessionResponse> => {
@@ -10,7 +10,7 @@ export const apiService = {
             user_id: 'USER-MOCK',
             display_name: 'Mock User',
             role: 'COMMITTEE',
-            views: ['review', 'claims', 'budget-requests']
+            views: ['review', 'claims', 'members', 'budget-requests', 'income', 'payouts', 'reports']
           });
         }, 300);
         return;
@@ -613,6 +613,254 @@ export const apiService = {
         .withSuccessHandler(resolve)
         .withFailureHandler(reject)
         .api_approvePayout(claimId, accountId);
+    });
+  },
+
+  // ─── Dashboard ───
+
+  getDashboardSummary: (): Promise<DashboardSummary> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => {
+          resolve({
+            missing_receipts: [
+              { claim_id: 'CLAIM-MOCK-1', claim_status: 'SUBMITTED', notes: 'Office supplies', total_amount: 150.00 }
+            ],
+            over_budget_claims: [
+              { claim_id: 'CLAIM-MOCK-2', budget_line_id: 'BL-MOCK', claimed: 600, remaining: 500, claim_status: 'SUBMITTED' }
+            ],
+            needs_info_claims: [
+              { claim_id: 'CLAIM-MOCK-3', claim_status: 'NEEDS_INFO', notes: 'Event catering', total_amount: 200.00, submitted_at: '2026-07-20' }
+            ],
+            failed_payouts: [
+              { payout_id: 'PAY-MOCK', claim_id: 'CLAIM-MOCK-4', amount: 300.00, failure_reason: 'Bank declined' }
+            ],
+            pending_requests: [
+              { request_id: 'BUDGET-MOCK', title: 'Summer event', submitted_at: '2026-07-15', requester_id: 'U-001' }
+            ],
+            counts: { missing_receipts: 1, over_budget: 1, needs_info: 1, failed_payouts: 1, pending_requests: 1, total_attention: 5 }
+          });
+        }, 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_getDashboardSummary();
+    });
+  },
+
+  // ─── Reports ───
+
+  getReportsData: (reportType: ReportType, filters?: ReportFilters): Promise<ReportData> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => {
+          const mockRows = (() => {
+            switch (reportType) {
+              case 'claims':
+                return [
+                  { claim_id: 'CLAIM-001', claimant_id: 'M-001', status: 'PAID', submitted_at: '2026-07-10', verified_at: '2026-07-12', approved_at: '2026-07-14', paid_at: '2026-07-16', total_amount: 150, notes: 'Test claim', created_by: 'U-001', event_id: '', semester: '26A', expense_date: '2026-07-05', payout_method: 'FPS' }
+                ];
+              case 'budget':
+                return [
+                  { request_id: 'BUDGET-001', title: 'Mock Budget', status: 'APPROVED', submitted_at: '2026-07-01', decided_at: '2026-07-03', total_requested: 500, total_approved: 450, lines: [] }
+                ];
+              case 'income':
+                return [
+                  { income_id: 'INC-001', date: '2026-07-01', category_id: 'CAT-1', amount: 1000, received_by: 'U-001', source_ref: '', notes: 'Mock income', account_id: 'AC-1', status: 'CONFIRMED' }
+                ];
+              case 'payouts':
+                return [
+                  { payout_id: 'PAY-001', claim_id: 'CLAIM-001', amount: 150, method: 'FPS', txn_reference: 'TXN123', status: 'SENT', account_id: 'AC-1', paid_at: '2026-07-16', confirmed_at: '', failure_reason: '' }
+                ];
+              default:
+                return [];
+            }
+          })();
+          resolve({ type: reportType, rows: mockRows, count: mockRows.length });
+        }, 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_getReportsData(reportType, filters || {});
+    });
+  },
+
+  exportCsv: (reportType: ReportType, filters?: ReportFilters): Promise<string> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => {
+          resolve('Claim ID,Claimant,Status,Amount,Notes\nCLAIM-001,M-001,PAID,150,Test\n');
+        }, 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_exportCsv(reportType, filters || {});
+    });
+  },
+
+  // ─── Semester ───
+
+  getSemesterStatus: (): Promise<{ current_semester: string; start_date: string; end_date: string; closeable: boolean; blockers: any[]; blocker_count: number }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => {
+          resolve({ current_semester: 'SEM A', start_date: '2026-09-01', end_date: '2026-12-31', closeable: true, blockers: [], blocker_count: 0 });
+        }, 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_getSemesterStatus();
+    });
+  },
+
+  suggestSemester: (expenseDate: string): Promise<{ semester: string }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ semester: 'SEM A' }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_suggestSemester(expenseDate);
+    });
+  },
+
+  correctSemester: (entityType: string, entityId: string, newSemester: string): Promise<{ ok: boolean; from: string; to: string }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ ok: true, from: 'SEM A', to: newSemester }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_correctSemester(entityType, entityId, newSemester);
+    });
+  },
+
+  closeSemester: (): Promise<{ ok: boolean; closed: string; next?: string; ready_for_migration?: boolean }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ ok: true, closed: 'SEM A', next: 'SEM B', ready_for_migration: false }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_closeSemester();
+    });
+  },
+
+  // ─── Annual Migration ───
+
+  getMigrationState: (): Promise<MigrationState | null> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve(null), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_getMigrationState();
+    });
+  },
+
+  getMigrationPreview: (): Promise<MigrationPreview> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => {
+          resolve({
+            current_year: 'SEM A',
+            next_committee_year: 27,
+            year_label: '26-27 (27)',
+            active_members: [{ user_id: 'M-1', display_name: 'Alice', role: 'MEMBER', active: true, email: '' }],
+            inactive_members: [],
+            operators: [{ user_id: 'U-1', display_name: 'Treasurer', role: 'TREASURER', active: true, email: 'citycf41@gmail.com' }],
+            accounts: [{ account_id: 'AC-1', name: 'Main', current_balance: 10000, status: 'ACTIVE' }],
+            categories: [{ category_id: 'CAT-1', name: 'Marketing', kind: 'EXPENSE', active: true }],
+            events: [{ event_id: 'EVT-1', name: 'Fall Gala', semester: 'SEM A' }],
+            has_treasurer: true
+          });
+        }, 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_getMigrationPreview();
+    });
+  },
+
+  startMigration: (): Promise<{ ok: boolean; stage: string; year_label: string }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ ok: true, stage: 'CONFIGURE', year_label: '26-27 (27)' }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_startMigration();
+    });
+  },
+
+  setMigrationSelections: (selections: MigrationSelections): Promise<{ ok: boolean; stage: string }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ ok: true, stage: 'REVIEW' }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_setMigrationSelections(selections);
+    });
+  },
+
+  getMigrationSelections: (): Promise<MigrationSelections> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ memberIds: ['M-1'], accountIds: ['AC-1'], categoryIds: ['CAT-1'], eventIds: ['EVT-1'], accountBalances: {}, balanceReasons: {} }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_getMigrationSelections();
+    });
+  },
+
+  executeMigration: (): Promise<{ ok: boolean; stage: string }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ ok: true, stage: 'REVIEW' }), 500);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_executeMigration();
+    });
+  },
+
+  activateMigration: (): Promise<{ ok: boolean; stage: string }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ ok: true, stage: 'ACTIVATED' }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_activateMigration();
+    });
+  },
+
+  cancelMigration: (): Promise<{ ok: boolean }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ ok: true }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_cancelMigration();
     });
   }
 };

@@ -1,4 +1,6 @@
-# CF-Budget: Financial Management System Architecture
+# CF-Budget: Financial Management System Architecture  [SUPERSEDED]
+
+> **This document is superseded.** The AppSheet/Google Forms approach has been abandoned. See [Committee Finance Web App Specification](../../docs/specs/committee-finance-web-app.md) for the current architecture. This document is retained for historical reference only.
 
 **For:** University student Christian fellowship (Hong Kong)
 **Replaces:** `SEM A Statement.xlsx` (Dashboard / MonthlyExpense / MonthlyIncome) + WhatsApp threads

@@ -423,7 +423,13 @@ function Setup_ensureConfigSeeded() {
     PAYOUT_AUTOCONFIRM_HOURS: '72',
     LOCK_AFTER_PAID_HOURS: '24',
     BACKUP_ACCOUNT_EMAIL: 'PASTE_ME',
-    NEEDS_INFO_ROLE_ID: ''
+    NEEDS_INFO_ROLE_ID: '',
+    SEM_A_START: '2026-09-01',
+    SEM_A_END: '2026-12-31',
+    SEM_B_START: '2027-01-01',
+    SEM_B_END: '2027-05-31',
+    SUMMER_START: '2027-06-01',
+    SUMMER_END: '2027-08-31'
   };
   var lastRow = sheet.getLastRow();
   var existingKeys = {};

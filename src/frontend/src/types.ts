@@ -294,3 +294,163 @@ export interface PayoutQueueItem {
 }
 
 export type IncomeTab = 'pending' | 'record' | 'history';
+
+export interface DashboardSummary {
+  missing_receipts: DashboardItem[];
+  over_budget_claims: OverBudgetItem[];
+  needs_info_claims: DashboardItem[];
+  failed_payouts: FailedPayoutItem[];
+  pending_requests: PendingRequestItem[];
+  counts: DashboardCounts;
+}
+
+export interface DashboardItem {
+  claim_id: string;
+  claim_status: string;
+  notes: string;
+  total_amount: number;
+  submitted_at?: string;
+}
+
+export interface OverBudgetItem {
+  claim_id: string;
+  budget_line_id: string;
+  claimed: number;
+  remaining: number;
+  claim_status: string;
+}
+
+export interface FailedPayoutItem {
+  payout_id: string;
+  claim_id: string;
+  amount: number;
+  failure_reason: string;
+}
+
+export interface PendingRequestItem {
+  request_id: string;
+  title: string;
+  submitted_at: string;
+  requester_id: string;
+}
+
+export interface DashboardCounts {
+  missing_receipts: number;
+  over_budget: number;
+  needs_info: number;
+  failed_payouts: number;
+  pending_requests: number;
+  total_attention: number;
+}
+
+export type ReportType = 'claims' | 'budget' | 'income' | 'payouts' | 'accounts';
+
+export interface ReportFilters {
+  status?: string;
+  fromDate?: string;
+  toDate?: string;
+  budgetLine?: string;
+  eventId?: string;
+}
+
+export interface ReportData {
+  type: ReportType;
+  rows: any[];
+  count: number;
+  accounts?: FinanceAccount[];
+  transfers?: AccountTransfer[];
+  adjustments?: AccountAdjustment[];
+  total_current_balance?: number;
+}
+
+export interface ReportClaimRow {
+  claim_id: string;
+  claimant_id: string;
+  status: string;
+  submitted_at: string;
+  verified_at: string;
+  approved_at: string;
+  paid_at: string;
+  total_amount: number;
+  notes: string;
+  created_by: string;
+  event_id: string;
+  semester: string;
+  expense_date: string;
+  payout_method: string;
+}
+
+export interface ReportBudgetRow {
+  request_id: string;
+  title: string;
+  status: string;
+  submitted_at: string;
+  decided_at: string;
+  total_requested: number;
+  total_approved: number;
+  lines: {
+    line_id: string;
+    category_id: string;
+    description: string;
+    requested_amount: number;
+    approved_amount: number;
+    line_status: string;
+    remaining: number;
+  }[];
+}
+
+export interface ReportIncomeRow {
+  income_id: string;
+  date: string;
+  category_id: string;
+  amount: number;
+  received_by: string;
+  source_ref: string;
+  notes: string;
+  account_id: string;
+  status: string;
+}
+
+export interface ReportPayoutRow {
+  payout_id: string;
+  claim_id: string;
+  amount: number;
+  method: string;
+  txn_reference: string;
+  status: string;
+  account_id: string;
+  paid_at: string;
+  confirmed_at: string;
+  failure_reason: string;
+}
+
+export interface MigrationState {
+  stage: string;
+  year_label: string;
+  committee_year: string;
+  target_spreadsheet_id: string;
+  target_folder_id: string;
+  active: boolean;
+}
+
+export interface MigrationPreview {
+  current_year: string;
+  next_committee_year: number;
+  year_label: string;
+  active_members: { user_id: string; display_name: string; role: string; active: boolean; email: string }[];
+  inactive_members: { user_id: string; display_name: string; role: string; active: boolean; email: string }[];
+  operators: { user_id: string; display_name: string; role: string; active: boolean; email: string }[];
+  accounts: { account_id: string; name: string; current_balance: number; status: string }[];
+  categories: { category_id: string; name: string; kind: string; active: boolean }[];
+  events: { event_id: string; name: string; semester: string }[];
+  has_treasurer: boolean;
+}
+
+export interface MigrationSelections {
+  memberIds: string[];
+  accountIds: string[];
+  categoryIds: string[];
+  eventIds: string[];
+  accountBalances: Record<string, number>;
+  balanceReasons: Record<string, string>;
+}

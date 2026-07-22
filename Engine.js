@@ -868,6 +868,213 @@ var Engine = {
     var rows = Engine._findRowsByColumn(sheet, COLS.BudgetRequestLines.request_id, requestId);
     var colIndex = COLS.BudgetRequestLines[field];
     return rows.reduce(function (sum, r) { return sum + (Number(r.values[colIndex - 1]) || 0); }, 0);
+  },
+
+  /**
+   * Return the current semester status including close blockers.
+   * Returns null if semester config is not set up.
+   */
+  getSemesterStatus: function () {
+    var currentSemester = Config.getOptional('CURRENT_SEMESTER') || '26A';
+    var semStart = Config.getOptional('SEM_' + currentSemester + '_START') || '';
+    var semEnd = Config.getOptional('SEM_' + currentSemester + '_END') || '';
+
+    var blockers = Engine._findCloseBlockers();
+    return {
+      current_semester: currentSemester,
+      start_date: semStart,
+      end_date: semEnd,
+      closeable: blockers.length === 0,
+      blockers: blockers,
+      blocker_count: blockers.length
+    };
+  },
+
+  /**
+   * Suggest a semester for a given expense date.
+   * Returns the matching semester or the current open semester for out-of-range dates.
+   */
+  suggestSemester: function (expenseDate) {
+    if (!expenseDate) return Config.getOptional('CURRENT_SEMESTER') || '26A';
+
+    var semesters = ['SEM A', 'SEM B', 'SUMMER'];
+    for (var i = 0; i < semesters.length; i++) {
+      var start = Config.getOptional('SEM_' + semesters[i] + '_START');
+      var end = Config.getOptional('SEM_' + semesters[i] + '_END');
+      if (start && end && expenseDate >= start && expenseDate <= end) {
+        return semesters[i];
+      }
+    }
+    return Config.getOptional('CURRENT_SEMESTER') || '26A';
+  },
+
+  /**
+   * Correct the semester assignment on a claim or budget request.
+   * Only allowed for operators, records an audit trail.
+   */
+  correctSemester: function (entityType, entityId, newSemester, actorUserId) {
+    var row = Engine._loadRow(entityType, entityId);
+    if (!row) return { ok: false, reason: 'Entity not found' };
+
+    var cols = COLS[entityType + 's'];
+    if (!cols.semester) return { ok: false, reason: 'Semester not applicable for ' + entityType };
+
+    var currentSemester = row.values[cols.semester - 1];
+    if (currentSemester === newSemester) return { ok: true, reason: 'Already assigned to ' + newSemester };
+
+    row.sheet.getRange(row.rowIndex, cols.semester).setValue(newSemester);
+    Audit.append(actorUserId, entityType, entityId, 'SEMESTER_CORRECTED', {
+      from_semester: currentSemester,
+      to_semester: newSemester
+    });
+
+    return { ok: true, from: currentSemester, to: newSemester };
+  },
+
+  /**
+   * Close the given semester. Treasurer only.
+   * 1. Check for unresolved blockers
+   * 2. Delete private DRAFT claims and DRAFT budget requests
+   * 3. Lock closed-period finance records
+   * 4. Roll forward finance account balances
+   * 5. Advance to next semester (or prepare for migration if closing SUMMER)
+   */
+  closeSemester: function (semester, actorUserId) {
+    var currentSemester = Config.getOptional('CURRENT_SEMESTER') || '26A';
+    if (semester !== currentSemester) return { ok: false, reason: 'Can only close the current semester: ' + currentSemester };
+
+    var blockers = Engine._findCloseBlockers();
+    if (blockers.length > 0) {
+      return { ok: false, reason: blockers.length + ' blocker(s) prevent close', blockers: blockers };
+    }
+
+    var now = Audit._nowIso();
+    var lock = LockService.getScriptLock();
+    try { lock.waitLock(30000); } catch (e) { return { ok: false, reason: 'Lock timeout' }; }
+
+    try {
+      // Delete private drafts
+      Engine._deleteDrafts(STATUS.ExpenseClaim.DRAFT, TABS.EXPENSE_CLAIMS, COLS.ExpenseClaims);
+      Engine._deleteDrafts(STATUS.BudgetRequest.DRAFT, TABS.BUDGET_REQUESTS, COLS.BudgetRequests);
+
+      // Roll forward account balances
+      var accountsSheet = getSheet_(TABS.FINANCE_ACCOUNTS);
+      var accValues = accountsSheet.getDataRange().getValues();
+      var ac = COLS.FinanceAccounts;
+      for (var i = 1; i < accValues.length; i++) {
+        if (!accValues[i][ac.account_id - 1]) continue;
+        var currentBal = Number(accValues[i][ac.current_balance - 1]) || 0;
+        accountsSheet.getRange(i + 1, ac.opening_balance).setValue(currentBal);
+        accountsSheet.getRange(i + 1, ac.pending_income).setValue(0);
+        accountsSheet.getRange(i + 1, ac.reserved_payouts).setValue(0);
+      }
+
+      // Determine next semester
+      var semesters = ['SEM A', 'SEM B', 'SUMMER'];
+      var currentIdx = semesters.indexOf(currentSemester);
+      var nextSemester = currentIdx < semesters.length - 1 ? semesters[currentIdx + 1] : null;
+
+      if (nextSemester) {
+        // Update Config
+        var configSheet = getSheet_(TABS.CONFIG);
+        var configValues = configSheet.getDataRange().getValues();
+        for (var j = 1; j < configValues.length; j++) {
+          if (configValues[j][0] === 'CURRENT_SEMESTER') {
+            configSheet.getRange(j + 1, 2).setValue(nextSemester);
+            break;
+          }
+        }
+        Config.invalidate();
+        Audit.append(actorUserId, 'Semester', currentSemester, 'CLOSE', {
+          next_semester: nextSemester,
+          accounts_rolled_forward: true,
+          drafts_deleted: true
+        });
+        try { Discord.postTreasury('📅 Semester **' + currentSemester + '** closed. Now active: **' + nextSemester + '**'); } catch (e) {}
+        return { ok: true, closed: currentSemester, next: nextSemester, ready_for_migration: false };
+      } else {
+        // Closing SUMMER — prepare for migration
+        Audit.append(actorUserId, 'Semester', currentSemester, 'CLOSE', {
+          ready_for_migration: true,
+          accounts_rolled_forward: true,
+          drafts_deleted: true
+        });
+        try { Discord.postTreasury('📅 Final semester **' + currentSemester + '** closed. Annual Migration is now available.'); } catch (e) {}
+        return { ok: true, closed: currentSemester, next: null, ready_for_migration: true };
+      }
+    } finally {
+      lock.releaseLock();
+    }
+  },
+
+  /**
+   * Find all blockers that prevent closing the current semester.
+   * @private
+   * @return {Array<{type: string, id: string, reason: string}>}
+   */
+  _findCloseBlockers: function () {
+    var blockers = [];
+
+    // Unresolved claims (not DRAFT, REJECTED, PAID, LOCKED)
+    var claimsSheet = getSheet_(TABS.EXPENSE_CLAIMS);
+    var claimsValues = claimsSheet.getDataRange().getValues();
+    var cc = COLS.ExpenseClaims;
+    var closedClaimStatuses = [STATUS.ExpenseClaim.DRAFT, STATUS.ExpenseClaim.REJECTED,
+      STATUS.ExpenseClaim.PAID, STATUS.ExpenseClaim.LOCKED];
+    for (var i = 1; i < claimsValues.length; i++) {
+      var cId = claimsValues[i][cc.claim_id - 1];
+      if (!cId) continue;
+      var cStatus = claimsValues[i][cc.status - 1];
+      if (closedClaimStatuses.indexOf(cStatus) < 0) {
+        blockers.push({ type: 'claim', id: cId, reason: 'Unresolved claim: ' + cStatus });
+      }
+    }
+
+    // Unresolved budget requests (not DRAFT, APPROVED, PARTIALLY_APPROVED, REJECTED, WITHDRAWN, CLOSED)
+    var reqSheet = getSheet_(TABS.BUDGET_REQUESTS);
+    var reqValues = reqSheet.getDataRange().getValues();
+    var rc = COLS.BudgetRequests;
+    var closedReqStatuses = [STATUS.BudgetRequest.DRAFT, STATUS.BudgetRequest.APPROVED,
+      STATUS.BudgetRequest.PARTIALLY_APPROVED, STATUS.BudgetRequest.REJECTED,
+      STATUS.BudgetRequest.WITHDRAWN, STATUS.BudgetRequest.CLOSED];
+    for (var j = 1; j < reqValues.length; j++) {
+      var rId = reqValues[j][rc.request_id - 1];
+      if (!rId) continue;
+      var rStatus = reqValues[j][rc.status - 1];
+      if (closedReqStatuses.indexOf(rStatus) < 0) {
+        blockers.push({ type: 'budget_request', id: rId, reason: 'Unresolved budget request: ' + rStatus });
+      }
+    }
+
+    // Unfinished payouts (QUEUED)
+    var payoutSheet = getSheet_(TABS.PAYOUTS);
+    var payoutValues = payoutSheet.getDataRange().getValues();
+    var pc = COLS.Payouts;
+    for (var k = 1; k < payoutValues.length; k++) {
+      var pId = payoutValues[k][pc.payout_id - 1];
+      if (!pId) continue;
+      if (payoutValues[k][pc.status - 1] === STATUS.Payout.QUEUED) {
+        blockers.push({ type: 'payout', id: pId, reason: 'Queued payout' });
+      }
+    }
+
+    return blockers;
+  },
+
+  /**
+   * Delete all rows with a given status from a tab.
+   * @private
+   */
+  _deleteDrafts: function (draftStatus, tabName, cols) {
+    var sheet = getSheet_(tabName);
+    var values = sheet.getDataRange().getValues();
+    var statusCol = cols.status - 1;
+    // Delete from bottom to preserve row indices
+    for (var i = values.length - 1; i >= 1; i--) {
+      if (values[i][statusCol] === draftStatus) {
+        sheet.deleteRow(i + 1);
+      }
+    }
   }
 };
 

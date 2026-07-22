@@ -2,4 +2,13 @@
 !*.js
 !*.gs
 !appsscript.json
-tests/runner.js
+!index.html
+tests/**
+archive/**
+src/**
+docs/**
+node_modules/**
+TestFramework.js
+TestHelpers.js
+package.json
+package-lock.json

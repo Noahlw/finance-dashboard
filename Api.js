@@ -1316,6 +1316,571 @@ function api_retryPayout(payoutId) {
   return { payout_id: result.newPayoutId, status: STATUS.Payout.QUEUED };
 }
 
+// ---------------------------------------------------------------------------
+// Dashboard + Reports API
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns a needs-attention summary for the dashboard.
+ * Surfaces: missing receipts, over-budget claims, needs-info, failed payouts, pending requests.
+ */
+function api_getDashboardSummary() {
+  var operator = _requireOperator();
+
+  var claimsSheet = getSheet_(TABS.EXPENSE_CLAIMS);
+  var claimsValues = claimsSheet.getDataRange().getValues();
+  var cc = COLS.ExpenseClaims;
+
+  var cliSheet = getSheet_(TABS.CLAIM_LINE_ITEMS);
+  var cliValues = cliSheet.getDataRange().getValues();
+  var cliC = COLS.ClaimLineItems;
+
+  var budgetLineSheet = getSheet_(TABS.BUDGET_REQUEST_LINES);
+  var blValues = budgetLineSheet.getDataRange().getValues();
+  var blC = COLS.BudgetRequestLines;
+
+  var payoutSheet = getSheet_(TABS.PAYOUTS);
+  var payoutValues = payoutSheet.getDataRange().getValues();
+  var pc = COLS.Payouts;
+
+  var requestSheet = getSheet_(TABS.BUDGET_REQUESTS);
+  var requestValues = requestSheet.getDataRange().getValues();
+  var rc = COLS.BudgetRequests;
+
+  var missingReceipt = [];
+  var overBudget = [];
+  var needsInfo = [];
+  var failedPayouts = [];
+  var pendingRequests = [];
+
+  var activeClaimStatuses = [STATUS.ExpenseClaim.SUBMITTED, STATUS.ExpenseClaim.NEEDS_INFO, STATUS.ExpenseClaim.VERIFIED];
+  var unresolvedRequestStatuses = [STATUS.BudgetRequest.PENDING];
+
+  // Build budget line remaining lookup
+  var budgetLineRemaining = {};
+  for (var bi = 1; bi < blValues.length; bi++) {
+    var blId = blValues[bi][blC.line_id - 1];
+    if (blId) {
+      budgetLineRemaining[blId] = Number(blValues[bi][blC.remaining - 1]) || 0;
+    }
+  }
+
+  // Check claims for missing receipts
+  for (var ci = 1; ci < cliValues.length; ci++) {
+    if (cliValues[ci][cliC.missing_receipt_flag - 1] === true) {
+      var claimId = cliValues[ci][cliC.claim_id - 1];
+      for (var cj = 1; cj < claimsValues.length; cj++) {
+        if (claimsValues[cj][cc.claim_id - 1] === claimId) {
+          var cStatus = claimsValues[cj][cc.status - 1];
+          if (cStatus !== STATUS.ExpenseClaim.DRAFT && cStatus !== STATUS.ExpenseClaim.REJECTED) {
+            missingReceipt.push({
+              claim_id: claimId,
+              claim_status: cStatus,
+              notes: claimsValues[cj][cc.notes - 1],
+              total_amount: Number(claimsValues[cj][cc.total_amount - 1]) || 0
+            });
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  // Check claims for over-budget lines and needs-info
+  for (var i = 1; i < claimsValues.length; i++) {
+    var status = claimsValues[i][cc.status - 1];
+    if (!status) continue;
+
+    if (status === STATUS.ExpenseClaim.NEEDS_INFO) {
+      needsInfo.push({
+        claim_id: claimsValues[i][cc.claim_id - 1],
+        notes: claimsValues[i][cc.notes - 1],
+        total_amount: Number(claimsValues[i][cc.total_amount - 1]) || 0,
+        submitted_at: claimsValues[i][cc.submitted_at - 1]
+      });
+    }
+
+    if (activeClaimStatuses.indexOf(status) >= 0) {
+      var claimId = claimsValues[i][cc.claim_id - 1];
+      var claimTotal = Number(claimsValues[i][cc.total_amount - 1]) || 0;
+      // Sum claimed against each budget line for this claim
+      var claimedByLine = {};
+      for (var j = 1; j < cliValues.length; j++) {
+        if (cliValues[j][cliC.claim_id - 1] === claimId) {
+          var blId = cliValues[j][cliC.budget_line_id - 1];
+          if (blId) {
+            claimedByLine[blId] = (claimedByLine[blId] || 0) + (Number(cliValues[j][cliC.amount - 1]) || 0);
+          }
+        }
+      }
+      for (var bl in claimedByLine) {
+        var remaining = budgetLineRemaining[bl];
+        if (remaining !== undefined && claimedByLine[bl] > remaining) {
+          overBudget.push({
+            claim_id: claimId,
+            budget_line_id: bl,
+            claimed: claimedByLine[bl],
+            remaining: remaining,
+            claim_status: status
+          });
+        }
+      }
+    }
+  }
+
+  // Failed payouts
+  for (var pi = 1; pi < payoutValues.length; pi++) {
+    if (payoutValues[pi][pc.status - 1] === STATUS.Payout.FAILED) {
+      failedPayouts.push({
+        payout_id: payoutValues[pi][pc.payout_id - 1],
+        claim_id: payoutValues[pi][pc.claim_id - 1],
+        amount: Number(payoutValues[pi][pc.amount - 1]) || 0,
+        failure_reason: payoutValues[pi][pc.failure_reason - 1] || ''
+      });
+    }
+  }
+
+  // Pending budget requests
+  for (var ri = 1; ri < requestValues.length; ri++) {
+    if (unresolvedRequestStatuses.indexOf(requestValues[ri][rc.status - 1]) >= 0) {
+      pendingRequests.push({
+        request_id: requestValues[ri][rc.request_id - 1],
+        title: requestValues[ri][rc.title - 1],
+        submitted_at: requestValues[ri][rc.submitted_at - 1],
+        requester_id: requestValues[ri][rc.requester_id - 1]
+      });
+    }
+  }
+
+  return {
+    missing_receipts: missingReceipt,
+    over_budget_claims: overBudget,
+    needs_info_claims: needsInfo,
+    failed_payouts: failedPayouts,
+    pending_requests: pendingRequests,
+    counts: {
+      missing_receipts: missingReceipt.length,
+      over_budget: overBudget.length,
+      needs_info: needsInfo.length,
+      failed_payouts: failedPayouts.length,
+      pending_requests: pendingRequests.length,
+      total_attention: missingReceipt.length + overBudget.length + needsInfo.length + failedPayouts.length + pendingRequests.length
+    }
+  };
+}
+
+/**
+ * Get report data for a given entity type with optional filters.
+ * type: 'claims' | 'budget' | 'income' | 'payouts' | 'accounts'
+ * filters: { status?, fromDate?, toDate?, budgetLine?, eventId? }
+ */
+function api_getReportsData(reportType, filters) {
+  var operator = _requireOperator();
+  filters = filters || {};
+
+  switch (reportType) {
+    case 'claims':
+      return _buildClaimsReport(filters);
+    case 'budget':
+      return _buildBudgetReport(filters);
+    case 'income':
+      return _buildIncomeReport(filters);
+    case 'payouts':
+      return _buildPayoutsReport(filters);
+    case 'accounts':
+      return _buildAccountsReport();
+    default:
+      throw new Error('Unknown report type: ' + reportType);
+  }
+}
+
+function _buildClaimsReport(filters) {
+  var sheet = getSheet_(TABS.EXPENSE_CLAIMS);
+  var values = sheet.getDataRange().getValues();
+  var c = COLS.ExpenseClaims;
+  var out = [];
+  var fromDate = filters.fromDate || '';
+  var toDate = filters.toDate || '';
+  var filterStatus = filters.status || '';
+  var filterEvent = filters.eventId || '';
+  var filterBudgetLine = filters.budgetLine || '';
+
+  // Pre-filter by budget line if needed
+  var claimIdsByLine = null;
+  if (filterBudgetLine) {
+    claimIdsByLine = {};
+    var cliSheet = getSheet_(TABS.CLAIM_LINE_ITEMS);
+    var cliValues = cliSheet.getDataRange().getValues();
+    var cliC = COLS.ClaimLineItems;
+    for (var j = 1; j < cliValues.length; j++) {
+      if (cliValues[j][cliC.budget_line_id - 1] === filterBudgetLine) {
+        claimIdsByLine[cliValues[j][cliC.claim_id - 1]] = true;
+      }
+    }
+  }
+
+  for (var i = 1; i < values.length; i++) {
+    var status = values[i][c.status - 1];
+    if (!status) continue;
+    if (status === STATUS.ExpenseClaim.DRAFT) continue;
+    if (filterStatus && status !== filterStatus) continue;
+    if (filterEvent && values[i][c.event_id - 1] !== filterEvent) continue;
+    if (filterBudgetLine && !claimIdsByLine[values[i][c.claim_id - 1]]) continue;
+
+    var submittedAt = String(values[i][c.submitted_at - 1] || '');
+    if (fromDate && submittedAt < fromDate) continue;
+    if (toDate && submittedAt > toDate) continue;
+
+    out.push({
+      claim_id: values[i][c.claim_id - 1],
+      claimant_id: values[i][c.claimant_id - 1],
+      status: status,
+      submitted_at: submittedAt,
+      verified_at: values[i][c.verified_at - 1] || '',
+      approved_at: values[i][c.approved_at - 1] || '',
+      paid_at: values[i][c.paid_at - 1] || '',
+      total_amount: Number(values[i][c.total_amount - 1]) || 0,
+      notes: values[i][c.notes - 1] || '',
+      created_by: values[i][c.created_by - 1],
+      event_id: values[i][c.event_id - 1] || '',
+      semester: values[i][c.semester - 1] || '',
+      expense_date: values[i][c.expense_date - 1] || '',
+      payout_method: values[i][c.payout_method - 1] || ''
+    });
+  }
+  return { type: 'claims', rows: out, count: out.length };
+}
+
+function _buildBudgetReport(filters) {
+  var reqSheet = getSheet_(TABS.BUDGET_REQUESTS);
+  var reqValues = reqSheet.getDataRange().getValues();
+  var rc = COLS.BudgetRequests;
+
+  var lineSheet = getSheet_(TABS.BUDGET_REQUEST_LINES);
+  var lineValues = lineSheet.getDataRange().getValues();
+  var lc = COLS.BudgetRequestLines;
+
+  var filterStatus = filters.status || '';
+  var fromDate = filters.fromDate || '';
+  var toDate = filters.toDate || '';
+
+  var requestLines = {};
+  for (var i = 1; i < lineValues.length; i++) {
+    var reqId = lineValues[i][lc.request_id - 1];
+    if (!reqId) continue;
+    if (!requestLines[reqId]) requestLines[reqId] = [];
+    requestLines[reqId].push({
+      line_id: lineValues[i][lc.line_id - 1],
+      category_id: lineValues[i][lc.category_id - 1],
+      description: lineValues[i][lc.description - 1],
+      requested_amount: Number(lineValues[i][lc.requested_amount - 1]) || 0,
+      approved_amount: Number(lineValues[i][lc.approved_amount - 1]) || 0,
+      line_status: lineValues[i][lc.line_status - 1],
+      remaining: Number(lineValues[i][lc.remaining - 1]) || 0
+    });
+  }
+
+  var out = [];
+  for (var j = 1; j < reqValues.length; j++) {
+    var status = reqValues[j][rc.status - 1];
+    if (!status) continue;
+    if (status === STATUS.BudgetRequest.DRAFT) continue;
+    if (filterStatus && status !== filterStatus) continue;
+
+    var submittedAt = String(reqValues[j][rc.submitted_at - 1] || '');
+    if (fromDate && submittedAt < fromDate) continue;
+    if (toDate && submittedAt > toDate) continue;
+
+    var id = reqValues[j][rc.request_id - 1];
+    var lines = requestLines[id] || [];
+    var totalRequested = 0;
+    var totalApproved = 0;
+    for (var k = 0; k < lines.length; k++) {
+      totalRequested += lines[k].requested_amount;
+      totalApproved += lines[k].approved_amount;
+    }
+
+    out.push({
+      request_id: id,
+      title: reqValues[j][rc.title - 1],
+      status: status,
+      submitted_at: submittedAt,
+      decided_at: reqValues[j][rc.decided_at - 1] || '',
+      total_requested: totalRequested,
+      total_approved: totalApproved,
+      lines: lines
+    });
+  }
+  return { type: 'budget', rows: out, count: out.length };
+}
+
+function _buildIncomeReport(filters) {
+  var sheet = getSheet_(TABS.INCOME);
+  var values = sheet.getDataRange().getValues();
+  var c = COLS.Income;
+  var out = [];
+  var filterStatus = filters.status || '';
+  var fromDate = filters.fromDate || '';
+  var toDate = filters.toDate || '';
+
+  for (var i = 1; i < values.length; i++) {
+    if (!values[i][c.income_id - 1]) continue;
+    var status = values[i][c.status - 1];
+    if (filterStatus && status !== filterStatus) continue;
+
+    var date = String(values[i][c.date - 1] || '');
+    if (fromDate && date < fromDate) continue;
+    if (toDate && date > toDate) continue;
+
+    out.push({
+      income_id: values[i][c.income_id - 1],
+      date: date,
+      category_id: values[i][c.category_id - 1],
+      amount: Number(values[i][c.amount - 1]) || 0,
+      received_by: values[i][c.received_by - 1],
+      source_ref: values[i][c.source_ref - 1] || '',
+      notes: values[i][c.notes - 1] || '',
+      account_id: values[i][c.account_id - 1] || '',
+      status: status
+    });
+  }
+  return { type: 'income', rows: out, count: out.length };
+}
+
+function _buildPayoutsReport(filters) {
+  var sheet = getSheet_(TABS.PAYOUTS);
+  var values = sheet.getDataRange().getValues();
+  var c = COLS.Payouts;
+  var out = [];
+  var filterStatus = filters.status || '';
+  var fromDate = filters.fromDate || '';
+  var toDate = filters.toDate || '';
+
+  for (var i = 1; i < values.length; i++) {
+    if (!values[i][c.payout_id - 1]) continue;
+    var status = values[i][c.status - 1];
+    if (filterStatus && status !== filterStatus) continue;
+
+    var paidAt = String(values[i][c.paid_at - 1] || '');
+    if (fromDate && paidAt < fromDate) continue;
+    if (toDate && paidAt > toDate) continue;
+
+    out.push({
+      payout_id: values[i][c.payout_id - 1],
+      claim_id: values[i][c.claim_id - 1],
+      amount: Number(values[i][c.amount - 1]) || 0,
+      method: values[i][c.method - 1] || '',
+      txn_reference: values[i][c.txn_reference - 1] || '',
+      status: status,
+      account_id: values[i][c.account_id - 1] || '',
+      paid_at: paidAt,
+      confirmed_at: values[i][c.confirmed_at - 1] || '',
+      failure_reason: values[i][c.failure_reason - 1] || ''
+    });
+  }
+  return { type: 'payouts', rows: out, count: out.length };
+}
+
+function _buildAccountsReport() {
+  var accounts = api_getAccounts();
+  var transfers = api_getTransfers();
+  var adjustments = api_getAdjustments();
+
+  return {
+    type: 'accounts',
+    accounts: accounts,
+    transfers: transfers,
+    adjustments: adjustments,
+    total_current_balance: accounts.reduce(function(sum, a) {
+      return sum + (Number(a.current_balance) || 0);
+    }, 0)
+  };
+}
+
+/**
+ * Generate CSV export for the given report type and filters.
+ * Returns a downloadable CSV string.
+ */
+function api_exportCsv(reportType, filters) {
+  _requireOperator();
+  var data = api_getReportsData(reportType, filters);
+  var rows = data.rows || [];
+  if (rows.length === 0) return '';
+
+  var headers;
+  switch (reportType) {
+    case 'claims':
+      headers = ['Claim ID', 'Claimant', 'Status', 'Submitted', 'Verified', 'Paid', 'Amount', 'Notes', 'Event', 'Semester', 'Expense Date', 'Method'];
+      return _csvRows(headers, rows.map(function(r) {
+        return [r.claim_id, r.claimant_id, r.status, r.submitted_at, r.verified_at, r.paid_at, r.total_amount, _csvEscape(r.notes), r.event_id, r.semester, r.expense_date, r.payout_method];
+      }));
+    case 'budget':
+      headers = ['Request ID', 'Title', 'Status', 'Submitted', 'Decided', 'Total Requested', 'Total Approved'];
+      return _csvRows(headers, rows.map(function(r) {
+        return [r.request_id, r.title, r.status, r.submitted_at, r.decided_at, r.total_requested, r.total_approved];
+      }));
+    case 'income':
+      headers = ['Income ID', 'Date', 'Category', 'Amount', 'Received By', 'Source', 'Notes', 'Account', 'Status'];
+      return _csvRows(headers, rows.map(function(r) {
+        return [r.income_id, r.date, r.category_id, r.amount, r.received_by, r.source_ref, _csvEscape(r.notes), r.account_id, r.status];
+      }));
+    case 'payouts':
+      headers = ['Payout ID', 'Claim ID', 'Amount', 'Method', 'TXN Ref', 'Status', 'Account', 'Paid', 'Confirmed', 'Failure Reason'];
+      return _csvRows(headers, rows.map(function(r) {
+        return [r.payout_id, r.claim_id, r.amount, r.method, r.txn_reference, r.status, r.account_id, r.paid_at, r.confirmed_at, _csvEscape(r.failure_reason)];
+      }));
+    default:
+      return '';
+  }
+}
+
+function _csvRows(headers, rows) {
+  var out = headers.join(',') + '\n';
+  for (var i = 0; i < rows.length; i++) {
+    out += rows[i].join(',') + '\n';
+  }
+  return out;
+}
+
+function _csvEscape(val) {
+  if (val === null || val === undefined) return '';
+  var s = String(val);
+  if (s.indexOf(',') >= 0 || s.indexOf('"') >= 0 || s.indexOf('\n') >= 0) {
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
+
+// ---------------------------------------------------------------------------
+// Semester Close API
+// ---------------------------------------------------------------------------
+
+/**
+ * Get the current semester status, including close blockers.
+ */
+function api_getSemesterStatus() {
+  _requireOperator();
+  return Engine.getSemesterStatus();
+}
+
+/**
+ * Suggest a semester for a given expense date.
+ */
+function api_suggestSemester(expenseDate) {
+  _requireOperator();
+  return { semester: Engine.suggestSemester(expenseDate) };
+}
+
+/**
+ * Correct the semester assignment on a claim or budget request.
+ */
+function api_correctSemester(entityType, entityId, newSemester) {
+  var operator = _requireOperator();
+  var result = Engine.correctSemester(entityType, entityId, newSemester, operator.userId);
+  if (!result.ok) throw new Error(result.reason);
+  return result;
+}
+
+/**
+ * Close the current semester. Treasurer only.
+ */
+function api_closeSemester() {
+  var operator = _requireOperator();
+  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized: Treasurer only');
+  var currentSemester = Config.getOptional('CURRENT_SEMESTER') || '26A';
+  var result = Engine.closeSemester(currentSemester, operator.userId);
+  if (!result.ok) throw new Error(result.reason);
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Annual Migration API
+// ---------------------------------------------------------------------------
+
+/**
+ * Get the current migration state (null if none in progress).
+ */
+function api_getMigrationState() {
+  _requireOperator();
+  return Migration.getState();
+}
+
+/**
+ * Get a preview of what would be migrated.
+ */
+function api_getMigrationPreview() {
+  _requireOperator();
+  return Migration.getPreview();
+}
+
+/**
+ * Start a migration (creates year folder and new spreadsheet).
+ * Treasurer only.
+ */
+function api_startMigration() {
+  var operator = _requireOperator();
+  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized: Treasurer only');
+  var result = Migration.startMigration(operator.userId);
+  if (!result.ok) throw new Error(result.reason);
+  return result;
+}
+
+/**
+ * Set selections for what to include in the migration.
+ * Treasurer only.
+ */
+function api_setMigrationSelections(selections) {
+  var operator = _requireOperator();
+  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized: Treasurer only');
+  var result = Migration.setSelections(operator.userId, selections);
+  if (!result.ok) throw new Error(result.reason);
+  return result;
+}
+
+/**
+ * Get the current selections for review.
+ */
+function api_getMigrationSelections() {
+  _requireOperator();
+  return Migration.getSelections();
+}
+
+/**
+ * Execute the migration (populate the new spreadsheet).
+ * Treasurer only.
+ */
+function api_executeMigration() {
+  var operator = _requireOperator();
+  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized: Treasurer only');
+  var result = Migration.executeMigration(operator.userId);
+  if (!result.ok) throw new Error(result.reason);
+  return result;
+}
+
+/**
+ * Activate the migration (set new spreadsheet as production).
+ * Treasurer only.
+ */
+function api_activateMigration() {
+  var operator = _requireOperator();
+  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized: Treasurer only');
+  var result = Migration.activateMigration(operator.userId);
+  if (!result.ok) throw new Error(result.reason);
+  return result;
+}
+
+/**
+ * Cancel an in-progress migration.
+ * Treasurer only.
+ */
+function api_cancelMigration() {
+  var operator = _requireOperator();
+  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized: Treasurer only');
+  var result = Migration.cancelMigration(operator.userId);
+  if (!result.ok) throw new Error(result.reason);
+  return result;
+}
+
 if (typeof module !== 'undefined') {
   module.exports = {
     api_resolveSession, api_getMyClaims, api_uploadReceipt, api_submitClaim, api_editClaim,
@@ -1328,6 +1893,11 @@ if (typeof module !== 'undefined') {
     api_recordIncome, api_getPendingIncome, api_confirmIncome, api_rejectIncome, api_requestIncomeInfo,
     api_recordAdjustment, api_recordTransfer, api_getTransfers, api_getAdjustments,
     api_getQueuedPayouts, api_markPayoutSent, api_recordPayoutFailed, api_retryPayout,
+    api_getDashboardSummary, api_getReportsData, api_exportCsv,
+    api_getSemesterStatus, api_suggestSemester, api_correctSemester, api_closeSemester,
+    api_getMigrationState, api_getMigrationPreview, api_startMigration,
+    api_setMigrationSelections, api_getMigrationSelections,
+    api_executeMigration, api_activateMigration, api_cancelMigration,
     _sha256Hex, _isLate, _resolveUser
   };
 }
