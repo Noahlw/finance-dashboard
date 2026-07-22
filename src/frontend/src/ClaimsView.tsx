@@ -7,7 +7,7 @@ interface ClaimsViewProps {
   members?: Member[];
 }
 
-type Step = "member" | "details" | "receipts" | "payment" | "review";
+type Step = "member" | "details" | "payment" | "receipts" | "review";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 const ALLOWED_TYPES = [
@@ -280,7 +280,7 @@ export default function ClaimsView({
     }
   };
 
-  const steps: Step[] = ["member", "details", "receipts", "payment", "review"];
+  const steps: Step[] = ["member", "details", "payment", "receipts", "review"];
 
   const renderStep = () => {
     switch (step) {

@@ -283,17 +283,8 @@ var Payouts = {
     var payeeUserId = claimRow.values[c.claimant_id - 1];
     var amount = Engine._sumClaimLineItems(claimId);
 
-    // Reserve the full amount from the selected account
-    if (accountId) {
-      var existingPayouts = Engine._findRowsByColumn(
-        getSheet_(TABS.PAYOUTS),
-        COLS.Payouts.claim_id,
-        claimId
-      );
-      if (existingPayouts.length === 0) {
-        Engine._postToAccountBalance(accountId, amount, "reserve");
-      }
-    }
+    // Note: balance deduction happens at markPayoutSent, not here.
+    // The reserved_payouts column tracks display-only reservation.
 
     var payoutId = Ids.nextId("Payout");
     var pc = COLS.Payouts;
@@ -355,12 +346,17 @@ var Payouts = {
         return { ok: false, reason: "ENTITY_NOT_FOUND" };
       }
       var pc = COLS.Payouts;
-      if (row.values[pc.status - 1] !== STATUS.Payout.QUEUED) {
+      if (row.values[pc.status - 1] !== STATUS.Payout.QUEUED &&
+          row.values[pc.status - 1] !== STATUS.Payout.SENT) {
         return {
           ok: false,
-          reason: "Only QUEUED payouts can be marked as failed.",
+          reason: "Only QUEUED or SENT payouts can be marked as failed.",
         };
       }
+
+      var wasSent = row.values[pc.status - 1] === STATUS.Payout.SENT;
+      var amount = Number(row.values[pc.amount - 1]) || 0;
+      var accountId = row.values[pc.account_id - 1];
 
       var now = Audit._nowIso();
       var sheet = row.sheet;
@@ -370,8 +366,14 @@ var Payouts = {
         .setValue(failureReason || "Unknown error");
       sheet.getRange(row.rowIndex, pc.paid_at).setValue(now);
 
+      // Reverse balance deduction if payout was already sent
+      if (wasSent && accountId) {
+        Engine._postToAccountBalance(accountId, amount, "adjustment_credit");
+      }
+
       Audit.append(actorUserId, "Payout", payoutId, "FAILED", {
         reason: failureReason,
+        wasSent: wasSent,
       });
       Discord.postTreasury(
         "🚫 **" +
@@ -439,11 +441,6 @@ var Payouts = {
       newRow[pc.account_id - 1] = accountId || "";
       newRow[pc.parent_payout_id - 1] = failedPayoutId;
       _appendRow(getSheet_(TABS.PAYOUTS), newRow);
-
-      // Re-reserve the amount
-      if (accountId) {
-        Engine._postToAccountBalance(accountId, amount, "reserve");
-      }
 
       Audit.append(actorUserId, "Payout", newPayoutId, "RETRY", {
         amount,

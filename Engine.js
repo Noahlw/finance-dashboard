@@ -958,6 +958,10 @@ var Engine = {
    * 5. Advance to next semester (or prepare for migration if closing SUMMER)
    */
   closeSemester(semester, actorUserId) {
+    var actor = Engine._loadActor(actorUserId);
+    if (!actor || actor.role !== ROLES.TREASURER) {
+      return { ok: false, reason: "Only a Treasurer can close a semester." };
+    }
     var currentSemester = Config.getOptional("CURRENT_SEMESTER") || "26A";
     if (semester !== currentSemester) {
       return {

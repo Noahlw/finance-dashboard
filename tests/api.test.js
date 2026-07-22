@@ -318,8 +318,23 @@ describe("Api.js", () => {
     };
     global.getVaultSheet_ = jest.fn(() => ({
       appendRow: jest.fn(),
-      getDataRange: () => ({ getValues: () => [[]] }),
-      getLastRow: () => 1,
+      getDataRange: () => ({
+        getValues: () => [
+          [
+            "user_id",
+            "full_name",
+            "student_id",
+            "payout_method",
+            "payout_handle",
+            "consent_ts",
+          ],
+          ["M-001", "Alice", "S12345", "FPS", "91234567", "2026-01-01"],
+          ["MEMBER-001", "Bob", "S67890", "FPS", "98887766", "2026-01-01"],
+          ["USER-1", "Charlie", "S11111", "FPS", "90000000", "2026-01-01"],
+          ["U-001", "Test User", "S-U001", "FPS", "91111111", "2026-01-01"],
+        ],
+      }),
+      getLastRow: () => 5,
       getRange: jest.fn(() => ({
         setNumberFormat: jest.fn().mockReturnThis(),
         setValue: jest.fn(),
@@ -1771,7 +1786,7 @@ describe("Api.js", () => {
       const { api_uploadReceipt } = require("../Api.js");
       const result = api_uploadReceipt("large.png", "image/png", "bigbase64", "", "", 0);
       expect(result.ok).toBe(false);
-      expect(result.error.message).toContain("3 MB limit");
+      expect(result.error.message).toContain("5 MB limit");
     });
   });
 

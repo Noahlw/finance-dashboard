@@ -12,7 +12,7 @@ var allowedReceiptMimes = [
   "image/gif",
   "application/pdf",
 ];
-var maxReceiptBytes = 3 * 1024 * 1024;
+var maxReceiptBytes = 5 * 1024 * 1024;
 
 function doGet(e) {
   return HtmlService.createTemplateFromFile("index")
@@ -102,13 +102,14 @@ function api_getMyClaims() {
     var rId = allLines[i][c_brl.request_id - 1];
     if (
       requestIds[rId] &&
-      allLines[i][c_brl.line_status - 1] === "APPROVED" &&
-      allLines[i][c_brl.remaining - 1] > 0
+      allLines[i][c_brl.line_status - 1] === "APPROVED"
     ) {
+      var remaining = allLines[i][c_brl.remaining - 1];
       budgetLines.push({
         description: allLines[i][c_brl.description - 1],
         line_id: allLines[i][c_brl.line_id - 1],
-        remaining: allLines[i][c_brl.remaining - 1],
+        overBudget: remaining <= 0,
+        remaining: remaining,
         request_id: rId,
       });
     }
@@ -158,7 +159,7 @@ function api_uploadReceipt(
   var bytes = Utilities.base64Decode(base64Data);
 
   if (bytes.length > maxReceiptBytes) {
-    return _err("INVALID_PARAMETER", "File exceeds 3 MB limit.");
+    return _err("INVALID_PARAMETER", "File exceeds 5 MB limit.");
   }
 
   if (allowedReceiptMimes.indexOf(mimeType) === -1) {
@@ -286,6 +287,9 @@ function api_submitClaim(payload) {
   if (!payload.claimantId) {
     return _err("INVALID_PARAMETER", "Claimant is required");
   }
+  if (!_findVaultByUserId(payload.claimantId)) {
+    return _err("INVALID_PARAMETER", "Claimant SID not found in member directory");
+  }
 
   if (
     _alreadyProcessed(
@@ -326,17 +330,40 @@ function api_submitClaim(payload) {
     payload.payoutHandle || "",
   ]);
 
-  var cliId = Ids.childId(claimId, 1, "CLAIMLINE");
-  var missingReceipt = !payload.receiptId;
-  _appendRow(getSheet_(TABS.CLAIM_LINE_ITEMS), [
-    cliId,
-    claimId,
-    payload.budgetLineId,
-    payload.receiptId || "",
-    total,
-    payload.notes,
-    missingReceipt,
-  ]);
+  var receiptIds = payload.receiptIds || [];
+  if (payload.receiptId && receiptIds.indexOf(payload.receiptId) === -1) {
+    receiptIds.push(payload.receiptId);
+  }
+  if (receiptIds.length === 0 && payload.receiptId) {
+    receiptIds = [payload.receiptId];
+  }
+
+  if (receiptIds.length > 0) {
+    for (var ri = 0; ri < receiptIds.length; ri++) {
+      var cliId2 = Ids.childId(claimId, ri + 1, "CLAIMLINE");
+      _appendRow(getSheet_(TABS.CLAIM_LINE_ITEMS), [
+        cliId2,
+        claimId,
+        payload.budgetLineId || "",
+        receiptIds[ri] || "",
+        total / receiptIds.length,
+        payload.notes || "",
+        false,
+      ]);
+    }
+  } else {
+    var cliId = Ids.childId(claimId, 1, "CLAIMLINE");
+    var missingReceipt = !payload.receiptId;
+    _appendRow(getSheet_(TABS.CLAIM_LINE_ITEMS), [
+      cliId,
+      claimId,
+      payload.budgetLineId || "",
+      payload.receiptId || "",
+      total,
+      payload.notes,
+      missingReceipt,
+    ]);
+  }
 
   Audit.append(user.userId, "ExpenseClaim", claimId, "CREATE", {
     lateFlag,
@@ -983,6 +1010,9 @@ function api_saveClaimDraft(payload) {
   try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
   if (!payload.claimantId) {
     return _err("INVALID_PARAMETER", "Claimant is required");
+  }
+  if (!_findVaultByUserId(payload.claimantId)) {
+    return _err("INVALID_PARAMETER", "Claimant SID not found in member directory");
   }
   if (!payload.uuid) {
     return _err("INVALID_PARAMETER", "uuid is required");
