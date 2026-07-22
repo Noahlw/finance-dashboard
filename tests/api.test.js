@@ -6,7 +6,7 @@ global.getVaultSheet_ = jest.fn();
 global.Engine = {
   _findRowsByColumn: jest.fn()
 };
-global.TABS = { EXPENSE_CLAIMS: 'ExpenseClaims', BUDGET_REQUESTS: 'BudgetRequests', BUDGET_REQUEST_LINES: 'BudgetRequestLines', USERS: 'Users', CLAIM_LINE_ITEMS: 'ClaimLineItems', RECEIPTS: 'Receipts', VAULT: 'Vault', COUNTERS: 'Counters' };
+global.TABS = { EXPENSE_CLAIMS: 'ExpenseClaims', BUDGET_REQUESTS: 'BudgetRequests', BUDGET_REQUEST_LINES: 'BudgetRequestLines', USERS: 'Users', CLAIM_LINE_ITEMS: 'ClaimLineItems', RECEIPTS: 'Receipts', VAULT: 'Vault', COUNTERS: 'Counters', FINANCE_ACCOUNTS: 'FinanceAccounts', INCOME: 'Income', ACCOUNT_TRANSFERS: 'AccountTransfers', ACCOUNT_ADJUSTMENTS: 'AccountAdjustments', PAYOUTS: 'Payouts' };
 global.COLS = {
   ExpenseClaims: { claim_id: 1, claimant_id: 2, status: 3, submitted_at: 4, total_amount: 11, notes: 14, processed_response_id: 15, created_by: 16, expense_date: 17, semester: 18, event_id: 19, payout_method: 20, payout_handle: 21 },
   BudgetRequests: { request_id: 1, requester_id: 2, event_id: 3, title: 4, justification: 5, needed_by: 6, status: 7, submitted_at: 8, decided_at: 9, decided_by: 10, decision_note: 11, self_approved: 12, processed_response_id: 13 },
@@ -15,17 +15,26 @@ global.COLS = {
   ClaimLineItems: { claim_id: 2, claim_line_id: 1, budget_line_id: 3, receipt_id: 4, amount: 5, description: 6, missing_receipt_flag: 7 },
   Receipts: { receipt_id: 1, drive_file_id: 2, sha256: 3, uploaded_by: 4, uploaded_at: 5, vendor: 6, receipt_date: 7, receipt_total: 8, file_link: 9 },
   Vault: { user_id: 1, full_name: 2, student_id: 3, payout_method: 4, payout_handle: 5, consent_ts: 6 },
-  Counters: { entity: 1, last_n: 2 }
+  Counters: { entity: 1, last_n: 2 },
+  FinanceAccounts: { account_id: 1, name: 2, opening_balance: 3, current_balance: 4, pending_income: 5, reserved_payouts: 6, status: 7, created_at: 8, deactivated_at: 9 },
+  Income: { income_id: 1, date: 2, category_id: 3, amount: 4, received_by: 5, source_ref: 6, event_id: 7, notes: 8, account_id: 9, status: 10, decided_by: 11, decided_at: 12, decision_note: 13 },
+  AccountTransfers: { transfer_id: 1, from_account_id: 2, to_account_id: 3, amount: 4, reason: 5, transferred_by: 6, transferred_at: 7 },
+  AccountAdjustments: { adjustment_id: 1, account_id: 2, amount: 3, direction: 4, reason: 5, adjusted_by: 6, adjusted_at: 7 },
+  Payouts: { payout_id: 1, claim_id: 2, payee_user_id: 3, amount: 4, method: 5, txn_reference: 6, status: 7, account_id: 8, failure_reason: 9, created_at: 10, sent_by: 11, sent_at: 12, parent_payout_id: 13 }
 };
 global.STATUS = {
   ExpenseClaim: { DRAFT: 'DRAFT', SUBMITTED: 'SUBMITTED', NEEDS_INFO: 'NEEDS_INFO', VERIFIED: 'VERIFIED', APPROVED_FOR_PAYOUT: 'APPROVED_FOR_PAYOUT', PAID: 'PAID', REJECTED: 'REJECTED', LOCKED: 'LOCKED' },
   BudgetRequest: { DRAFT: 'DRAFT', PENDING: 'PENDING', NEEDS_INFO: 'NEEDS_INFO', APPROVED: 'APPROVED', PARTIALLY_APPROVED: 'PARTIALLY_APPROVED', REJECTED: 'REJECTED', WITHDRAWN: 'WITHDRAWN', CLOSED: 'CLOSED' },
-  BudgetRequestLine: { PENDING: 'PENDING', APPROVED: 'APPROVED', REDUCED: 'REDUCED', REJECTED: 'REJECTED' }
+  BudgetRequestLine: { PENDING: 'PENDING', APPROVED: 'APPROVED', REDUCED: 'REDUCED', REJECTED: 'REJECTED' },
+  FinanceAccount: { ACTIVE: 'ACTIVE', INACTIVE: 'INACTIVE' },
+  Income: { PENDING: 'PENDING', NEEDS_INFO: 'NEEDS_INFO', CONFIRMED: 'CONFIRMED', REJECTED: 'REJECTED', CORRECTED: 'CORRECTED' },
+  Payout: { QUEUED: 'QUEUED', SENT: 'SENT', CONFIRMED: 'CONFIRMED', FAILED: 'FAILED' }
 };
 global.ROLES = { COMMITTEE: 'COMMITTEE', TREASURER: 'TREASURER', MEMBER: 'MEMBER', ADVISOR_AUDITOR: 'ADVISOR_AUDITOR' };
 global.Discord = { postStatus: jest.fn() };
 global.Audit = { _nowIso: jest.fn(() => '2026-07-21T12:00:00Z'), append: jest.fn() };
 global.Ids = { nextId: jest.fn(() => 'BUDGET-26A-001'), childId: jest.fn(() => 'BUDGETLINE-26A-001-01') };
+global.Payouts = { markPayoutSent: jest.fn(() => ({ ok: true })), recordPayoutFailed: jest.fn(() => ({ ok: true })), retryPayout: jest.fn(() => ({ ok: true, newPayoutId: 'PAYOUT-002' })) };
 global.Utilities = {
   base64Decode: jest.fn(() => [116, 101, 115, 116, 32, 98, 121, 116, 101, 115]),
   computeDigest: jest.fn(() => [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]),
@@ -42,7 +51,16 @@ global.PropertiesService = {
   }))
 };
 global.Engine._loadRow = jest.fn();
+global.Engine._loadActor = jest.fn(() => ({ role: 'COMMITTEE', displayName: 'Test User' }));
 global.Engine._sumBudgetRequestLines = jest.fn(() => 0);
+global.Engine._sumClaimLineItems = jest.fn(() => 0);
+global.Engine._computeEffectiveBalance = jest.fn(() => 0);
+global.Engine.recordIncome = jest.fn(() => ({ ok: true, incomeId: 'INC-001' }));
+global.Engine.confirmIncome = jest.fn(() => ({ ok: true, accountId: 'AC-001' }));
+global.Engine.rejectIncome = jest.fn(() => ({ ok: true }));
+global.Engine.requestIncomeInfo = jest.fn(() => ({ ok: true }));
+global.Engine.adjustAccount = jest.fn(() => ({ ok: true, adjustmentId: 'ADJ-001' }));
+global.Engine.transferBetweenAccounts = jest.fn(() => ({ ok: true, transferId: 'TRF-001' }));
 global.Engine.transition = jest.fn((entityType, entityId, action, actorUserId, payload) => {
   return { ok: true, from: 'DRAFT', to: 'PENDING', selfApproved: false };
 });
@@ -96,7 +114,7 @@ describe('Api.js', () => {
       expect(result.role).toBe('COMMITTEE');
       expect(result.user_id).toBe('U-001');
       expect(result.display_name).toBe('Test User');
-      expect(result.views).toEqual(['claims', 'members', 'budget-requests']);
+      expect(result.views).toEqual(['review', 'claims', 'members', 'budget-requests']);
     });
 
     it('should allow TREASURER role with all views', () => {
@@ -115,7 +133,7 @@ describe('Api.js', () => {
       const result = api_resolveSession();
       expect(result.allowed).toBe(true);
       expect(result.role).toBe('TREASURER');
-      expect(result.views).toEqual(['claims', 'members', 'budget-requests', 'income', 'payouts', 'reports']);
+      expect(result.views).toEqual(['review', 'claims', 'members', 'budget-requests', 'income', 'payouts', 'reports']);
     });
 
     it('should deny unknown user', () => {
@@ -911,6 +929,665 @@ describe('Api.js', () => {
     it('should reject empty receiptIds array', () => {
       const { api_attachReceipts } = require('../Api.js');
       expect(() => api_attachReceipts('CLAIM-001', [])).toThrow('receiptIds array is required');
+    });
+  });
+
+  describe('api_getClaimsQueue', () => {
+    it('should return SUBMITTED, NEEDS_INFO, and VERIFIED claims', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        if (tab === 'ExpenseClaims') return {
+          getDataRange: () => ({
+            getValues: () => [
+              ['claim_id', 'claimant_id', 'status', 'submitted_at', 'verified_at', '', '', '', '', '', 'total_amount', '', '', 'notes', '', 'created_by', '', '', 'event_id'],
+              ['CLAIM-001', 'M-001', 'SUBMITTED', '2026-07-20', '', '', '', '', '', '', 100, '', '', 'Test claim 1', '', 'U-001', '', '', 'EVT-001'],
+              ['CLAIM-002', 'M-002', 'VERIFIED', '2026-07-19', '2026-07-21', '', '', '', '', '', 200, '', '', 'Test claim 2', '', 'U-002', '', '', 'EVT-002'],
+              ['CLAIM-003', 'M-001', 'REJECTED', '2026-07-18', '', '', '', '', '', '', 50, '', '', 'Rejected claim', '', 'U-001', '', '', 'EVT-001']
+            ]
+          })
+        };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_getClaimsQueue } = require('../Api.js');
+      const result = api_getClaimsQueue();
+      expect(result.length).toBe(2);
+      expect(result[0].claim_id).toBe('CLAIM-001');
+      expect(result[0].status).toBe('SUBMITTED');
+      expect(result[1].claim_id).toBe('CLAIM-002');
+    });
+
+    it('should filter by status', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        if (tab === 'ExpenseClaims') return {
+          getDataRange: () => ({
+            getValues: () => [
+              ['claim_id', 'claimant_id', 'status', 'submitted_at', 'verified_at', '', '', '', '', '', 'total_amount', '', '', 'notes', '', 'created_by', '', '', 'event_id'],
+              ['CLAIM-001', 'M-001', 'SUBMITTED', '2026-07-20', '', '', '', '', '', '', 100, '', '', 'Test', '', 'U-001', '', '', 'EVT-001'],
+              ['CLAIM-002', 'M-002', 'VERIFIED', '2026-07-19', '2026-07-21', '', '', '', '', '', 200, '', '', 'Test 2', '', 'U-002', '', '', 'EVT-002']
+            ]
+          })
+        };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_getClaimsQueue } = require('../Api.js');
+      const result = api_getClaimsQueue({ status: 'VERIFIED' });
+      expect(result.length).toBe(1);
+      expect(result[0].claim_id).toBe('CLAIM-002');
+    });
+
+    it('should filter by creator', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        if (tab === 'ExpenseClaims') return {
+          getDataRange: () => ({
+            getValues: () => [
+              ['claim_id', 'claimant_id', 'status', 'submitted_at', 'verified_at', '', '', '', '', '', 'total_amount', '', '', 'notes', '', 'created_by', '', '', 'event_id'],
+              ['CLAIM-001', 'M-001', 'SUBMITTED', '2026-07-20', '', '', '', '', '', '', 100, '', '', 'Test', '', 'U-001', '', '', 'EVT-001'],
+              ['CLAIM-002', 'M-002', 'SUBMITTED', '2026-07-19', '', '', '', '', '', '', 200, '', '', 'Test 2', '', 'U-002', '', '', 'EVT-002']
+            ]
+          })
+        };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_getClaimsQueue } = require('../Api.js');
+      const result = api_getClaimsQueue({ creator: 'U-002' });
+      expect(result.length).toBe(1);
+      expect(result[0].claim_id).toBe('CLAIM-002');
+    });
+
+    it('should filter by budget line', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        if (tab === 'ExpenseClaims') return {
+          getDataRange: () => ({
+            getValues: () => [
+              ['claim_id', 'claimant_id', 'status', 'submitted_at', 'verified_at', '', '', '', '', '', 'total_amount', '', '', 'notes', '', 'created_by', '', '', 'event_id'],
+              ['CLAIM-001', 'M-001', 'SUBMITTED', '2026-07-20', '', '', '', '', '', '', 100, '', '', 'Test', '', 'U-001', '', '', 'EVT-001'],
+              ['CLAIM-002', 'M-002', 'VERIFIED', '2026-07-19', '2026-07-21', '', '', '', '', '', 200, '', '', 'Test 2', '', 'U-002', '', '', 'EVT-002']
+            ]
+          })
+        };
+        if (tab === 'ClaimLineItems') return {
+          getDataRange: () => ({
+            getValues: () => [
+              ['claim_line_id', 'claim_id', 'budget_line_id', 'receipt_id', 'amount', 'description', 'missing_receipt_flag'],
+              ['CLI-001', 'CLAIM-001', 'BL-001', '', 100, 'Item 1', false],
+              ['CLI-002', 'CLAIM-002', 'BL-002', '', 200, 'Item 2', false]
+            ]
+          })
+        };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_getClaimsQueue } = require('../Api.js');
+      const result = api_getClaimsQueue({ budgetLine: 'BL-001' });
+      expect(result.length).toBe(1);
+      expect(result[0].claim_id).toBe('CLAIM-001');
+    });
+
+    it('should filter by SID', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        if (tab === 'ExpenseClaims') return {
+          getDataRange: () => ({
+            getValues: () => [
+              ['claim_id', 'claimant_id', 'status', 'submitted_at', 'verified_at', '', '', '', '', '', 'total_amount', '', '', 'notes', '', 'created_by', '', '', 'event_id'],
+              ['CLAIM-001', 'M-001', 'SUBMITTED', '2026-07-20', '', '', '', '', '', '', 100, '', '', 'Test', '', 'U-001', '', '', 'EVT-001'],
+              ['CLAIM-002', 'M-002', 'VERIFIED', '2026-07-19', '2026-07-21', '', '', '', '', '', 200, '', '', 'Test 2', '', 'U-002', '', '', 'EVT-002']
+            ]
+          })
+        };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      global.getVaultSheet_.mockReturnValueOnce({
+        getDataRange: () => ({
+          getValues: () => [
+            ['user_id', 'full_name', 'student_id', 'payout_method', 'payout_handle', 'consent_ts'],
+            ['M-001', 'Alice', 'S12345', 'FPS', '91234567', '2026-01-01']
+          ]
+        })
+      });
+      const { api_getClaimsQueue } = require('../Api.js');
+      const result = api_getClaimsQueue({ sid: 'S12345' });
+      expect(result.length).toBe(1);
+      expect(result[0].claim_id).toBe('CLAIM-001');
+    });
+  });
+
+  describe('api_verifyClaim', () => {
+    it('should verify a claim and return status transition', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      global.Engine.transition.mockReturnValueOnce({ ok: true, from: 'SUBMITTED', to: 'VERIFIED', selfApproved: false });
+      const { api_verifyClaim } = require('../Api.js');
+      const result = api_verifyClaim('CLAIM-001', { decision_note: 'Looks good' });
+      expect(result.to).toBe('VERIFIED');
+      expect(global.Engine.transition).toHaveBeenCalledWith('ExpenseClaim', 'CLAIM-001', 'VERIFY', 'U-001', { decision_note: 'Looks good' });
+    });
+
+    it('should throw if transition fails', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      global.Engine.transition.mockReturnValueOnce({ ok: false, reason: 'Self-verification not allowed' });
+      const { api_verifyClaim } = require('../Api.js');
+      expect(() => api_verifyClaim('CLAIM-001')).toThrow('Self-verification not allowed');
+    });
+  });
+
+  describe('api_rejectClaim', () => {
+    it('should reject a claim with reason', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      global.Engine.transition.mockReturnValueOnce({ ok: true, from: 'SUBMITTED', to: 'REJECTED', selfApproved: false });
+      const { api_rejectClaim } = require('../Api.js');
+      const result = api_rejectClaim('CLAIM-001', 'Insufficient documentation');
+      expect(result.to).toBe('REJECTED');
+      expect(global.Engine.transition).toHaveBeenCalledWith('ExpenseClaim', 'CLAIM-001', 'REJECT', 'U-001', { decision_note: 'Insufficient documentation' });
+    });
+
+    it('should throw if reason is empty', () => {
+      const { api_rejectClaim } = require('../Api.js');
+      expect(() => api_rejectClaim('CLAIM-001', '')).toThrow('Rejection reason is required');
+    });
+  });
+
+  describe('api_requestInfo', () => {
+    it('should move claim to NEEDS_INFO with request note', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      global.Engine.transition.mockReturnValueOnce({ ok: true, from: 'SUBMITTED', to: 'NEEDS_INFO', selfApproved: false });
+      const { api_requestInfo } = require('../Api.js');
+      const result = api_requestInfo('CLAIM-001', 'Please provide original receipt');
+      expect(result.to).toBe('NEEDS_INFO');
+      expect(global.Engine.transition).toHaveBeenCalledWith('ExpenseClaim', 'CLAIM-001', 'REQUEST_INFO', 'U-001', { decision_note: 'Please provide original receipt' });
+    });
+
+    it('should throw if request note is empty', () => {
+      const { api_requestInfo } = require('../Api.js');
+      expect(() => api_requestInfo('CLAIM-001', '')).toThrow('Request note is required');
+    });
+  });
+
+  describe('api_resubmitClaim', () => {
+    it('should resubmit a NEEDS_INFO claim', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.Engine._loadRow.mockReturnValueOnce({
+        rowIndex: 2,
+        values: ['CLAIM-001', 'M-001', 'NEEDS_INFO', '2026-07-20', '', '', '', '', '', '', 100, false, false, 'Note: Need receipt', '', 'U-001', '2026-07-20', '26A', '', 'FPS', '91234567']
+      });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      global.Engine.transition.mockReturnValueOnce({ ok: true, from: 'NEEDS_INFO', to: 'SUBMITTED' });
+      const { api_resubmitClaim } = require('../Api.js');
+      const result = api_resubmitClaim('CLAIM-001');
+      expect(result.to).toBe('SUBMITTED');
+      expect(global.Engine.transition).toHaveBeenCalledWith('ExpenseClaim', 'CLAIM-001', 'RESUBMIT', 'U-001', {});
+    });
+
+    it('should throw if claim not found', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.Engine._loadRow.mockReturnValueOnce(null);
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_resubmitClaim } = require('../Api.js');
+      expect(() => api_resubmitClaim('CLAIM-NOT-FOUND')).toThrow('Claim not found');
+    });
+  });
+
+  describe('api_approvePayout', () => {
+    it('should approve payout for treasurer', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'treasurer@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-002', 'Treasurer', 'TREASURER', 'treasurer@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      global.Engine.transition.mockReturnValueOnce({ ok: true, from: 'VERIFIED', to: 'APPROVED_FOR_PAYOUT', selfApproved: false });
+      const { api_approvePayout } = require('../Api.js');
+      const result = api_approvePayout('CLAIM-001');
+      expect(result.to).toBe('APPROVED_FOR_PAYOUT');
+    });
+
+    it('should throw for non-treasurer', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_approvePayout } = require('../Api.js');
+      expect(() => api_approvePayout('CLAIM-001')).toThrow('Unauthorized');
+    });
+
+    it('should support optional accountId parameter for treasurer', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'treasurer@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-002', 'Treasurer', 'TREASURER', 'treasurer@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      global.Engine.transition.mockReturnValueOnce({ ok: true, from: 'VERIFIED', to: 'APPROVED_FOR_PAYOUT', selfApproved: false });
+      const { api_approvePayout } = require('../Api.js');
+      const result = api_approvePayout('CLAIM-001', 'AC-001');
+      expect(result.to).toBe('APPROVED_FOR_PAYOUT');
+      expect(global.Engine.transition).toHaveBeenCalledWith('ExpenseClaim', 'CLAIM-001', 'APPROVE_PAYOUT', 'U-002', { account_id: 'AC-001' });
+    });
+  });
+
+  // ──────────────────────────────────────────────
+  //  Finance Accounts
+  // ──────────────────────────────────────────────
+
+  describe('api_getAccounts', () => {
+    it('should return accounts from FinanceAccounts sheet', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        if (tab === 'FinanceAccounts') return {
+          getDataRange: () => ({
+            getValues: () => [
+              ['account_id', 'name', 'opening_balance', 'current_balance', 'pending_income', 'reserved_payouts', 'status', 'created_at', 'deactivated_at'],
+              ['AC-001', 'Main Checking', 10000, 12000, 500, 300, 'ACTIVE', '2026-07-01', ''],
+              ['AC-002', 'Savings', 5000, 5500, 0, 0, 'INACTIVE', '2026-07-01', '2026-07-15']
+            ]
+          })
+        };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_getAccounts } = require('../Api.js');
+      const result = api_getAccounts();
+      expect(result.length).toBe(2);
+      expect(result[0].account_id).toBe('AC-001');
+      expect(result[0].name).toBe('Main Checking');
+      expect(result[0].current_balance).toBe(12000);
+      expect(result[1].status).toBe('INACTIVE');
+    });
+  });
+
+  describe('api_addAccount', () => {
+    it('should create a new ACTIVE account', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'treasurer@example.com' });
+      global.Ids.nextId.mockReturnValueOnce('AC-003');
+      global.Audit._nowIso.mockReturnValueOnce('2026-07-22T12:00:00Z');
+
+      var financeSheet = {
+        getDataRange: jest.fn(() => ({ getValues: () => [['account_id', 'name', 'opening_balance', 'current_balance', 'pending_income', 'reserved_payouts', 'status', 'created_at', 'deactivated_at']] })),
+        getLastRow: () => 1,
+        getMaxRows: () => 10,
+        insertRowAfter: jest.fn(),
+        getRange: jest.fn(() => ({ setValues: jest.fn(), getValues: jest.fn(() => [['AC-002', 'Old', 100, 100, 0, 0, 'ACTIVE', '2026-01-01', '']]) })),
+        appendRow: jest.fn()
+      };
+
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-002', 'Treasurer', 'TREASURER', 'treasurer@example.com', true, '2026-01-01']] }) };
+        if (tab === 'FinanceAccounts') return financeSheet;
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_addAccount } = require('../Api.js');
+      const result = api_addAccount({ name: 'Petty Cash', opening_balance: 500 });
+      expect(result.account_id).toBe('AC-003');
+      expect(result.status).toBe('ACTIVE');
+      expect(financeSheet.getRange).toHaveBeenCalledWith('A:A');
+    });
+
+    it('should throw for non-treasurer', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_addAccount } = require('../Api.js');
+      expect(() => api_addAccount({ name: 'Test' })).toThrow('Unauthorized');
+    });
+  });
+
+  describe('api_renameAccount', () => {
+    it('should rename an ACTIVE account', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'treasurer@example.com' });
+      var sheetMock = { getRange: jest.fn(() => ({ setValue: jest.fn() })) };
+      global.Engine._loadRow.mockReturnValueOnce({
+        rowIndex: 2, sheet: sheetMock,
+        values: ['AC-001', 'Old Name', 10000, 12000, 500, 300, 'ACTIVE', '2026-07-01', '']
+      });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-002', 'Treasurer', 'TREASURER', 'treasurer@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_renameAccount } = require('../Api.js');
+      const result = api_renameAccount('AC-001', 'New Name');
+      expect(result.name).toBe('New Name');
+      expect(result.account_id).toBe('AC-001');
+      expect(sheetMock.getRange).toHaveBeenCalledWith(2, global.COLS.FinanceAccounts.name);
+    });
+  });
+
+  describe('api_deactivateAccount', () => {
+    it('should deactivate an ACTIVE account', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'treasurer@example.com' });
+      var sheetMock = { getRange: jest.fn(() => ({ setValue: jest.fn() })) };
+      global.Engine._loadRow.mockReturnValueOnce({
+        rowIndex: 3, sheet: sheetMock,
+        values: ['AC-001', 'Main', 10000, 12000, 500, 300, 'ACTIVE', '2026-07-01', '']
+      });
+      global.Audit._nowIso.mockReturnValueOnce('2026-07-22T12:00:00Z');
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-002', 'Treasurer', 'TREASURER', 'treasurer@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_deactivateAccount } = require('../Api.js');
+      const result = api_deactivateAccount('AC-001');
+      expect(result.status).toBe('INACTIVE');
+      expect(result.account_id).toBe('AC-001');
+    });
+  });
+
+  // ──────────────────────────────────────────────
+  //  Income
+  // ──────────────────────────────────────────────
+
+  describe('api_recordIncome', () => {
+    it('should record income as PENDING for non-treasurer', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_recordIncome } = require('../Api.js');
+      const result = api_recordIncome({ date: '2026-07-22', categoryId: 'CAT-001', amount: 500, sourceRef: 'Ticket sales', accountId: 'AC-001' });
+      expect(result.income_id).toBe('INC-001');
+      expect(global.Engine.recordIncome).toHaveBeenCalled();
+    });
+
+    it('should record income with empty accountId successfully (no throw)', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_recordIncome } = require('../Api.js');
+      const result = api_recordIncome({ date: '2026-07-22', categoryId: 'CAT-001', amount: 500 });
+      expect(result.income_id).toBe('INC-001');
+    });
+  });
+
+  describe('api_getPendingIncome', () => {
+    it('should return only PENDING income items', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        if (tab === 'Income') return {
+          getDataRange: () => ({
+            getValues: () => [
+              ['income_id', 'date', 'category_id', 'amount', 'received_by', 'source_ref', 'event_id', 'notes', 'account_id', 'status', 'decided_by', 'decided_at', 'decision_note'],
+              ['INC-001', '2026-07-20', 'CAT-001', 500, 'U-001', 'Tickets', '', '', 'AC-001', 'PENDING', '', '', ''],
+              ['INC-002', '2026-07-21', 'CAT-002', 300, 'U-002', 'Donation', '', '', 'AC-001', 'CONFIRMED', 'U-002', '2026-07-22', '']
+            ]
+          })
+        };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_getPendingIncome } = require('../Api.js');
+      const result = api_getPendingIncome();
+      expect(result.length).toBe(1);
+      expect(result[0].income_id).toBe('INC-001');
+    });
+  });
+
+  describe('api_confirmIncome', () => {
+    it('should confirm income via Engine for treasurer', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'treasurer@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-002', 'Treasurer', 'TREASURER', 'treasurer@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_confirmIncome } = require('../Api.js');
+      const result = api_confirmIncome('INC-001', 'AC-001');
+      expect(result.status).toBe('CONFIRMED');
+      expect(result.account_id).toBe('AC-001');
+      expect(global.Engine.confirmIncome).toHaveBeenCalledWith('INC-001', 'AC-001', 'U-002');
+    });
+
+    it('should throw for non-treasurer', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_confirmIncome } = require('../Api.js');
+      expect(() => api_confirmIncome('INC-001', '')).toThrow('Unauthorized');
+    });
+  });
+
+  describe('api_rejectIncome', () => {
+    it('should reject income for treasurer', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'treasurer@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-002', 'Treasurer', 'TREASURER', 'treasurer@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_rejectIncome } = require('../Api.js');
+      const result = api_rejectIncome('INC-001', 'Duplicate entry');
+      expect(result.status).toBe('REJECTED');
+      expect(global.Engine.rejectIncome).toHaveBeenCalledWith('INC-001', 'U-002', 'Duplicate entry');
+    });
+  });
+
+  describe('api_requestIncomeInfo', () => {
+    it('should request info for income', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'treasurer@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-002', 'Treasurer', 'TREASURER', 'treasurer@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_requestIncomeInfo } = require('../Api.js');
+      const result = api_requestIncomeInfo('INC-001', 'Need proof');
+      expect(result.status).toBe('NEEDS_INFO');
+      expect(global.Engine.requestIncomeInfo).toHaveBeenCalledWith('INC-001', 'U-002', 'Need proof');
+    });
+  });
+
+  // ──────────────────────────────────────────────
+  //  Adjustments & Transfers
+  // ──────────────────────────────────────────────
+
+  describe('api_recordAdjustment', () => {
+    it('should record adjustment via Engine for treasurer', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'treasurer@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-002', 'Treasurer', 'TREASURER', 'treasurer@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_recordAdjustment } = require('../Api.js');
+      const result = api_recordAdjustment({ accountId: 'AC-001', amount: 100, direction: 'CREDIT', reason: 'Correction' });
+      expect(result.adjustment_id).toBe('ADJ-001');
+      expect(result.account_id).toBe('AC-001');
+      expect(global.Engine.adjustAccount).toHaveBeenCalledWith('AC-001', 100, 'CREDIT', 'Correction', 'U-002');
+    });
+
+    it('should throw for non-treasurer', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_recordAdjustment } = require('../Api.js');
+      expect(() => api_recordAdjustment({ accountId: 'AC-001', amount: 100, direction: 'CREDIT', reason: 'Test' })).toThrow('Unauthorized');
+    });
+  });
+
+  describe('api_recordTransfer', () => {
+    it('should record transfer via Engine for treasurer', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'treasurer@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-002', 'Treasurer', 'TREASURER', 'treasurer@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_recordTransfer } = require('../Api.js');
+      const result = api_recordTransfer({ fromAccountId: 'AC-001', toAccountId: 'AC-002', amount: 200, reason: 'Reallocation' });
+      expect(result.transfer_id).toBe('TRF-001');
+      expect(result.from).toBe('AC-001');
+      expect(global.Engine.transferBetweenAccounts).toHaveBeenCalledWith('AC-001', 'AC-002', 200, 'Reallocation', 'U-002');
+    });
+  });
+
+  describe('api_getTransfers', () => {
+    it('should return transfers sheet data', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'treasurer@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-002', 'Treasurer', 'TREASURER', 'treasurer@example.com', true, '2026-01-01']] }) };
+        if (tab === 'AccountTransfers') return {
+          getDataRange: () => ({
+            getValues: () => [
+              ['transfer_id', 'from_account_id', 'to_account_id', 'amount', 'reason', 'transferred_by', 'transferred_at'],
+              ['TRF-001', 'AC-001', 'AC-002', 200, 'Reallocation', 'U-002', '2026-07-22']
+            ]
+          })
+        };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_getTransfers } = require('../Api.js');
+      const result = api_getTransfers();
+      expect(result.length).toBe(1);
+      expect(result[0].from_account_id).toBe('AC-001');
+    });
+  });
+
+  describe('api_getAdjustments', () => {
+    it('should return adjustments sheet data', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'treasurer@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-002', 'Treasurer', 'TREASURER', 'treasurer@example.com', true, '2026-01-01']] }) };
+        if (tab === 'AccountAdjustments') return {
+          getDataRange: () => ({
+            getValues: () => [
+              ['adjustment_id', 'account_id', 'amount', 'direction', 'reason', 'adjusted_by', 'adjusted_at'],
+              ['ADJ-001', 'AC-001', 100, 'CREDIT', 'Correction', 'U-002', '2026-07-22']
+            ]
+          })
+        };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_getAdjustments } = require('../Api.js');
+      const result = api_getAdjustments();
+      expect(result.length).toBe(1);
+      expect(result[0].adjustment_id).toBe('ADJ-001');
+    });
+  });
+
+  // ──────────────────────────────────────────────
+  //  Payout Queue
+  // ──────────────────────────────────────────────
+
+  describe('api_getQueuedPayouts', () => {
+    it('should return QUEUED and FAILED payouts only', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'treasurer@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-002', 'Treasurer', 'TREASURER', 'treasurer@example.com', true, '2026-01-01']] }) };
+        if (tab === 'Payouts') return {
+          getDataRange: () => ({
+            getValues: () => [
+              ['payout_id', 'claim_id', 'payee_user_id', 'amount', 'method', 'txn_reference', 'status', 'account_id', 'failure_reason', 'created_at'],
+              ['PAYOUT-001', 'CLAIM-001', 'M-001', 150, 'FPS', '', 'QUEUED', 'AC-001', '', '2026-07-22'],
+              ['PAYOUT-002', 'CLAIM-002', 'M-002', 200, 'OTHER', 'TX-123', 'SENT', 'AC-001', '', '2026-07-21'],
+              ['PAYOUT-003', 'CLAIM-003', 'M-003', 50, 'FPS', '', 'FAILED', 'AC-001', 'Insufficient balance', '2026-07-20']
+            ]
+          })
+        };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_getQueuedPayouts } = require('../Api.js');
+      const result = api_getQueuedPayouts();
+      expect(result.length).toBe(2);
+      expect(result[0].status).toBe('QUEUED');
+      expect(result[1].status).toBe('FAILED');
+    });
+
+    it('should return empty array if no payouts found (available to COMMITTEE)', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_getQueuedPayouts } = require('../Api.js');
+      const result = api_getQueuedPayouts();
+      expect(result.length).toBe(0);
+    });
+  });
+
+  describe('api_markPayoutSent', () => {
+    it('should mark payout sent via Payouts module', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'treasurer@example.com' });
+      global.Engine._loadRow.mockReturnValueOnce({
+        rowIndex: 2,
+        values: ['PAYOUT-001', 'CLAIM-001', 'M-001', 150, 'FPS', '', 'QUEUED', 'AC-001', '', '2026-07-22']
+      });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-002', 'Treasurer', 'TREASURER', 'treasurer@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_markPayoutSent } = require('../Api.js');
+      const result = api_markPayoutSent('PAYOUT-001', { txnReference: 'FPS-REF-123' });
+      expect(result.status).toBe('SENT');
+      expect(global.Payouts.markPayoutSent).toHaveBeenCalledWith('PAYOUT-001', 150, 'FPS', 'FPS-REF-123', 'U-002');
+    });
+
+    it('should throw for non-treasurer', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_markPayoutSent } = require('../Api.js');
+      expect(() => api_markPayoutSent('PAYOUT-001', {})).toThrow('Unauthorized');
+    });
+  });
+
+  describe('api_recordPayoutFailed', () => {
+    it('should record payout failure via Payouts module', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'treasurer@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-002', 'Treasurer', 'TREASURER', 'treasurer@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_recordPayoutFailed } = require('../Api.js');
+      const result = api_recordPayoutFailed('PAYOUT-001', 'Bank details incorrect');
+      expect(result.status).toBe('FAILED');
+      expect(result.payout_id).toBe('PAYOUT-001');
+      expect(global.Payouts.recordPayoutFailed).toHaveBeenCalled();
+    });
+  });
+
+  describe('api_retryPayout', () => {
+    it('should retry a failed payout via Payouts module', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'treasurer@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [['user_id', 'display_name', 'role', 'email', 'active', 'created_at'], ['U-002', 'Treasurer', 'TREASURER', 'treasurer@example.com', true, '2026-01-01']] }) };
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_retryPayout } = require('../Api.js');
+      const result = api_retryPayout('PAYOUT-001');
+      expect(result.status).toBe('QUEUED');
+      expect(global.Payouts.retryPayout).toHaveBeenCalledWith('PAYOUT-001', 'U-002');
     });
   });
 });

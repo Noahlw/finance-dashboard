@@ -8,8 +8,12 @@ import type {
 import BudgetRequestsView from './BudgetRequestsView';
 import MembersView from './MembersView';
 import ClaimsView from './ClaimsView';
+import ReviewDashboard from './ReviewDashboard';
+import FinanceAccountsView from './FinanceAccountsView';
+import PayoutsView from './PayoutsView';
 
 const VIEW_LABELS: Record<WorkspaceView, string> = {
+  'review': 'Review',
   'claims': 'Claims',
   'members': 'Members',
   'budget-requests': 'Budget Requests',
@@ -90,6 +94,9 @@ function WorkspaceShell({ session }: { session: SessionInfo }) {
       case 'claims': return <ClaimsView members={members} budgetLines={budgetLines} />;
       case 'members': return <MembersView />;
       case 'budget-requests': return <BudgetRequestsView role={session.role} />;
+      case 'review': return <ReviewDashboard role={session.role} members={members} />;
+      case 'income': return <FinanceAccountsView role={session.role} />;
+      case 'payouts': return <PayoutsView role={session.role} />;
       default: return <PlaceholderView view={activeView} />;
     }
   };
@@ -146,6 +153,7 @@ function WorkspaceShell({ session }: { session: SessionInfo }) {
 
 function getViewIcon(view: WorkspaceView): string {
   switch (view) {
+    case 'review': return '\u{270F}\u{FE0F}';
     case 'claims': return '\u{1F4B0}';
     case 'members': return '\u{1F465}';
     case 'budget-requests': return '\u{1F4CB}';

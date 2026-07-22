@@ -24,6 +24,9 @@ var TABS = Object.freeze({
   APPROVALS: 'Approvals',
   CONFIG: 'Config',
   COUNTERS: 'Counters',
+  FINANCE_ACCOUNTS: 'FinanceAccounts',
+  ACCOUNT_TRANSFERS: 'AccountTransfers',
+  ACCOUNT_ADJUSTMENTS: 'AccountAdjustments',
   // CF-Vault workbook (separate spreadsheet; treasurer-only)
   VAULT: 'Vault'
 });
@@ -67,13 +70,28 @@ var COLS = Object.freeze({
     receipt_id: 1, drive_file_id: 2, sha256: 3, uploaded_by: 4,
     uploaded_at: 5, vendor: 6, receipt_date: 7, receipt_total: 8, file_link: 9
   }),
+  FinanceAccounts: Object.freeze({
+    account_id: 1, name: 2, opening_balance: 3, current_balance: 4,
+    pending_income: 5, reserved_payouts: 6, status: 7, created_at: 8,
+    deactivated_at: 9
+  }),
   Income: Object.freeze({
     income_id: 1, date: 2, category_id: 3, amount: 4, received_by: 5,
-    source_ref: 6, event_id: 7, notes: 8
+    source_ref: 6, event_id: 7, notes: 8, account_id: 9, status: 10,
+    decided_by: 11, decided_at: 12, decision_note: 13, processed_response_id: 14
+  }),
+  AccountTransfers: Object.freeze({
+    transfer_id: 1, from_account_id: 2, to_account_id: 3, amount: 4,
+    reason: 5, transferred_by: 6, transferred_at: 7
+  }),
+  AccountAdjustments: Object.freeze({
+    adjustment_id: 1, account_id: 2, amount: 3, direction: 4,
+    reason: 5, adjusted_by: 6, adjusted_at: 7
   }),
   Payouts: Object.freeze({
     payout_id: 1, claim_id: 2, payee_user_id: 3, amount: 4, method: 5,
-    txn_reference: 6, paid_by: 7, status: 8, paid_at: 9, confirmed_at: 10
+    txn_reference: 6, paid_by: 7, status: 8, paid_at: 9, confirmed_at: 10,
+    account_id: 11, failure_reason: 12, parent_payout_id: 13
   }),
   AuditLog: Object.freeze({
     seq: 1, ts: 2, actor_user_id: 3, entity_type: 4, entity_id: 5,
@@ -117,13 +135,20 @@ var STATUS = Object.freeze({
     PAID: 'PAID', LOCKED: 'LOCKED'
   }),
   Payout: Object.freeze({
-    QUEUED: 'QUEUED', SENT: 'SENT', CONFIRMED: 'CONFIRMED'
+    QUEUED: 'QUEUED', SENT: 'SENT', CONFIRMED: 'CONFIRMED', FAILED: 'FAILED'
+  }),
+  FinanceAccount: Object.freeze({
+    ACTIVE: 'ACTIVE', INACTIVE: 'INACTIVE'
+  }),
+  Income: Object.freeze({
+    PENDING: 'PENDING', NEEDS_INFO: 'NEEDS_INFO', CONFIRMED: 'CONFIRMED',
+    REJECTED: 'REJECTED', CORRECTED: 'CORRECTED'
   })
 });
 
 /** Vault.payout_method / Payouts.method values (design §1.3). */
 var PAYOUT_METHOD = Object.freeze({
-  FPS: 'FPS', PAYME: 'PAYME', BANK: 'BANK', CASH: 'CASH'
+  FPS: 'FPS', PAYME: 'PAYME', BANK: 'BANK', CASH: 'CASH', OTHER: 'OTHER'
 });
 
 /** Entity name -> ID prefix, used by Ids.nextId(). */
@@ -136,7 +161,10 @@ var ENTITY_PREFIX = Object.freeze({
   ClaimLineItem: 'CLAIMLINE',
   Receipt: 'RECEIPT',
   Income: 'INCOME',
-  Payout: 'PAYOUT'
+  Payout: 'PAYOUT',
+  FinanceAccount: 'ACCOUNT',
+  AccountTransfer: 'XFER',
+  AccountAdjustment: 'ADJ'
 });
 
 /** Approval actions accepted on the Approvals tab intent columns. */
@@ -147,7 +175,9 @@ var ACTIONS = Object.freeze({
   REQUEST_INFO: 'REQUEST_INFO',
   VERIFY: 'VERIFY',
   APPROVE_PAYOUT: 'APPROVE_PAYOUT',
-  MARK_PAID: 'MARK_PAID'
+  MARK_PAID: 'MARK_PAID',
+  CONFIRM: 'CONFIRM',
+  CORRECT: 'CORRECT'
 });
 
 if (typeof module !== 'undefined') {

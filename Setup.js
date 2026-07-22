@@ -54,6 +54,13 @@ function setupAll() {
     });
   }
 
+  var accountsSeeded = Setup_ensureFinanceAccountsSeeded();
+  if (accountsSeeded.created) {
+    Audit.append('SYSTEM', 'FinanceAccount', accountsSeeded.accountId, 'CREATE', {
+      name: accountsSeeded.name, openingBalance: accountsSeeded.openingBalance
+    });
+  }
+
   SpreadsheetApp.flush(); // Crucial so a subsequent call in a separate execution (e.g. clasp run) doesn't race a stale read of what was just seeded.
 
   return {
@@ -83,7 +90,8 @@ function Setup_ensureAllTabsExist(ledger) {
     TABS.USERS, TABS.CATEGORIES, TABS.EVENTS, TABS.BUDGET_REQUESTS,
     TABS.BUDGET_REQUEST_LINES, TABS.EXPENSE_CLAIMS, TABS.CLAIM_LINE_ITEMS,
     TABS.RECEIPTS, TABS.INCOME, TABS.PAYOUTS, TABS.AUDIT_LOG,
-    TABS.APPROVALS, TABS.CONFIG, TABS.COUNTERS
+    TABS.APPROVALS, TABS.CONFIG, TABS.COUNTERS,
+    TABS.FINANCE_ACCOUNTS, TABS.ACCOUNT_TRANSFERS, TABS.ACCOUNT_ADJUSTMENTS
   ];
   var created = [];
 
@@ -148,6 +156,8 @@ function Setup_applyValidationsAndProtections(ledger) {
   Setup_applyDropdown(ledger, TABS.BUDGET_REQUEST_LINES, COLS.BudgetRequestLines.line_status, Setup_values(STATUS.BudgetRequestLine));
   Setup_applyDropdown(ledger, TABS.EXPENSE_CLAIMS, COLS.ExpenseClaims.status, Setup_values(STATUS.ExpenseClaim));
   Setup_applyDropdown(ledger, TABS.PAYOUTS, COLS.Payouts.status, Setup_values(STATUS.Payout));
+  Setup_applyDropdown(ledger, TABS.FINANCE_ACCOUNTS, COLS.FinanceAccounts.status, Setup_values(STATUS.FinanceAccount));
+  Setup_applyDropdown(ledger, TABS.INCOME, COLS.Income.status, Setup_values(STATUS.Income));
   Setup_applyDropdown(ledger, TABS.USERS, COLS.Users.role, Setup_values(ROLES));
   Setup_applyDropdown(ledger, TABS.CATEGORIES, COLS.Categories.kind, ['EXPENSE', 'INCOME']);
   Setup_applyDropdown(ledger, TABS.APPROVALS, COLS.Approvals.action, Setup_values(ACTIONS));
@@ -168,7 +178,8 @@ function Setup_applyValidationsAndProtections(ledger) {
   var warnOnlyTabs = [
     TABS.USERS, TABS.CATEGORIES, TABS.EVENTS, TABS.BUDGET_REQUESTS,
     TABS.BUDGET_REQUEST_LINES, TABS.EXPENSE_CLAIMS, TABS.CLAIM_LINE_ITEMS,
-    TABS.RECEIPTS, TABS.INCOME, TABS.PAYOUTS
+    TABS.RECEIPTS, TABS.INCOME, TABS.PAYOUTS,
+    TABS.FINANCE_ACCOUNTS, TABS.ACCOUNT_TRANSFERS, TABS.ACCOUNT_ADJUSTMENTS
   ];
   for (var j = 0; j < warnOnlyTabs.length; j++) {
     Setup_protectWarnOnly(ledger.getSheetByName(warnOnlyTabs[j]));
@@ -411,7 +422,8 @@ function Setup_ensureConfigSeeded() {
     APPROVAL_SLA_HOURS: '72',
     PAYOUT_AUTOCONFIRM_HOURS: '72',
     LOCK_AFTER_PAID_HOURS: '24',
-    BACKUP_ACCOUNT_EMAIL: 'PASTE_ME'
+    BACKUP_ACCOUNT_EMAIL: 'PASTE_ME',
+    NEEDS_INFO_ROLE_ID: ''
   };
   var lastRow = sheet.getLastRow();
   var existingKeys = {};
@@ -592,6 +604,27 @@ function Setup_ensureOpeningBalanceSeeded() {
 }
 
 /**
+ * Seed a default Checking Finance Account if none exist. The treasurer can
+ * rename/add more later via the web UI. The opening balance is set to the
+ * same amount as the opening-balance Income row.
+ * @return {{created: boolean, accountId: ?string, name: ?string, openingBalance: ?number}}
+ */
+function Setup_ensureFinanceAccountsSeeded() {
+  var sheet = getSheet_(TABS.FINANCE_ACCOUNTS);
+  var values = sheet.getRange(2, 1, Math.max(1, sheet.getMaxRows() - 1), 1).getValues();
+  for (var i = 0; i < values.length; i++) {
+    if (values[i][0]) return { created: false, accountId: null, name: null, openingBalance: null };
+  }
+  var accountId = Ids.nextId('FinanceAccount');
+  var now = Utilities.formatDate(new Date(), 'Asia/Hong_Kong', "yyyy-MM-dd'T'HH:mm:ssXXX");
+  var c = COLS.FinanceAccounts;
+  sheet.getRange(2, 1, 1, Object.keys(c).length).setValues([[
+    accountId, 'Main Checking', 10167.35, 10167.35, 0, 0, STATUS.FinanceAccount.ACTIVE, now, ''
+  ]]);
+  return { created: true, accountId: accountId, name: 'Main Checking', openingBalance: 10167.35 };
+}
+
+/**
  * Wipes all data rows (row 2+) from every tab except CONFIG.
  * WARNING: Destructive!
  */
@@ -600,7 +633,8 @@ function Setup_clearAllData(ledger) {
     TABS.USERS, TABS.CATEGORIES, TABS.EVENTS, TABS.BUDGET_REQUESTS,
     TABS.BUDGET_REQUEST_LINES, TABS.EXPENSE_CLAIMS, TABS.CLAIM_LINE_ITEMS,
     TABS.RECEIPTS, TABS.INCOME, TABS.PAYOUTS, TABS.AUDIT_LOG,
-    TABS.APPROVALS, TABS.COUNTERS
+    TABS.APPROVALS, TABS.COUNTERS,
+    TABS.FINANCE_ACCOUNTS, TABS.ACCOUNT_TRANSFERS, TABS.ACCOUNT_ADJUSTMENTS
   ];
   for (var i = 0; i < tabsToClear.length; i++) {
     var sheet = ledger.getSheetByName(tabsToClear[i]);

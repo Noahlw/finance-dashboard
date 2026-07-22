@@ -20,6 +20,12 @@ declare namespace google {
       function api_discardBudgetRequest(requestId: string): void;
       function api_getPendingBudgetRequests(): void;
       function api_decisionBudgetRequest(entityId: string, action: string, payload: any): void;
+      function api_getClaimsQueue(filters: any): void;
+      function api_verifyClaim(claimId: string, payload: any): void;
+      function api_rejectClaim(claimId: string, reason: string): void;
+      function api_requestInfo(claimId: string, reason: string): void;
+      function api_resubmitClaim(claimId: string): void;
+      function api_approvePayout(claimId: string): void;
     }
   }
 }

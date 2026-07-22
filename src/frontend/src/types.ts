@@ -1,4 +1,4 @@
-export type WorkspaceView = 'claims' | 'members' | 'budget-requests' | 'income' | 'payouts' | 'reports';
+export type WorkspaceView = 'review' | 'claims' | 'members' | 'budget-requests' | 'income' | 'payouts' | 'reports';
 export type SessionRole = 'COMMITTEE' | 'TREASURER' | 'MEMBER' | 'ADVISOR_AUDITOR';
 
 export interface SessionInfo {
@@ -187,3 +187,110 @@ export interface Claim {
   payout_method?: string;
   receiptIds?: string[];
 }
+
+export interface ClaimQueueItem {
+  claim_id: string;
+  claimant_id: string;
+  status: string;
+  submitted_at: string;
+  verified_at?: string;
+  total_amount: number;
+  notes: string;
+  created_by: string;
+  event_id?: string;
+}
+
+export interface ClaimQueueFilters {
+  status?: string;
+  eventId?: string;
+  creator?: string;
+  budgetLine?: string;
+  sid?: string;
+}
+
+export interface TransitionResult {
+  claim_id: string;
+  from: string;
+  to: string;
+}
+
+// Finance Account types
+export interface FinanceAccount {
+  account_id: string;
+  name: string;
+  opening_balance: number;
+  current_balance: number;
+  pending_income: number;
+  reserved_payouts: number;
+  status: string;
+  created_at: string;
+  deactivated_at?: string;
+}
+
+export interface AddAccountPayload {
+  name: string;
+  opening_balance?: number;
+}
+
+export interface IncomeItem {
+  income_id: string;
+  date: string;
+  category_id: string;
+  amount: number;
+  received_by: string;
+  source_ref: string;
+  event_id: string;
+  notes: string;
+  account_id?: string;
+  status: string;
+  decided_by?: string;
+  decided_at?: string;
+  decision_note?: string;
+}
+
+export interface RecordIncomePayload {
+  uuid?: string;
+  date: string;
+  categoryId: string;
+  amount: number;
+  sourceRef?: string;
+  eventId?: string;
+  notes?: string;
+  accountId?: string;
+  proposedAccountId?: string;
+}
+
+export interface AccountTransfer {
+  transfer_id: string;
+  from_account_id: string;
+  to_account_id: string;
+  amount: number;
+  reason: string;
+  transferred_by: string;
+  transferred_at: string;
+}
+
+export interface AccountAdjustment {
+  adjustment_id: string;
+  account_id: string;
+  amount: number;
+  direction: string;
+  reason: string;
+  adjusted_by: string;
+  adjusted_at: string;
+}
+
+export interface PayoutQueueItem {
+  payout_id: string;
+  claim_id: string;
+  payee_user_id: string;
+  amount: number;
+  method: string;
+  txn_reference: string;
+  status: string;
+  account_id?: string;
+  failure_reason?: string;
+  parent_payout_id?: string;
+}
+
+export type IncomeTab = 'pending' | 'record' | 'history';

@@ -88,10 +88,10 @@ var Engine = {
   },
 
   /**
-   * Record new income. (P2-2 Income Intake)
-   * High Trust: Any committee member can trigger this via the Action Row, but actorUserId is audited.
+   * Record new income with optional proposed account. PENDING until confirmed
+   * by a Treasurer. Any committee member can record income.
    */
-  recordIncome: function (date, categoryId, amount, sourceRef, eventId, notes, actorUserId) {
+  recordIncome: function (date, categoryId, amount, sourceRef, eventId, notes, actorUserId, accountId, uuid) {
     var lock = LockService.getScriptLock();
     try {
       lock.waitLock(30000);
@@ -100,25 +100,302 @@ var Engine = {
       throw e;
     }
     try {
+      if (uuid && Engine._alreadyProcessedIncome(uuid)) {
+        return { ok: true, incomeId: Engine._findIncomeByUuid(uuid) };
+      }
       var incomeId = Ids.nextId('Income');
       var sheet = getSheet_(TABS.INCOME);
+      var c = COLS.Income;
       var row = [];
-      var cols = COLS.Income;
-      row[cols.income_id - 1] = incomeId;
-      row[cols.date - 1] = date;
-      row[cols.category_id - 1] = categoryId;
-      row[cols.amount - 1] = amount;
-      row[cols.received_by - 1] = actorUserId;
-      row[cols.source_ref - 1] = sourceRef;
-      row[cols.event_id - 1] = eventId || '';
-      row[cols.notes - 1] = notes || '';
-      
-      sheet.appendRow(row);
-      Audit.append(actorUserId, 'Income', incomeId, 'CREATE', { amount: amount, sourceRef: sourceRef });
+      row[c.income_id - 1] = incomeId;
+      row[c.date - 1] = date;
+      row[c.category_id - 1] = categoryId;
+      row[c.amount - 1] = amount;
+      row[c.received_by - 1] = actorUserId;
+      row[c.source_ref - 1] = sourceRef || '';
+      row[c.event_id - 1] = eventId || '';
+      row[c.notes - 1] = notes || '';
+      row[c.account_id - 1] = accountId || '';
+      row[c.status - 1] = STATUS.Income.PENDING;
+      row[c.processed_response_id - 1] = uuid || '';
+
+      _appendRow(sheet, row);
+      Audit.append(actorUserId, 'Income', incomeId, 'CREATE', { amount: amount, sourceRef: sourceRef, accountId: accountId || null });
       return { ok: true, incomeId: incomeId };
     } finally {
       lock.releaseLock();
     }
+  },
+
+  /**
+   * Confirm pending income — posts to the given account's current_balance
+   * and pending_income, and marks the income row CONFIRMED. Idempotent.
+   * Only a Treasurer may confirm.
+   * @return {{ok: boolean, reason: ?string, accountId: ?string}}
+   */
+  confirmIncome: function (incomeId, accountId, actorUserId) {
+    var lock = LockService.getScriptLock();
+    try {
+      lock.waitLock(30000);
+    } catch (e) { throw e; }
+    try {
+      var actor = Engine._loadActor(actorUserId);
+      if (!actor || actor.role !== ROLES.TREASURER) {
+        return { ok: false, reason: 'Only a Treasurer can confirm income.', accountId: null };
+      }
+
+      var row = Engine._loadRow('Income', incomeId);
+      if (!row) return { ok: false, reason: 'Income not found.', accountId: null };
+
+      var c = COLS.Income;
+      var currentStatus = row.values[c.status - 1];
+      if (currentStatus === STATUS.Income.CONFIRMED) {
+        return { ok: true, reason: null, accountId: row.values[c.account_id - 1] || accountId };
+      }
+      if (currentStatus !== STATUS.Income.PENDING && currentStatus !== STATUS.Income.NEEDS_INFO) {
+        return { ok: false, reason: 'Income is ' + currentStatus + ', not PENDING.', accountId: null };
+      }
+
+      if (!accountId) {
+        accountId = row.values[c.account_id - 1];
+        if (!accountId) return { ok: false, reason: 'No account_id specified and income has no proposed account.', accountId: null };
+      }
+
+      var acctRow = Engine._loadRow('FinanceAccount', accountId);
+      if (!acctRow) return { ok: false, reason: 'Account not found.', accountId: null };
+      if (acctRow.values[COLS.FinanceAccounts.status - 1] !== STATUS.FinanceAccount.ACTIVE) {
+        return { ok: false, reason: 'Account is not active.', accountId: null };
+      }
+
+      var amount = Number(row.values[c.amount - 1]) || 0;
+      var now = Audit._nowIso();
+      var sheet = row.sheet;
+
+      sheet.getRange(row.rowIndex, c.account_id).setValue(accountId);
+      sheet.getRange(row.rowIndex, c.status).setValue(STATUS.Income.CONFIRMED);
+      sheet.getRange(row.rowIndex, c.decided_by).setValue(actorUserId);
+      sheet.getRange(row.rowIndex, c.decided_at).setValue(now);
+
+      Engine._postToAccountBalance(accountId, amount, 'income');
+
+      Audit.append(actorUserId, 'Income', incomeId, 'CONFIRM', { accountId: accountId, amount: amount });
+      Discord.postTreasury('**' + incomeId + '** — confirmed HK$' + Number(amount).toFixed(2) + ' → ' + accountId + ' (by ' + actorUserId + ').');
+      return { ok: true, reason: null, accountId: accountId };
+    } finally {
+      lock.releaseLock();
+    }
+  },
+
+  /**
+   * Reject pending income. Note is required.
+   */
+  rejectIncome: function (incomeId, actorUserId, reason) {
+    var row = Engine._loadRow('Income', incomeId);
+    if (!row) return { ok: false, reason: 'Income not found.' };
+    var c = COLS.Income;
+    var currentStatus = row.values[c.status - 1];
+    if (currentStatus !== STATUS.Income.PENDING && currentStatus !== STATUS.Income.NEEDS_INFO) {
+      return { ok: false, reason: 'Income is ' + currentStatus + ', cannot reject.' };
+    }
+    var now = Audit._nowIso();
+    row.sheet.getRange(row.rowIndex, c.status).setValue(STATUS.Income.REJECTED);
+    row.sheet.getRange(row.rowIndex, c.decided_by).setValue(actorUserId);
+    row.sheet.getRange(row.rowIndex, c.decided_at).setValue(now);
+    row.sheet.getRange(row.rowIndex, c.decision_note).setValue(reason || '');
+    Audit.append(actorUserId, 'Income', incomeId, 'REJECT', { reason: reason });
+    Discord.postTreasury('**' + incomeId + '** — rejected by ' + actorUserId + ': ' + (reason || ''));
+    return { ok: true };
+  },
+
+  /**
+   * Request info on pending income.
+   */
+  requestIncomeInfo: function (incomeId, actorUserId, reason) {
+    var row = Engine._loadRow('Income', incomeId);
+    if (!row) return { ok: false, reason: 'Income not found.' };
+    var c = COLS.Income;
+    var currentStatus = row.values[c.status - 1];
+    if (currentStatus !== STATUS.Income.PENDING) {
+      return { ok: false, reason: 'Income is ' + currentStatus + ', cannot request info.' };
+    }
+    var now = Audit._nowIso();
+    row.sheet.getRange(row.rowIndex, c.status).setValue(STATUS.Income.NEEDS_INFO);
+    row.sheet.getRange(row.rowIndex, c.decided_by).setValue(actorUserId);
+    row.sheet.getRange(row.rowIndex, c.decided_at).setValue(now);
+    row.sheet.getRange(row.rowIndex, c.decision_note).setValue(reason || '');
+    Audit.append(actorUserId, 'Income', incomeId, 'REQUEST_INFO', { reason: reason });
+    return { ok: true };
+  },
+
+  /**
+   * Post a monetary change to an account's balance columns and return the new balance.
+   * direction: 'income' (adds to current_balance), 'payout' (subtracts from current_balance),
+   *            'adjustment_credit' (adds), 'adjustment_debit' (subtracts)
+   * @private
+   */
+  _postToAccountBalance: function (accountId, amount, direction) {
+    var acctRow = Engine._loadRow('FinanceAccount', accountId);
+    if (!acctRow) return;
+    var ac = COLS.FinanceAccounts;
+    var sheet = acctRow.sheet;
+    var currentBalance = Number(acctRow.values[ac.current_balance - 1]) || 0;
+    var pendingIncome = Number(acctRow.values[ac.pending_income - 1]) || 0;
+    var reservedPayouts = Number(acctRow.values[ac.reserved_payouts - 1]) || 0;
+
+    if (direction === 'income') {
+      currentBalance += amount;
+      pendingIncome -= amount;
+    } else if (direction === 'payout') {
+      currentBalance -= amount;
+      reservedPayouts -= amount;
+    } else if (direction === 'reserve') {
+      reservedPayouts += amount;
+    } else if (direction === 'adjustment_credit') {
+      currentBalance += amount;
+    } else if (direction === 'adjustment_debit') {
+      currentBalance -= amount;
+    } else if (direction === 'pending_income_add') {
+      pendingIncome += amount;
+    } else if (direction === 'pending_income_sub') {
+      pendingIncome -= amount;
+    }
+
+    sheet.getRange(acctRow.rowIndex, ac.current_balance).setValue(currentBalance);
+    sheet.getRange(acctRow.rowIndex, ac.pending_income).setValue(Math.max(pendingIncome, 0));
+    sheet.getRange(acctRow.rowIndex, ac.reserved_payouts).setValue(Math.max(reservedPayouts, 0));
+  },
+
+  /**
+   * Record an account adjustment (correction). Creates a row in
+   * AccountAdjustments and updates the account balance.
+   * direction: 'CREDIT' (money in) or 'DEBIT' (money out)
+   */
+  adjustAccount: function (accountId, amount, direction, reason, actorUserId) {
+    var lock = LockService.getScriptLock();
+    try {
+      lock.waitLock(30000);
+    } catch (e) { throw e; }
+    try {
+      var actor = Engine._loadActor(actorUserId);
+      if (!actor || actor.role !== ROLES.TREASURER) {
+        return { ok: false, reason: 'Only a Treasurer can adjust accounts.' };
+      }
+      var acctRow = Engine._loadRow('FinanceAccount', accountId);
+      if (!acctRow) return { ok: false, reason: 'Account not found.' };
+      if (acctRow.values[COLS.FinanceAccounts.status - 1] !== STATUS.FinanceAccount.ACTIVE) {
+        return { ok: false, reason: 'Account is not active.' };
+      }
+
+      var adjId = Ids.nextId('AccountAdjustment');
+      var now = Audit._nowIso();
+      var adjDir = direction === 'CREDIT' ? 'adjustment_credit' : 'adjustment_debit';
+
+      _appendRow(getSheet_(TABS.ACCOUNT_ADJUSTMENTS), [
+        adjId, accountId, amount, direction, reason, actorUserId, now
+      ]);
+
+      Engine._postToAccountBalance(accountId, amount, adjDir);
+
+      Audit.append(actorUserId, 'AccountAdjustment', adjId, 'CREATE', {
+        accountId: accountId, amount: amount, direction: direction, reason: reason
+      });
+      Discord.postTreasury('**' + adjId + '** — ' + direction + ' of HK$' + Number(amount).toFixed(2) + ' on ' + accountId + ' — ' + (reason || '') + ' (by ' + actorUserId + ').');
+      return { ok: true, adjustmentId: adjId };
+    } finally {
+      lock.releaseLock();
+    }
+  },
+
+  /**
+   * Transfer money between two active accounts.
+   */
+  transferBetweenAccounts: function (fromAccountId, toAccountId, amount, reason, actorUserId) {
+    var lock = LockService.getScriptLock();
+    try {
+      lock.waitLock(30000);
+    } catch (e) { throw e; }
+    try {
+      var actor = Engine._loadActor(actorUserId);
+      if (!actor || actor.role !== ROLES.TREASURER) {
+        return { ok: false, reason: 'Only a Treasurer can transfer between accounts.' };
+      }
+      if (fromAccountId === toAccountId) {
+        return { ok: false, reason: 'Cannot transfer to the same account.' };
+      }
+
+      var fromRow = Engine._loadRow('FinanceAccount', fromAccountId);
+      if (!fromRow) return { ok: false, reason: 'Source account not found.' };
+      if (fromRow.values[COLS.FinanceAccounts.status - 1] !== STATUS.FinanceAccount.ACTIVE) {
+        return { ok: false, reason: 'Source account is not active.' };
+      }
+      if ((Number(fromRow.values[COLS.FinanceAccounts.current_balance - 1]) || 0) < amount) {
+        return { ok: false, reason: 'Insufficient balance in source account.' };
+      }
+
+      var toRow = Engine._loadRow('FinanceAccount', toAccountId);
+      if (!toRow) return { ok: false, reason: 'Destination account not found.' };
+      if (toRow.values[COLS.FinanceAccounts.status - 1] !== STATUS.FinanceAccount.ACTIVE) {
+        return { ok: false, reason: 'Destination account is not active.' };
+      }
+
+      var xferId = Ids.nextId('AccountTransfer');
+      var now = Audit._nowIso();
+      _appendRow(getSheet_(TABS.ACCOUNT_TRANSFERS), [
+        xferId, fromAccountId, toAccountId, amount, reason, actorUserId, now
+      ]);
+
+      Engine._postToAccountBalance(fromAccountId, amount, 'adjustment_debit');
+      Engine._postToAccountBalance(toAccountId, amount, 'adjustment_credit');
+
+      Audit.append(actorUserId, 'AccountTransfer', xferId, 'CREATE', {
+        from: fromAccountId, to: toAccountId, amount: amount, reason: reason
+      });
+      Discord.postTreasury('**' + xferId + '** — HK$' + Number(amount).toFixed(2) + ' ' + fromAccountId + ' → ' + toAccountId + ' — ' + (reason || '') + ' (by ' + actorUserId + ').');
+      return { ok: true, transferId: xferId };
+    } finally {
+      lock.releaseLock();
+    }
+  },
+
+  /**
+   * Compute the effective balance of an account: current_balance + pending_income - reserved_payouts.
+   */
+  _computeEffectiveBalance: function (accountId) {
+    var row = Engine._loadRow('FinanceAccount', accountId);
+    if (!row) return 0;
+    var ac = COLS.FinanceAccounts;
+    var balance = Number(row.values[ac.current_balance - 1]) || 0;
+    var pending = Number(row.values[ac.pending_income - 1]) || 0;
+    var reserved = Number(row.values[ac.reserved_payouts - 1]) || 0;
+    return balance + pending - reserved;
+  },
+
+  /**
+   * Check if an income uuid was already processed (idempotency).
+   * @private
+   */
+  _alreadyProcessedIncome: function (uuid) {
+    var sheet = getSheet_(TABS.INCOME);
+    var values = sheet.getDataRange().getValues();
+    var c = COLS.Income;
+    for (var i = 1; i < values.length; i++) {
+      if (values[i][c.processed_response_id - 1] === uuid) return true;
+    }
+    return false;
+  },
+
+  /**
+   * Find an income row by its processed_response_id (uuid).
+   * @private
+   */
+  _findIncomeByUuid: function (uuid) {
+    var sheet = getSheet_(TABS.INCOME);
+    var values = sheet.getDataRange().getValues();
+    var c = COLS.Income;
+    for (var i = 1; i < values.length; i++) {
+      if (values[i][c.processed_response_id - 1] === uuid) return values[i][c.income_id - 1];
+    }
+    return null;
   },
 
   /**
@@ -303,7 +580,8 @@ var Engine = {
       BudgetRequest: TABS.BUDGET_REQUESTS, ExpenseClaim: TABS.EXPENSE_CLAIMS,
       User: TABS.USERS, BudgetRequestLine: TABS.BUDGET_REQUEST_LINES,
       ClaimLineItem: TABS.CLAIM_LINE_ITEMS, Payout: TABS.PAYOUTS,
-      Receipt: TABS.RECEIPTS
+      Receipt: TABS.RECEIPTS, Income: TABS.INCOME,
+      FinanceAccount: TABS.FINANCE_ACCOUNTS
     };
     var sheet = getSheet_(tabMap[entityType]);
     var values = sheet.getDataRange().getValues();
@@ -439,9 +717,10 @@ var Engine = {
       sheet.getRange(row.rowIndex, c.total_amount).setValue(Engine._sumClaimLineItems(claimId));
     } else if (action === 'SUBMIT') {
       sheet.getRange(row.rowIndex, c.submitted_at).setValue(now);
-    } else if (action === 'APPROVE_PAYOUT') {
+    } else     if (action === 'APPROVE_PAYOUT') {
       sheet.getRange(row.rowIndex, c.approved_at).setValue(now);
       sheet.getRange(row.rowIndex, c.approved_by).setValue(actorUserId);
+      var payoutAccountId = payload && payload.account_id;
     } else if (action === 'REJECT' || action === 'REQUEST_INFO') {
       Engine._appendNote(sheet, row.rowIndex, c.notes, action + ' by ' + actorUserId + ': ' + (payload.decision_note || ''));
     } else if (action === 'RESUBMIT') {
@@ -460,7 +739,7 @@ var Engine = {
 
     sheet.getRange(row.rowIndex, c.status).setValue(nextStatus);
     if (selfApproved) sheet.getRange(row.rowIndex, c.self_approved).setValue(true);
-    if (action === 'APPROVE_PAYOUT') Payouts.onClaimApprovedForPayout(claimId);
+    if (action === 'APPROVE_PAYOUT') Payouts.onClaimApprovedForPayout(claimId, payoutAccountId);
     if (action === 'LOCK' && effectDetail) {
       effectDetail.lockedHash = Engine._computeLockedRowHash(sheet, row.rowIndex);
     }
@@ -565,6 +844,14 @@ var Engine = {
       ? Engine._sumBudgetRequestLines(entityId, 'approved_amount')
       : Engine._sumClaimLineItems(entityId);
 
+    if (action === 'REQUEST_INFO') {
+      var roleId = Config.getOptional('NEEDS_INFO_ROLE_ID');
+      var mention = roleId ? '<@&' + roleId + '>' : '';
+      Discord.postTreasury('**' + entityId + '** — ' + title + ' — ' + fromStatus + ' → ' + toStatus + ' (by ' + actorUserId + ')' + (mention ? ' — ' + mention : ''));
+      Discord.postStatus(entityId, title, toStatus, amount);
+      return;
+    }
+
     Discord.postTreasury('**' + entityId + '** — ' + title + ' — ' + fromStatus + ' → ' + toStatus + ' (by ' + actorUserId + ')');
     Discord.postStatus(entityId, title, toStatus, amount);
     if (selfApproved) Discord.postSelfApproved(entityId, actorUserId, amount);
@@ -599,4 +886,4 @@ function Engine_deriveRequestStatus(requestId) {
   return CoreDecisions.deriveRequestStatusFromLineStatuses(statuses);
 }
 
-if (typeof module !== 'undefined') { module.exports = { Engine }; }
+if (typeof module !== 'undefined') { module.exports = { Engine: Engine }; }

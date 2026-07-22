@@ -1,4 +1,4 @@
-import type { MyClaimsResponse, ClaimPayload, EditClaimPayload, SessionResponse, BudgetRequest, BudgetRequestDraftPayload, PendingBudgetRequest, BudgetDecisionPayload, Member, AddMemberPayload, ClaimDraftPayload, UploadReceiptResponse } from '../types';
+import type { MyClaimsResponse, ClaimPayload, EditClaimPayload, SessionResponse, BudgetRequest, BudgetRequestDraftPayload, PendingBudgetRequest, BudgetDecisionPayload, Member, AddMemberPayload, ClaimDraftPayload, UploadReceiptResponse, ClaimQueueItem, ClaimQueueFilters, TransitionResult, FinanceAccount, AddAccountPayload, IncomeItem, RecordIncomePayload, AccountTransfer, AccountAdjustment, PayoutQueueItem } from '../types';
 
 export const apiService = {
   resolveSession: (): Promise<SessionResponse> => {
@@ -10,7 +10,7 @@ export const apiService = {
             user_id: 'USER-MOCK',
             display_name: 'Mock User',
             role: 'COMMITTEE',
-            views: ['claims', 'budget-requests']
+            views: ['review', 'claims', 'budget-requests']
           });
         }, 300);
         return;
@@ -290,6 +290,89 @@ export const apiService = {
     });
   },
 
+  getClaimsQueue: (filters?: ClaimQueueFilters): Promise<ClaimQueueItem[]> => {
+    return new Promise((resolve, reject) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => {
+          resolve([
+            { claim_id: 'CLAIM-001', claimant_id: 'M-001', status: 'SUBMITTED', submitted_at: '2026-07-20', total_amount: 150, notes: 'Conference tickets', created_by: 'U-001' },
+            { claim_id: 'CLAIM-002', claimant_id: 'M-002', status: 'VERIFIED', submitted_at: '2026-07-19', verified_at: '2026-07-21', total_amount: 200, notes: 'Supplies', created_by: 'U-002' }
+          ]);
+        }, 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        .api_getClaimsQueue(filters || {});
+    });
+  },
+
+  verifyClaim: (claimId: string, payload?: any): Promise<TransitionResult> => {
+    return new Promise((resolve, reject) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ claim_id: claimId, from: 'SUBMITTED', to: 'VERIFIED' }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        .api_verifyClaim(claimId, payload || {});
+    });
+  },
+
+  rejectClaim: (claimId: string, reason: string): Promise<TransitionResult> => {
+    return new Promise((resolve, reject) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ claim_id: claimId, from: 'SUBMITTED', to: 'REJECTED' }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        .api_rejectClaim(claimId, reason);
+    });
+  },
+
+  requestInfo: (claimId: string, reason: string): Promise<TransitionResult> => {
+    return new Promise((resolve, reject) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ claim_id: claimId, from: 'SUBMITTED', to: 'NEEDS_INFO' }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        .api_requestInfo(claimId, reason);
+    });
+  },
+
+  resubmitClaim: (claimId: string): Promise<TransitionResult> => {
+    return new Promise((resolve, reject) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ claim_id: claimId, from: 'NEEDS_INFO', to: 'SUBMITTED' }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        .api_resubmitClaim(claimId);
+    });
+  },
+
+  approvePayout: (claimId: string): Promise<TransitionResult> => {
+    return new Promise((resolve, reject) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ claim_id: claimId, from: 'VERIFIED', to: 'APPROVED_FOR_PAYOUT' }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        .api_approvePayout(claimId);
+    });
+  },
+
   decisionBudgetRequest: (entityId: string, action: string, payload: BudgetDecisionPayload): Promise<{ request_id: string; from: string; to: string }> => {
     return new Promise((resolve) => {
       if (typeof google === 'undefined' || !google.script) {
@@ -301,6 +384,235 @@ export const apiService = {
       google.script.run
         .withSuccessHandler(resolve)
         .api_decisionBudgetRequest(entityId, action, payload);
+    });
+  },
+
+  // ─── Finance Accounts ───
+
+  getAccounts: (): Promise<FinanceAccount[]> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => {
+          resolve([{ account_id: 'AC-001', name: 'Main Checking', opening_balance: 10167.35, current_balance: 10167.35, pending_income: 0, reserved_payouts: 0, status: 'ACTIVE', created_at: '2026-07-01' }]);
+        }, 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_getAccounts();
+    });
+  },
+
+  addAccount: (payload: AddAccountPayload): Promise<FinanceAccount> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => {
+          resolve({ account_id: 'AC-MOCK', name: payload.name, opening_balance: payload.opening_balance || 0, current_balance: payload.opening_balance || 0, pending_income: 0, reserved_payouts: 0, status: 'ACTIVE', created_at: new Date().toISOString().slice(0, 10) });
+        }, 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_addAccount(payload);
+    });
+  },
+
+  renameAccount: (accountId: string, name: string): Promise<{ success: boolean }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ success: true }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_renameAccount(accountId, name);
+    });
+  },
+
+  deactivateAccount: (accountId: string): Promise<{ success: boolean }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ success: true }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_deactivateAccount(accountId);
+    });
+  },
+
+  // ─── Income ───
+
+  recordIncome: (payload: RecordIncomePayload): Promise<{ success: boolean; income_id?: string }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ success: true, income_id: 'INC-MOCK' }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_recordIncome(payload);
+    });
+  },
+
+  getPendingIncome: (): Promise<IncomeItem[]> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve([]), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_getPendingIncome();
+    });
+  },
+
+  confirmIncome: (incomeId: string, payload: { accountId?: string; note?: string }): Promise<{ success: boolean }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ success: true }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_confirmIncome(incomeId, payload);
+    });
+  },
+
+  rejectIncome: (incomeId: string, note?: string): Promise<{ success: boolean }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ success: true }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_rejectIncome(incomeId, note);
+    });
+  },
+
+  requestIncomeInfo: (incomeId: string, note?: string): Promise<{ success: boolean }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ success: true }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_requestIncomeInfo(incomeId, note);
+    });
+  },
+
+  // ─── Account Transfers & Adjustments ───
+
+  recordAdjustment: (payload: { accountId: string; amount: number; direction: string; reason: string }): Promise<{ success: boolean }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ success: true }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_recordAdjustment(payload);
+    });
+  },
+
+  recordTransfer: (payload: { fromAccountId: string; toAccountId: string; amount: number; reason: string }): Promise<{ success: boolean }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ success: true }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_recordTransfer(payload);
+    });
+  },
+
+  getTransfers: (): Promise<AccountTransfer[]> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve([]), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_getTransfers();
+    });
+  },
+
+  getAdjustments: (): Promise<AccountAdjustment[]> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve([]), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_getAdjustments();
+    });
+  },
+
+  // ─── Payout Queue ───
+
+  getQueuedPayouts: (): Promise<PayoutQueueItem[]> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve([]), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_getQueuedPayouts();
+    });
+  },
+
+  markPayoutSent: (payoutId: string, payload: { txnReference: string; amount?: number; accountId?: string }): Promise<{ success: boolean }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ success: true }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_markPayoutSent(payoutId, payload);
+    });
+  },
+
+  recordPayoutFailed: (payoutId: string, reason: string): Promise<{ success: boolean }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ success: true }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_recordPayoutFailed(payoutId, reason);
+    });
+  },
+
+  retryPayout: (payoutId: string): Promise<{ success: boolean }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ success: true }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_retryPayout(payoutId);
+    });
+  },
+
+  approvePayoutWithAccount: (claimId: string, accountId: string): Promise<TransitionResult> => {
+    return new Promise((resolve, reject) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => resolve({ claim_id: claimId, from: 'VERIFIED', to: 'APPROVED_FOR_PAYOUT' }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .withFailureHandler(reject)
+        .api_approvePayout(claimId, accountId);
     });
   }
 };

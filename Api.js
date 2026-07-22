@@ -27,7 +27,7 @@ function api_resolveSession() {
 
   if (!user.active) return { allowed: false, reason: 'inactive_user' };
 
-  var views = [ 'claims', 'members', 'budget-requests' ];
+  var views = [ 'review', 'claims', 'members', 'budget-requests' ];
   if (user.role === ROLES.TREASURER) views.push('income', 'payouts', 'reports');
 
   return {
@@ -828,6 +828,494 @@ function api_submitDraftClaim(claimId) {
   return { claim_id: claimId, status: result.to, submitted_at: Audit._nowIso() };
 }
 
+// ---------------------------------------------------------------------------
+// Claim Review API
+// ---------------------------------------------------------------------------
+
+function api_getClaimsQueue(filters) {
+  var operator = _requireOperator();
+  filters = filters || {};
+
+  var sheet = getSheet_(TABS.EXPENSE_CLAIMS);
+  var values = sheet.getDataRange().getValues();
+  var c = COLS.ExpenseClaims;
+  var out = [];
+
+  var queueStatuses = [STATUS.ExpenseClaim.SUBMITTED, STATUS.ExpenseClaim.NEEDS_INFO, STATUS.ExpenseClaim.VERIFIED];
+  var filterStatus = filters.status;
+  var filterEvent = filters.eventId;
+  var filterCreator = filters.creator;
+  var filterBudgetLine = filters.budgetLine;
+  var filterSid = filters.sid;
+
+  var claimIdsByBudgetLine = null;
+  if (filterBudgetLine) {
+    claimIdsByBudgetLine = {};
+    var cliSheet = getSheet_(TABS.CLAIM_LINE_ITEMS);
+    var cliValues = cliSheet.getDataRange().getValues();
+    var cliC = COLS.ClaimLineItems;
+    for (var j = 1; j < cliValues.length; j++) {
+      if (cliValues[j][cliC.budget_line_id - 1] === filterBudgetLine) {
+        claimIdsByBudgetLine[cliValues[j][cliC.claim_id - 1]] = true;
+      }
+    }
+  }
+
+  var userIdBySid = null;
+  if (filterSid) {
+    var vaultSheet = getVaultSheet_();
+    var vaultValues = vaultSheet.getDataRange().getValues();
+    var vaultC = COLS.Vault;
+    for (var k = 1; k < vaultValues.length; k++) {
+      if (String(vaultValues[k][vaultC.student_id - 1]) === String(filterSid)) {
+        userIdBySid = vaultValues[k][vaultC.user_id - 1];
+        break;
+      }
+    }
+  }
+
+  for (var i = 1; i < values.length; i++) {
+    var status = values[i][c.status - 1];
+    if (queueStatuses.indexOf(status) === -1) continue;
+    if (filterStatus && status !== filterStatus) continue;
+    if (filterEvent && values[i][c.event_id - 1] !== filterEvent) continue;
+    if (filterCreator && values[i][c.created_by - 1] !== filterCreator) continue;
+    if (filterBudgetLine && !claimIdsByBudgetLine[values[i][c.claim_id - 1]]) continue;
+    if (filterSid && values[i][c.claimant_id - 1] !== userIdBySid) continue;
+
+    out.push({
+      claim_id: values[i][c.claim_id - 1],
+      claimant_id: values[i][c.claimant_id - 1],
+      status: status,
+      submitted_at: values[i][c.submitted_at - 1],
+      verified_at: values[i][c.verified_at - 1],
+      total_amount: values[i][c.total_amount - 1],
+      notes: values[i][c.notes - 1],
+      created_by: values[i][c.created_by - 1],
+      event_id: values[i][c.event_id - 1]
+    });
+  }
+  return out;
+}
+
+/**
+ * Verify a SUBMITTED claim. Calls Engine.transition with VERIFY action.
+ */
+function api_verifyClaim(claimId, payload) {
+  var operator = _requireOperator();
+  payload = payload || {};
+
+  var result = Engine.transition('ExpenseClaim', claimId, 'VERIFY', operator.userId, payload);
+  if (!result.ok) throw new Error(result.reason);
+  return { claim_id: claimId, from: result.from, to: result.to };
+}
+
+/**
+ * Reject a claim with a required reason. Calls Engine.transition with REJECT action.
+ */
+function api_rejectClaim(claimId, reason) {
+  var operator = _requireOperator();
+  if (!reason || !String(reason).trim()) throw new Error('Rejection reason is required');
+
+  var result = Engine.transition('ExpenseClaim', claimId, 'REJECT', operator.userId, { decision_note: reason });
+  if (!result.ok) throw new Error(result.reason);
+  return { claim_id: claimId, from: result.from, to: result.to };
+}
+
+/**
+ * Request more information on a SUBMITTED claim. Calls Engine.transition with REQUEST_INFO action.
+ */
+function api_requestInfo(claimId, reason) {
+  var operator = _requireOperator();
+  if (!reason || !String(reason).trim()) throw new Error('Request note is required');
+
+  var result = Engine.transition('ExpenseClaim', claimId, 'REQUEST_INFO', operator.userId, { decision_note: reason });
+  if (!result.ok) throw new Error(result.reason);
+  return { claim_id: claimId, from: result.from, to: result.to };
+}
+
+/**
+ * Resubmit a NEEDS_INFO claim. Calls Engine.transition with RESUBMIT action.
+ */
+function api_resubmitClaim(claimId) {
+  var operator = _requireOperator();
+
+  var existing = Engine._loadRow('ExpenseClaim', claimId);
+  if (!existing) throw new Error('Claim not found');
+  if (existing.values[COLS.ExpenseClaims.created_by - 1] !== operator.userId) {
+    throw new Error('Unauthorized');
+  }
+
+  var result = Engine.transition('ExpenseClaim', claimId, 'RESUBMIT', operator.userId, {});
+  if (!result.ok) throw new Error(result.reason);
+  return { claim_id: claimId, from: result.from, to: result.to };
+}
+
+/**
+ * Approve a VERIFIED claim for payout (Treasurer only).
+ */
+// ---------------------------------------------------------------------------
+// Finance Accounts API
+// ---------------------------------------------------------------------------
+
+/**
+ * Get all Finance Accounts with their balances.
+ * Available to all operators (COMMITTEE and TREASURER).
+ */
+function api_getAccounts() {
+  _requireOperator();
+  var sheet = getSheet_(TABS.FINANCE_ACCOUNTS);
+  var values = sheet.getDataRange().getValues();
+  var c = COLS.FinanceAccounts;
+  var out = [];
+  for (var i = 1; i < values.length; i++) {
+    if (!values[i][c.account_id - 1]) continue;
+    out.push({
+      account_id: values[i][c.account_id - 1],
+      name: values[i][c.name - 1],
+      opening_balance: Number(values[i][c.opening_balance - 1]) || 0,
+      current_balance: Number(values[i][c.current_balance - 1]) || 0,
+      pending_income: Number(values[i][c.pending_income - 1]) || 0,
+      reserved_payouts: Number(values[i][c.reserved_payouts - 1]) || 0,
+      status: values[i][c.status - 1],
+      created_at: values[i][c.created_at - 1] || '',
+      deactivated_at: values[i][c.deactivated_at - 1] || ''
+    });
+  }
+  return out;
+}
+
+/**
+ * Add a new Finance Account (Treasurer only).
+ */
+function api_addAccount(payload) {
+  var operator = _requireOperator();
+  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized');
+  if (!payload.name || !String(payload.name).trim()) throw new Error('Account name is required');
+
+  var accountId = Ids.nextId('FinanceAccount');
+  var now = Audit._nowIso();
+  var c = COLS.FinanceAccounts;
+  var openingBalance = Number(payload.opening_balance) || 0;
+  _appendRow(getSheet_(TABS.FINANCE_ACCOUNTS), [
+    accountId, String(payload.name).trim(), openingBalance, openingBalance,
+    0, 0, STATUS.FinanceAccount.ACTIVE, now, ''
+  ]);
+
+  Audit.append(operator.userId, 'FinanceAccount', accountId, 'CREATE', { name: payload.name, openingBalance: openingBalance });
+  return { account_id: accountId, name: String(payload.name).trim(), status: STATUS.FinanceAccount.ACTIVE };
+}
+
+/**
+ * Rename an active Finance Account (Treasurer only).
+ */
+function api_renameAccount(accountId, newName) {
+  var operator = _requireOperator();
+  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized');
+  if (!newName || !String(newName).trim()) throw new Error('Account name is required');
+
+  var row = Engine._loadRow('FinanceAccount', accountId);
+  if (!row) throw new Error('Account not found');
+  if (row.values[COLS.FinanceAccounts.status - 1] !== STATUS.FinanceAccount.ACTIVE) {
+    throw new Error('Only active accounts can be renamed');
+  }
+
+  row.sheet.getRange(row.rowIndex, COLS.FinanceAccounts.name).setValue(String(newName).trim());
+  Audit.append(operator.userId, 'FinanceAccount', accountId, 'RENAME', { newName: newName });
+  return { account_id: accountId, name: String(newName).trim() };
+}
+
+/**
+ * Deactivate a Finance Account (Treasurer only). Historical data retained.
+ */
+function api_deactivateAccount(accountId) {
+  var operator = _requireOperator();
+  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized');
+
+  var row = Engine._loadRow('FinanceAccount', accountId);
+  if (!row) throw new Error('Account not found');
+  if (row.values[COLS.FinanceAccounts.status - 1] !== STATUS.FinanceAccount.ACTIVE) {
+    throw new Error('Account is already inactive');
+  }
+
+  var now = Audit._nowIso();
+  row.sheet.getRange(row.rowIndex, COLS.FinanceAccounts.status).setValue(STATUS.FinanceAccount.INACTIVE);
+  row.sheet.getRange(row.rowIndex, COLS.FinanceAccounts.deactivated_at).setValue(now);
+  Audit.append(operator.userId, 'FinanceAccount', accountId, 'DEACTIVATE', {});
+  return { account_id: accountId, status: STATUS.FinanceAccount.INACTIVE };
+}
+
+// ---------------------------------------------------------------------------
+// Income Workflow API
+// ---------------------------------------------------------------------------
+
+/**
+ * Record new income. Available to all operators (COMMITTEE, TREASURER).
+ * The income starts as PENDING and must be confirmed by a Treasurer.
+ */
+function api_recordIncome(payload) {
+  var operator = _requireOperator();
+  if (!payload.date) throw new Error('Date is required');
+  if (!payload.categoryId) throw new Error('Category is required');
+  if (!payload.amount || Number(payload.amount) <= 0) throw new Error('Amount must be positive');
+  if (!payload.accountId && payload.proposedAccountId) {
+    payload.accountId = payload.proposedAccountId;
+  }
+
+  var result = Engine.recordIncome(
+    payload.date, payload.categoryId, Number(payload.amount),
+    payload.sourceRef || '', payload.eventId || '', payload.notes || '',
+    operator.userId, payload.accountId || '', payload.uuid || ''
+  );
+  if (!result.ok) throw new Error(result.reason || 'Failed to record income');
+  return { income_id: result.incomeId, status: STATUS.Income.PENDING };
+}
+
+/**
+ * Get all pending income (Treasurer review queue).
+ */
+function api_getPendingIncome() {
+  var operator = _requireOperator();
+
+  var sheet = getSheet_(TABS.INCOME);
+  var values = sheet.getDataRange().getValues();
+  var c = COLS.Income;
+  var out = [];
+
+  var queueStatuses = [STATUS.Income.PENDING, STATUS.Income.NEEDS_INFO];
+  for (var i = 1; i < values.length; i++) {
+    var status = values[i][c.status - 1];
+    if (queueStatuses.indexOf(status) === -1) continue;
+    out.push({
+      income_id: values[i][c.income_id - 1],
+      date: values[i][c.date - 1],
+      category_id: values[i][c.category_id - 1],
+      amount: Number(values[i][c.amount - 1]) || 0,
+      received_by: values[i][c.received_by - 1],
+      source_ref: values[i][c.source_ref - 1] || '',
+      event_id: values[i][c.event_id - 1] || '',
+      notes: values[i][c.notes - 1] || '',
+      account_id: values[i][c.account_id - 1] || '',
+      status: status,
+      decided_by: values[i][c.decided_by - 1] || '',
+      decided_at: values[i][c.decided_at - 1] || '',
+      decision_note: values[i][c.decision_note - 1] || ''
+    });
+  }
+  return out;
+}
+
+/**
+ * Confirm pending income and post to account balance (Treasurer only).
+ */
+function api_confirmIncome(incomeId, accountId) {
+  var operator = _requireOperator();
+  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized');
+
+  var result = Engine.confirmIncome(incomeId, accountId, operator.userId);
+  if (!result.ok) throw new Error(result.reason);
+  return { income_id: incomeId, status: STATUS.Income.CONFIRMED, account_id: result.accountId };
+}
+
+/**
+ * Reject pending income (Treasurer only).
+ */
+function api_rejectIncome(incomeId, reason) {
+  var operator = _requireOperator();
+  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized');
+  if (!reason || !String(reason).trim()) throw new Error('Rejection reason is required');
+
+  var result = Engine.rejectIncome(incomeId, operator.userId, reason);
+  if (!result.ok) throw new Error(result.reason);
+  return { income_id: incomeId, status: STATUS.Income.REJECTED };
+}
+
+/**
+ * Request info on pending income (Treasurer only).
+ */
+function api_requestIncomeInfo(incomeId, reason) {
+  var operator = _requireOperator();
+  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized');
+  if (!reason || !String(reason).trim()) throw new Error('Note is required');
+
+  var result = Engine.requestIncomeInfo(incomeId, operator.userId, reason);
+  if (!result.ok) throw new Error(result.reason);
+  return { income_id: incomeId, status: STATUS.Income.NEEDS_INFO };
+}
+
+/**
+ * Record an account adjustment (correction) — Treasurer only.
+ * direction: 'CREDIT' (add money) or 'DEBIT' (subtract money)
+ */
+function api_recordAdjustment(payload) {
+  var operator = _requireOperator();
+  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized');
+  if (!payload.amount || Number(payload.amount) <= 0) throw new Error('Amount must be positive');
+  if (payload.direction !== 'CREDIT' && payload.direction !== 'DEBIT') throw new Error('Direction must be CREDIT or DEBIT');
+  if (!payload.reason || !String(payload.reason).trim()) throw new Error('Reason is required');
+
+  var result = Engine.adjustAccount(payload.accountId, Number(payload.amount), payload.direction, payload.reason, operator.userId);
+  if (!result.ok) throw new Error(result.reason);
+  return { adjustment_id: result.adjustmentId, account_id: payload.accountId };
+}
+
+/**
+ * Record a transfer between accounts — Treasurer only.
+ */
+function api_recordTransfer(payload) {
+  var operator = _requireOperator();
+  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized');
+  if (!payload.amount || Number(payload.amount) <= 0) throw new Error('Amount must be positive');
+  if (!payload.reason || !String(payload.reason).trim()) throw new Error('Reason is required');
+
+  var result = Engine.transferBetweenAccounts(payload.fromAccountId, payload.toAccountId, Number(payload.amount), payload.reason, operator.userId);
+  if (!result.ok) throw new Error(result.reason);
+  return { transfer_id: result.transferId, from: payload.fromAccountId, to: payload.toAccountId };
+}
+
+/**
+ * Get all account transfers.
+ */
+function api_getTransfers() {
+  var operator = _requireOperator();
+  var sheet = getSheet_(TABS.ACCOUNT_TRANSFERS);
+  var values = sheet.getDataRange().getValues();
+  var c = COLS.AccountTransfers;
+  var out = [];
+  for (var i = 1; i < values.length; i++) {
+    if (!values[i][c.transfer_id - 1]) continue;
+    out.push({
+      transfer_id: values[i][c.transfer_id - 1],
+      from_account_id: values[i][c.from_account_id - 1],
+      to_account_id: values[i][c.to_account_id - 1],
+      amount: Number(values[i][c.amount - 1]) || 0,
+      reason: values[i][c.reason - 1] || '',
+      transferred_by: values[i][c.transferred_by - 1],
+      transferred_at: values[i][c.transferred_at - 1]
+    });
+  }
+  return out;
+}
+
+/**
+ * Get all account adjustments.
+ */
+function api_getAdjustments(accountId) {
+  var operator = _requireOperator();
+  var sheet = getSheet_(TABS.ACCOUNT_ADJUSTMENTS);
+  var values = sheet.getDataRange().getValues();
+  var c = COLS.AccountAdjustments;
+  var out = [];
+  for (var i = 1; i < values.length; i++) {
+    if (!values[i][c.adjustment_id - 1]) continue;
+    if (accountId && values[i][c.account_id - 1] !== accountId) continue;
+    out.push({
+      adjustment_id: values[i][c.adjustment_id - 1],
+      account_id: values[i][c.account_id - 1],
+      amount: Number(values[i][c.amount - 1]) || 0,
+      direction: values[i][c.direction - 1],
+      reason: values[i][c.reason - 1] || '',
+      adjusted_by: values[i][c.adjusted_by - 1],
+      adjusted_at: values[i][c.adjusted_at - 1]
+    });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Payout Lifecycle API
+// ---------------------------------------------------------------------------
+
+/**
+ * Approve a VERIFIED claim for payout (Treasurer only).
+ * Optionally specify the Finance Account to deduct from.
+ */
+function api_approvePayout(claimId, accountId) {
+  var operator = _requireOperator();
+  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized');
+
+  var payload = {};
+  if (accountId) payload.account_id = accountId;
+
+  var result = Engine.transition('ExpenseClaim', claimId, 'APPROVE_PAYOUT', operator.userId, payload);
+  if (!result.ok) throw new Error(result.reason);
+  return { claim_id: claimId, from: result.from, to: result.to };
+}
+
+/**
+ * Get queued payouts (QUEUED and FAILED) for Treasurer action.
+ */
+function api_getQueuedPayouts() {
+  var operator = _requireOperator();
+  var sheet = getSheet_(TABS.PAYOUTS);
+  var values = sheet.getDataRange().getValues();
+  var c = COLS.Payouts;
+  var out = [];
+
+  var relevantStatuses = [STATUS.Payout.QUEUED, STATUS.Payout.FAILED];
+  for (var i = 1; i < values.length; i++) {
+    var status = values[i][c.status - 1];
+    if (relevantStatuses.indexOf(status) === -1) continue;
+    out.push({
+      payout_id: values[i][c.payout_id - 1],
+      claim_id: values[i][c.claim_id - 1],
+      payee_user_id: values[i][c.payee_user_id - 1],
+      amount: Number(values[i][c.amount - 1]) || 0,
+      method: values[i][c.method - 1] || '',
+      txn_reference: values[i][c.txn_reference - 1] || '',
+      status: status,
+      account_id: values[i][c.account_id - 1] || '',
+      failure_reason: values[i][c.failure_reason - 1] || '',
+      parent_payout_id: values[i][c.parent_payout_id - 1] || ''
+    });
+  }
+  return out;
+}
+
+/**
+ * Mark a queued payout as sent, deduct from account (Treasurer only).
+ */
+function api_markPayoutSent(payoutId, payload) {
+  var operator = _requireOperator();
+  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized');
+  var payoutRow = Engine._loadRow('Payout', payoutId);
+  if (!payoutRow) throw new Error('Payout not found');
+  var c = COLS.Payouts;
+  var method = payload.method || payoutRow.values[c.method - 1];
+  if (!method) throw new Error('Payment method is required');
+  var sentAmount = payload.amount != null ? Number(payload.amount) : Number(payoutRow.values[c.amount - 1]) || 0;
+  if (sentAmount <= 0) throw new Error('Amount must be positive');
+
+  var result = Payouts.markPayoutSent(payoutId, sentAmount, method, payload.txnReference || '', operator.userId);
+  if (!result.ok) throw new Error(result.reason);
+  return { payout_id: payoutId, status: STATUS.Payout.SENT };
+}
+
+/**
+ * Record a failed payout attempt (Treasurer only).
+ */
+function api_recordPayoutFailed(payoutId, failureReason) {
+  var operator = _requireOperator();
+  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized');
+  if (!failureReason || !String(failureReason).trim()) throw new Error('Failure reason is required');
+
+  var result = Payouts.recordPayoutFailed(payoutId, failureReason, operator.userId);
+  if (!result.ok) throw new Error(result.reason);
+  return { payout_id: payoutId, status: STATUS.Payout.FAILED };
+}
+
+/**
+ * Retry a failed payout (Treasurer only).
+ */
+function api_retryPayout(payoutId) {
+  var operator = _requireOperator();
+  if (operator.role !== ROLES.TREASURER) throw new Error('Unauthorized');
+
+  var result = Payouts.retryPayout(payoutId, operator.userId);
+  if (!result.ok) throw new Error(result.reason);
+  return { payout_id: result.newPayoutId, status: STATUS.Payout.QUEUED };
+}
+
 if (typeof module !== 'undefined') {
   module.exports = {
     api_resolveSession, api_getMyClaims, api_uploadReceipt, api_submitClaim, api_editClaim,
@@ -835,6 +1323,11 @@ if (typeof module !== 'undefined') {
     api_discardBudgetRequest, api_getPendingBudgetRequests, api_decisionBudgetRequest,
     api_getMembers, api_addMember, api_reactivateMember, api_saveClaimDraft, api_submitDraftClaim,
     api_deleteOrphanedReceipt, api_attachReceipts,
+    api_getClaimsQueue, api_verifyClaim, api_rejectClaim, api_requestInfo, api_resubmitClaim, api_approvePayout,
+    api_getAccounts, api_addAccount, api_renameAccount, api_deactivateAccount,
+    api_recordIncome, api_getPendingIncome, api_confirmIncome, api_rejectIncome, api_requestIncomeInfo,
+    api_recordAdjustment, api_recordTransfer, api_getTransfers, api_getAdjustments,
+    api_getQueuedPayouts, api_markPayoutSent, api_recordPayoutFailed, api_retryPayout,
     _sha256Hex, _isLate, _resolveUser
   };
 }
