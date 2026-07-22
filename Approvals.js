@@ -217,3 +217,5 @@ function Approvals_resolveActor(e) {
   }
   return { userId: Config.get('TREASURER_USER_ID'), email: email, method: 'TREASURER_FALLBACK' };
 }
+
+if (typeof module !== 'undefined') { module.exports = { Approvals_pendingRequestRows, Approvals_claimRows, Approvals_queuedPayoutRows }; }

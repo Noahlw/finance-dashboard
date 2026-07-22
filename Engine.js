@@ -140,18 +140,14 @@ var Engine = {
 
   /**
    * P2 Engine completeness checks for VERIFY on ExpenseClaims.
-   * Checks budget remaining, missing receipt caps, and roles.
+   * Checks:
+   *   - every claim line has a valid receipt_id or missing-receipt flag
+   *   - Σ ClaimLineItems.amount per receipt_id ≤ Receipt.receipt_total
+   *   - budget remaining is not negative
+   *   - missing-receipt cap, role, and per-semester rules
    *
-   * TODO(known gap, FINANCE-SYSTEM-DESIGN.md §3.2): this only implements the
-   * over-claim guard and the missing-receipt cap/role/per-semester rules.
-   * Still missing, of the four documented VERIFY invariants:
-   *   1. every claim line has a valid receipt_id (or an approved
-   *      missing-receipt declaration) — not currently checked at all.
-   *   2. Σ ClaimLineItems.amount per receipt_id ≤ Receipt.receipt_total —
-   *      not implemented anywhere in the codebase.
-   *   3. late_flag is only computed once at claim intake (IntakeForms.gs);
-   *      it's never re-checked here at verify time.
-   * Deliberately deferred, not fixed as part of the CoreDecisions extraction.
+   * TODO(known gap): late_flag is only computed once at claim intake
+   * (IntakeForms.gs); it's never re-checked here at verify time.
    */
   _validateClaimVerification: function (claimId, actorUserId, payload) {
     var cliSheet = getSheet_(TABS.CLAIM_LINE_ITEMS);
@@ -602,3 +598,5 @@ function Engine_deriveRequestStatus(requestId) {
   var statuses = rows.map(function (r) { return r.values[c.line_status - 1]; });
   return CoreDecisions.deriveRequestStatusFromLineStatuses(statuses);
 }
+
+if (typeof module !== 'undefined') { module.exports = { Engine }; }

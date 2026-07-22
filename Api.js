@@ -4,6 +4,9 @@
  * before interacting with the Engine.
  */
 
+var allowedReceiptMimes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'application/pdf'];
+var maxReceiptBytes = 5 * 1024 * 1024;
+
 function doGet(e) {
   return HtmlService.createTemplateFromFile('index')
       .evaluate()
@@ -91,13 +94,9 @@ function api_uploadReceipt(fileName, mimeType, base64Data, vendor, receiptDate, 
 
   var bytes = Utilities.base64Decode(base64Data);
 
-  // Validate file size (5 MB max)
-  var maxBytes = 5 * 1024 * 1024;
-  if (bytes.length > maxBytes) throw new Error('File exceeds 5 MB limit.');
+  if (bytes.length > maxReceiptBytes) throw new Error('File exceeds 5 MB limit.');
 
-  // Validate MIME type
-  var allowedMime = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'application/pdf'];
-  if (allowedMime.indexOf(mimeType) === -1) throw new Error('Unsupported file type. Allowed: PNG, JPEG, GIF, PDF.');
+  if (allowedReceiptMimes.indexOf(mimeType) === -1) throw new Error('Unsupported file type. Allowed: PNG, JPEG, GIF, PDF.');
 
   var sha256 = _sha256Hex(bytes);
 
@@ -106,11 +105,20 @@ function api_uploadReceipt(fileName, mimeType, base64Data, vendor, receiptDate, 
   var hashCol = COLS.Receipts.sha256 - 1;
   var uploaderCol = COLS.Receipts.uploaded_by - 1;
   var idCol = COLS.Receipts.receipt_id - 1;
+  var vendorCol = COLS.Receipts.vendor - 1;
+  var dateCol = COLS.Receipts.receipt_date - 1;
+  var totalCol = COLS.Receipts.receipt_total - 1;
 
   for (var i = 1; i < receiptData.length; i++) {
     if (receiptData[i][hashCol] === sha256) {
       if (receiptData[i][uploaderCol] === user.userId) return { receiptId: receiptData[i][idCol] };
       else throw new Error('Duplicate receipt detected (uploaded by another user).');
+    }
+    if (vendor && receiptDate && Number(receiptTotal) > 0 &&
+        receiptData[i][vendorCol] === vendor &&
+        String(receiptData[i][dateCol]) === String(receiptDate) &&
+        Number(receiptData[i][totalCol]) === Number(receiptTotal)) {
+      try { Discord.postTreasury('⚠️ Soft Warning: Receipt matches existing receipt **' + receiptData[i][idCol] + '** on Vendor, Date, and Total. Possible duplicate claim.'); } catch(e){}
     }
   }
 
@@ -744,6 +752,7 @@ function api_saveClaimDraft(payload) {
   if (receiptIds.length > 0) {
     var perLineAmount = total / receiptIds.length;
     for (var ri = 0; ri < receiptIds.length; ri++) {
+      // missing_receipt_flag is always false here: receiptIds present means we have receipts
       var cliValues = [Ids.childId(claimId, ri + 1, 'CLAIMLINE'), claimId, payload.budgetLineId || '', receiptIds[ri] || '', perLineAmount, payload.notes || '', false];
       _appendRow(cliSheet, cliValues);
     }
