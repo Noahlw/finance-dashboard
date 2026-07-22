@@ -4,13 +4,30 @@
  * annual file to a fresh annual spreadsheet and year folder.
  *
  * Stages:
- *   1. PREVIEW   — Show what will be migrated
- *   2. CONFIGURE — Create folder + spreadsheet, stage data
- *   3. REVIEW    — Treasurer reviews and confirms
- *   4. ACTIVATED — Migration complete, new file active
+ *   1. PREVIEW             — Show what will be migrated
+ *   2. INIT                — Create folder + spreadsheet
+ *   3. MEMBERS             — Select members to carry forward
+ *   4. ACCOUNTS            — Select accounts + opening balances
+ *   5. CATEGORIES_EVENTS   — Select categories and events
+ *   6. REVIEW              — Treasurer reviews and confirms
+ *   7. EXECUTE             — Write selected data to new spreadsheet
+ *   8. ACTIVATED           — Migration complete, new file active
+ *
+ * Each data-selection step (MEMBERS / ACCOUNTS / CATEGORIES_EVENTS) saves
+ * its subset independently to MIGRATION_SELECTIONS, so the Treasurer can
+ * close the browser and resume at the same stage.
  */
 
-var MIGRATION_STAGES = ["PREVIEW", "CONFIGURE", "REVIEW", "ACTIVATED"];
+var MIGRATION_STAGES = [
+  "PREVIEW",
+  "INIT",
+  "MEMBERS",
+  "ACCOUNTS",
+  "CATEGORIES_EVENTS",
+  "REVIEW",
+  "EXECUTE",
+  "ACTIVATED",
+];
 
 var Migration = {
   /**
@@ -56,10 +73,11 @@ var Migration = {
    */
   activateMigration(actorUserId) {
     var stage = Config.getOptional("MIGRATION_STAGE") || "";
-    if (stage !== "REVIEW") {
+    if (stage !== "REVIEW" && stage !== "EXECUTE") {
       return {
         ok: false,
-        reason: "Migration must be in REVIEW stage. Current: " + stage,
+        reason:
+          "Migration must be in REVIEW or EXECUTE stage. Current: " + stage,
       };
     }
 
@@ -158,9 +176,20 @@ var Migration = {
 
   /**
    * Execute the migration: create the new spreadsheet schema with selected data.
-   * Stage: REVIEW -> ACTIVATED
+   * Stage: REVIEW -> EXECUTE
    */
   executeMigration(actorUserId) {
+    var stage = Config.getOptional("MIGRATION_STAGE") || "";
+    if (stage !== "REVIEW" && stage !== "EXECUTE") {
+      return {
+        ok: false,
+        reason:
+          "Cannot execute migration from stage " +
+          (stage || "(none)") +
+          ". Confirm selections first.",
+      };
+    }
+
     var targetSpreadsheetId =
       Config.getOptional("MIGRATION_TARGET_SPREADSHEET_ID") || "";
     if (!targetSpreadsheetId) {
@@ -497,9 +526,12 @@ var Migration = {
         members: Object.keys(memberMap).length,
       });
 
+      Migration._setConfig("MIGRATION_STAGE", "EXECUTE");
+      Config.invalidate();
+
       return {
         ok: true,
-        stage: "REVIEW",
+        stage: "EXECUTE",
         target_spreadsheet_id: targetSpreadsheetId,
       };
     } catch (e) {
@@ -655,10 +687,32 @@ var Migration = {
   },
 
   /**
-   * Confirm selected members, accounts, categories, and events for migration.
-   * Stage: CONFIGURE -> REVIEW
+   * Confirm all selections for migration.
+   * Stage: CATEGORIES_EVENTS -> REVIEW
+   *
+   * This is the bulk "save everything" entry point kept for backward
+   * compatibility. New per-entity methods (setMemberSelections,
+   * setAccountSelections, setCategoryEventSelections) save each subset
+   * independently so the Treasurer can resume mid-flow.
    */
   setSelections(actorUserId, selections) {
+    var stage = Config.getOptional("MIGRATION_STAGE") || "";
+    if (
+      stage !== "INIT" &&
+      stage !== "MEMBERS" &&
+      stage !== "ACCOUNTS" &&
+      stage !== "CATEGORIES_EVENTS" &&
+      stage !== "REVIEW"
+    ) {
+      return {
+        ok: false,
+        reason:
+          "Cannot set selections from current stage: " +
+          (stage || "(none)") +
+          ". Start a migration first.",
+      };
+    }
+
     selections = selections || {};
 
     var selectionJson = JSON.stringify({
@@ -691,7 +745,7 @@ var Migration = {
 
   /**
    * Initiate migration. Creates the year folder and new spreadsheet.
-   * Stage: PREVIEW -> CONFIGURE
+   * Stage: PREVIEW -> INIT
    */
   startMigration(actorUserId) {
     var preview = Migration.getPreview();
@@ -742,7 +796,7 @@ var Migration = {
     } catch (e) {}
 
     // Store migration state in Config
-    Migration._setConfig("MIGRATION_STAGE", "CONFIGURE");
+    Migration._setConfig("MIGRATION_STAGE", "INIT");
     Migration._setConfig("MIGRATION_YEAR_LABEL", preview.year_label);
     Migration._setConfig(
       "MIGRATION_COMMITTEE_YEAR",
@@ -761,12 +815,193 @@ var Migration = {
       folder_id: yearFolder.getId(),
       ok: true,
       spreadsheet_id: spreadsheetId,
-      stage: "CONFIGURE",
+      stage: "INIT",
       year_label: preview.year_label,
     };
+  },
+
+  /**
+   * Advance the migration stage automatically when an earlier selection step
+   * has been completed. Ensures resumability: if the Treasurer closes the
+   * browser at the MEMBERS stage, getState() reports stage=MEMBERS, but
+   * advancing to the next selection step (ACCOUNTS) is straightforward.
+   * @private
+   */
+  _advanceStageIfNeeded(targetStage) {
+    var current = Config.getOptional("MIGRATION_STAGE") || "";
+    var currentIdx = MIGRATION_STAGES.indexOf(current);
+    var targetIdx = MIGRATION_STAGES.indexOf(targetStage);
+    if (currentIdx >= 0 && targetIdx > currentIdx) {
+      Migration._setConfig("MIGRATION_STAGE", targetStage);
+    }
+  },
+
+  /**
+   * Read the current MIGRATION_SELECTIONS JSON, or return empty defaults.
+   * @private
+   */
+  _getSelections_() {
+    var json = Config.getOptional("MIGRATION_SELECTIONS") || "{}";
+    try {
+      var parsed = JSON.parse(json);
+      return {
+        account_balances: parsed.account_balances || {},
+        account_ids: parsed.account_ids || [],
+        balance_reasons: parsed.balance_reasons || {},
+        category_ids: parsed.category_ids || [],
+        event_ids: parsed.event_ids || [],
+        member_ids: parsed.member_ids || [],
+      };
+    } catch (e) {
+      return {
+        account_balances: {},
+        account_ids: [],
+        balance_reasons: {},
+        category_ids: [],
+        event_ids: [],
+        member_ids: [],
+      };
+    }
+  },
+
+  /**
+   * Save member selections to MIGRATION_SELECTIONS.
+   * Stage: INIT -> MEMBERS (and from MEMBERS onwards as a no-op update).
+   */
+  setMemberSelections(actorUserId, memberIds) {
+    var stage = Config.getOptional("MIGRATION_STAGE") || "";
+    if (
+      stage !== "INIT" &&
+      stage !== "MEMBERS" &&
+      stage !== "ACCOUNTS" &&
+      stage !== "CATEGORIES_EVENTS" &&
+      stage !== "REVIEW" &&
+      stage !== "EXECUTE"
+    ) {
+      return {
+        ok: false,
+        reason:
+          "Cannot set members from current stage: " +
+          (stage || "(none)") +
+          ". Start a migration first.",
+      };
+    }
+
+    var ids = Array.isArray(memberIds) ? memberIds : [];
+    var selections = Migration._getSelections_();
+    selections.member_ids = ids;
+    Migration._setConfig("MIGRATION_SELECTIONS", JSON.stringify(selections));
+
+    // Auto-advance to MEMBERS stage if we were at INIT.
+    Migration._advanceStageIfNeeded("MEMBERS");
+
+    Audit.append(
+      actorUserId,
+      "Migration",
+      Config.getOptional("MIGRATION_YEAR_LABEL") || "",
+      "MEMBERS_SET",
+      { members: ids.length }
+    );
+
+    return { ok: true, stage: "MEMBERS" };
+  },
+
+  /**
+   * Save account selections + opening balances + balance reasons.
+   * Stage: any after INIT.
+   */
+  setAccountSelections(actorUserId, payload) {
+    var stage = Config.getOptional("MIGRATION_STAGE") || "";
+    if (
+      stage !== "INIT" &&
+      stage !== "MEMBERS" &&
+      stage !== "ACCOUNTS" &&
+      stage !== "CATEGORIES_EVENTS" &&
+      stage !== "REVIEW" &&
+      stage !== "EXECUTE"
+    ) {
+      return {
+        ok: false,
+        reason:
+          "Cannot set accounts from current stage: " +
+          (stage || "(none)") +
+          ". Start a migration first.",
+      };
+    }
+
+    payload = payload || {};
+    var selections = Migration._getSelections_();
+    selections.account_ids = Array.isArray(payload.accountIds)
+      ? payload.accountIds
+      : [];
+    selections.account_balances = payload.accountBalances || {};
+    selections.balance_reasons = payload.balanceReasons || {};
+    Migration._setConfig("MIGRATION_SELECTIONS", JSON.stringify(selections));
+
+    Migration._advanceStageIfNeeded("ACCOUNTS");
+
+    Audit.append(
+      actorUserId,
+      "Migration",
+      Config.getOptional("MIGRATION_YEAR_LABEL") || "",
+      "ACCOUNTS_SET",
+      {
+        accounts: selections.account_ids.length,
+        balances: Object.keys(selections.account_balances).length,
+      }
+    );
+
+    return { ok: true, stage: "ACCOUNTS" };
+  },
+
+  /**
+   * Save category and event selections.
+   * Stage: any after INIT.
+   */
+  setCategoryEventSelections(actorUserId, payload) {
+    var stage = Config.getOptional("MIGRATION_STAGE") || "";
+    if (
+      stage !== "INIT" &&
+      stage !== "MEMBERS" &&
+      stage !== "ACCOUNTS" &&
+      stage !== "CATEGORIES_EVENTS" &&
+      stage !== "REVIEW" &&
+      stage !== "EXECUTE"
+    ) {
+      return {
+        ok: false,
+        reason:
+          "Cannot set categories/events from current stage: " +
+          (stage || "(none)") +
+          ". Start a migration first.",
+      };
+    }
+
+    payload = payload || {};
+    var selections = Migration._getSelections_();
+    selections.category_ids = Array.isArray(payload.categoryIds)
+      ? payload.categoryIds
+      : [];
+    selections.event_ids = Array.isArray(payload.eventIds) ? payload.eventIds : [];
+    Migration._setConfig("MIGRATION_SELECTIONS", JSON.stringify(selections));
+
+    Migration._advanceStageIfNeeded("CATEGORIES_EVENTS");
+
+    Audit.append(
+      actorUserId,
+      "Migration",
+      Config.getOptional("MIGRATION_YEAR_LABEL") || "",
+      "CATEGORIES_EVENTS_SET",
+      {
+        categories: selections.category_ids.length,
+        events: selections.event_ids.length,
+      }
+    );
+
+    return { ok: true, stage: "CATEGORIES_EVENTS" };
   },
 };
 
 if (typeof module !== "undefined") {
-  module.exports = { Migration };
+  module.exports = { MIGRATION_STAGES, Migration };
 }

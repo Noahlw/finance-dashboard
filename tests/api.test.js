@@ -709,7 +709,9 @@ describe("Api.js", () => {
         title: "Hack",
       });
       expect(result.ok).toBe(false);
-      expect(result.error.message).toContain("Cannot edit a APPROVED budget request");
+      expect(result.error.message).toContain(
+        "Cannot edit a APPROVED budget request"
+      );
     });
   });
 
@@ -928,9 +930,13 @@ describe("Api.js", () => {
         to: "APPROVED",
       });
       const { api_decisionBudgetRequest } = require("../Api.js");
-      const { data: result } = api_decisionBudgetRequest("BUDGET-26A-001", "APPROVE", {
-        decision_note: "Looks good",
-      });
+      const { data: result } = api_decisionBudgetRequest(
+        "BUDGET-26A-001",
+        "APPROVE",
+        {
+          decision_note: "Looks good",
+        }
+      );
       expect(result.to).toBe("APPROVED");
     });
   });
@@ -940,7 +946,9 @@ describe("Api.js", () => {
       global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => "" });
       const result = api_getMyClaims();
       expect(result.ok).toBe(false);
-      expect(result.error.message).toContain("User not authenticated (no active session)");
+      expect(result.error.message).toContain(
+        "User not authenticated (no active session)"
+      );
     });
 
     it("should return empty arrays if user is unknown", () => {
@@ -1200,7 +1208,9 @@ describe("Api.js", () => {
       const { api_editClaim } = require("../Api.js");
       const result = api_editClaim(payload);
       expect(result.ok).toBe(false);
-      expect(result.error.message).toContain("Only SUBMITTED claims can be edited.");
+      expect(result.error.message).toContain(
+        "Only SUBMITTED claims can be edited."
+      );
     });
   });
 
@@ -1351,7 +1361,10 @@ describe("Api.js", () => {
         }),
       });
       const { api_addMember } = require("../Api.js");
-      const result = api_addMember({ display_name: "Dave", student_id: "S123456" });
+      const result = api_addMember({
+        display_name: "Dave",
+        student_id: "S123456",
+      });
       expect(result.ok).toBe(false);
       expect(result.error.message).toContain("member");
     });
@@ -1529,7 +1542,7 @@ describe("Api.js", () => {
       expect(result.ok).toBe(false);
       expect(result.error.code).toBe("VALIDATION_ERROR");
       expect(result.error.details.errors.length).toBeGreaterThanOrEqual(3);
-      var fields = result.error.details.errors.map(function (e) { return e.field; });
+      var fields = result.error.details.errors.map((e) => e.field);
       expect(fields).toContain("claimantId");
       expect(fields).toContain("amount");
       expect(fields).toContain("uuid");
@@ -1541,7 +1554,10 @@ describe("Api.js", () => {
       });
       global.Ids.nextId.mockReturnValueOnce("CLAIM-ATOMIC");
       global.Ids.childId.mockReturnValueOnce("CLI-ATOMIC-1");
-      global.Audit = { _nowIso: () => "2026-07-21T12:00:00Z", append: jest.fn() };
+      global.Audit = {
+        _nowIso: () => "2026-07-21T12:00:00Z",
+        append: jest.fn(),
+      };
       global.Config = { getNum: () => 14, getOptional: () => "" };
 
       global.Engine.transition.mockReturnValueOnce({
@@ -1556,8 +1572,8 @@ describe("Api.js", () => {
         claimantId: "MEMBER-001",
         expenseDate: "2026-07-15",
         notes: "Office supplies",
-        payoutMethod: "FPS",
         payoutHandle: "91234567",
+        payoutMethod: "FPS",
         semester: "26A",
         uuid: "atomic-uuid-1",
       };
@@ -1582,7 +1598,14 @@ describe("Api.js", () => {
         getDataRange: () => ({
           getValues: () => [
             [],
-            ["U-001", "Test User", "COMMITTEE", "test@example.com", true, "2026-01-01"],
+            [
+              "U-001",
+              "Test User",
+              "COMMITTEE",
+              "test@example.com",
+              true,
+              "2026-01-01",
+            ],
           ],
         }),
       };
@@ -1592,14 +1615,34 @@ describe("Api.js", () => {
         getRange: () => ({ getValues: () => [], setValues: jest.fn() }),
       };
 
-      var existingSheet = { getRange: jest.fn(() => ({ setValue: jest.fn() })) };
+      var existingSheet = {
+        getRange: jest.fn(() => ({ setValue: jest.fn() })),
+      };
       global.Engine._loadRow.mockReturnValueOnce({
         rowIndex: 2,
         sheet: existingSheet,
         values: [
-          "CLAIM-DRAFT-1", "M-001", "DRAFT", "", "", "", "", "", "", "",
-          100, false, false, "Old note", "old-uuid", "U-001",
-          "2026-07-10", "26A", "", "FPS", "",
+          "CLAIM-DRAFT-1",
+          "M-001",
+          "DRAFT",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          100,
+          false,
+          false,
+          "Old note",
+          "old-uuid",
+          "U-001",
+          "2026-07-10",
+          "26A",
+          "",
+          "FPS",
+          "",
         ],
       });
       global.Engine.transition.mockReturnValueOnce({
@@ -1608,19 +1651,21 @@ describe("Api.js", () => {
         to: "SUBMITTED",
       });
 
-      global.getSheet_.mockImplementation(function (tab) {
-        if (tab === "Users") return usersSheet;
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === "Users") {
+          return usersSheet;
+        }
         return defSheet;
       });
 
       var payload = {
-        claimId: "CLAIM-DRAFT-1",
         amount: 250,
         claimantId: "MEMBER-001",
+        claimId: "CLAIM-DRAFT-1",
         expenseDate: "2026-07-20",
         notes: "Updated notes",
-        payoutMethod: "PAYME",
         payoutHandle: "payme-id",
+        payoutMethod: "PAYME",
         semester: "26A",
         uuid: "atomic-draft-uuid",
       };
@@ -1628,11 +1673,19 @@ describe("Api.js", () => {
       var { api_atomicSubmitClaim } = require("../Api.js");
       var result = api_atomicSubmitClaim(payload);
 
-      if (!result.ok) throw new Error("DRAFTUPD: " + result.error.code + " " + result.error.message);
+      if (!result.ok) {
+        throw new Error(
+          "DRAFTUPD: " + result.error.code + " " + result.error.message
+        );
+      }
       expect(result.ok).toBe(true);
       expect(existingSheet.getRange).toHaveBeenCalled();
       expect(global.Engine.transition).toHaveBeenCalledWith(
-        "ExpenseClaim", "CLAIM-DRAFT-1", "SUBMIT", "U-001", {}
+        "ExpenseClaim",
+        "CLAIM-DRAFT-1",
+        "SUBMIT",
+        "U-001",
+        {}
       );
     });
 
@@ -1650,29 +1703,77 @@ describe("Api.js", () => {
         getDataRange: () => ({
           getValues: () => [
             [],
-            ["U-001", "Test User", "COMMITTEE", "test@example.com", true, "2026-01-01"],
+            [
+              "U-001",
+              "Test User",
+              "COMMITTEE",
+              "test@example.com",
+              true,
+              "2026-01-01",
+            ],
           ],
         }),
-        getRange: () => ({ getValues: () => [], setValues: jest.fn(), setValue: jest.fn() }),
         getMaxRows: () => 1000,
+        getRange: () => ({
+          getValues: () => [],
+          setValue: jest.fn(),
+          setValues: jest.fn(),
+        }),
       };
       var receiptSheet = {
-        getDataRange: () => ({
-          getValues: () => [["receipt_id", "drive_file_id", "sha256", "uploaded_by"]],
-        }),
         appendRow: jest.fn(),
-        getRange: () => ({ getValues: () => [[""]], setValues: jest.fn(), setValue: jest.fn() }),
+        getDataRange: () => ({
+          getValues: () => [
+            ["receipt_id", "drive_file_id", "sha256", "uploaded_by"],
+          ],
+        }),
         getMaxRows: () => 1000,
+        getRange: () => ({
+          getValues: () => [[""]],
+          setValue: jest.fn(),
+          setValues: jest.fn(),
+        }),
       };
-      var claimsSheet = { appendRow: jest.fn(), deleteRow: jest.fn(), getLastRow: () => 1, getMaxRows: () => 1000, getRange: () => ({ getValues: () => [[""]], setValues: jest.fn(), setValue: jest.fn() }) };
-      var cliSheet = { appendRow: jest.fn(), deleteRow: jest.fn(), getRange: () => ({ getValues: () => [[""]], setValues: jest.fn(), setValue: jest.fn() }), getMaxRows: () => 1000 };
+      var claimsSheet = {
+        appendRow: jest.fn(),
+        deleteRow: jest.fn(),
+        getLastRow: () => 1,
+        getMaxRows: () => 1000,
+        getRange: () => ({
+          getValues: () => [[""]],
+          setValue: jest.fn(),
+          setValues: jest.fn(),
+        }),
+      };
+      var cliSheet = {
+        appendRow: jest.fn(),
+        deleteRow: jest.fn(),
+        getMaxRows: () => 1000,
+        getRange: () => ({
+          getValues: () => [[""]],
+          setValue: jest.fn(),
+          setValues: jest.fn(),
+        }),
+      };
 
-      global.getSheet_.mockImplementation(function (tab) {
-        if (tab === "Users") return usersSheet;
-        if (tab === "Receipts") return receiptSheet;
-        if (tab === "ExpenseClaims") return claimsSheet;
-        if (tab === "ClaimLineItems") return cliSheet;
-        return { getLastRow: () => 1, getMaxRows: () => 10, getRange: () => ({ getValues: () => [], setValues: jest.fn() }) };
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === "Users") {
+          return usersSheet;
+        }
+        if (tab === "Receipts") {
+          return receiptSheet;
+        }
+        if (tab === "ExpenseClaims") {
+          return claimsSheet;
+        }
+        if (tab === "ClaimLineItems") {
+          return cliSheet;
+        }
+        return {
+          getLastRow: () => 1,
+          getMaxRows: () => 10,
+          getRange: () => ({ getValues: () => [], setValues: jest.fn() }),
+        };
       });
 
       // Simulate transition failure
@@ -1683,23 +1784,25 @@ describe("Api.js", () => {
       });
 
       // Mock _findRowsByColumn to simulate rows that need cleanup
-      global.Engine._findRowsByColumn = jest.fn(function () {
-        return [{ rowIndex: 2, sheet: { deleteRow: jest.fn() } }];
-      });
+      global.Engine._findRowsByColumn = jest.fn(() => [
+        { rowIndex: 2, sheet: { deleteRow: jest.fn() } },
+      ]);
 
       var payload = {
         amount: 100,
         claimantId: "MEMBER-001",
         expenseDate: "2026-07-15",
         notes: "Test rollback",
-        payoutMethod: "FPS",
         payoutHandle: "91234567",
+        payoutMethod: "FPS",
+        receipts: [
+          {
+            base64Data: "dGVzdA==",
+            fileName: "rec.jpg",
+            mimeType: "image/jpeg",
+          },
+        ],
         uuid: "rollback-uuid",
-        receipts: [{
-          fileName: "rec.jpg",
-          mimeType: "image/jpeg",
-          base64Data: "dGVzdA==",
-        }],
       };
 
       var { api_atomicSubmitClaim } = require("../Api.js");
@@ -1722,7 +1825,9 @@ describe("Api.js", () => {
         .mockReturnValueOnce("CLI-QR-1");
       global.Config = { getNum: () => 14, getOptional: () => "" };
       global.Engine.transition.mockReturnValueOnce({
-        from: "DRAFT", ok: true, to: "SUBMITTED",
+        from: "DRAFT",
+        ok: true,
+        to: "SUBMITTED",
       });
 
       var payload = {
@@ -1731,21 +1836,21 @@ describe("Api.js", () => {
         claimantId: "MEMBER-001",
         expenseDate: "2026-07-15",
         notes: "Food receipts",
-        payoutMethod: "FPS",
         payoutHandle: "91234567",
-        uuid: "files-uuid",
-        receipts: [
-          {
-            fileName: "receipt1.jpg",
-            mimeType: "image/jpeg",
-            base64Data: "ZmlsZTE=",
-          },
-        ],
+        payoutMethod: "FPS",
         qrFile: {
+          base64Data: "cXJkYXRh",
           fileName: "qr.png",
           mimeType: "image/png",
-          base64Data: "cXJkYXRh",
         },
+        receipts: [
+          {
+            base64Data: "ZmlsZTE=",
+            fileName: "receipt1.jpg",
+            mimeType: "image/jpeg",
+          },
+        ],
+        uuid: "files-uuid",
       };
 
       var { api_atomicSubmitClaim } = require("../Api.js");
@@ -1769,14 +1874,16 @@ describe("Api.js", () => {
         claimantId: "MEMBER-001",
         expenseDate: "2026-07-15",
         notes: "Bad file test",
-        payoutMethod: "FPS",
         payoutHandle: "91234567",
+        payoutMethod: "FPS",
+        receipts: [
+          {
+            base64Data: "dGVzdA==",
+            fileName: "bad.exe",
+            mimeType: "application/x-msdownload",
+          },
+        ],
         uuid: "bad-file-uuid",
-        receipts: [{
-          fileName: "bad.exe",
-          mimeType: "application/x-msdownload",
-          base64Data: "dGVzdA==",
-        }],
       };
 
       var { api_atomicSubmitClaim } = require("../Api.js");
@@ -1798,19 +1905,32 @@ describe("Api.js", () => {
           getValues: jest.fn(() => [["uuid-reused"]]),
         })),
       };
-      global.getSheet_.mockImplementation(function (tab) {
+      global.getSheet_.mockImplementation((tab) => {
         if (tab === "Users") {
           return {
             getDataRange: () => ({
               getValues: () => [
                 [],
-                ["U-001", "Test User", "COMMITTEE", "test@example.com", true, "2026-01-01"],
+                [
+                  "U-001",
+                  "Test User",
+                  "COMMITTEE",
+                  "test@example.com",
+                  true,
+                  "2026-01-01",
+                ],
               ],
             }),
           };
         }
-        if (tab === "ExpenseClaims") return claimsSheet;
-        return { getLastRow: () => 1, getMaxRows: () => 10, getRange: () => ({ getValues: () => [], setValues: jest.fn() }) };
+        if (tab === "ExpenseClaims") {
+          return claimsSheet;
+        }
+        return {
+          getLastRow: () => 1,
+          getMaxRows: () => 10,
+          getRange: () => ({ getValues: () => [], setValues: jest.fn() }),
+        };
       });
 
       var payload = {
@@ -1818,8 +1938,8 @@ describe("Api.js", () => {
         claimantId: "MEMBER-001",
         expenseDate: "2026-07-15",
         notes: "Idempotent test",
-        payoutMethod: "FPS",
         payoutHandle: "91234567",
+        payoutMethod: "FPS",
         uuid: "uuid-reused",
       };
 
@@ -1937,7 +2057,14 @@ describe("Api.js", () => {
         };
       });
       const { api_uploadReceipt } = require("../Api.js");
-      const result = api_uploadReceipt("file.txt", "text/plain", "base64data", "", "", 0);
+      const result = api_uploadReceipt(
+        "file.txt",
+        "text/plain",
+        "base64data",
+        "",
+        "",
+        0
+      );
       expect(result.ok).toBe(false);
       expect(result.error.message).toContain("Unsupported file type");
     });
@@ -2055,7 +2182,14 @@ describe("Api.js", () => {
         };
       });
       const { api_uploadReceipt } = require("../Api.js");
-      const result = api_uploadReceipt("dupe.png", "image/png", "base64data", "", "", 0);
+      const result = api_uploadReceipt(
+        "dupe.png",
+        "image/png",
+        "base64data",
+        "",
+        "",
+        0
+      );
       expect(result.ok).toBe(false);
       expect(result.error.message).toContain("Duplicate receipt detected");
     });
@@ -2099,7 +2233,14 @@ describe("Api.js", () => {
         };
       });
       const { api_uploadReceipt } = require("../Api.js");
-      const result = api_uploadReceipt("large.png", "image/png", "bigbase64", "", "", 0);
+      const result = api_uploadReceipt(
+        "large.png",
+        "image/png",
+        "bigbase64",
+        "",
+        "",
+        0
+      );
       expect(result.ok).toBe(false);
       expect(result.error.message).toContain("5 MB limit");
     });
@@ -2721,7 +2862,9 @@ describe("Api.js", () => {
       const { api_attachReceipts } = require("../Api.js");
       const result = api_attachReceipts("CLAIM-ATTACH-002", ["RECEIPT-X"]);
       expect(result.ok).toBe(false);
-      expect(result.error.message).toContain("Receipts can only be attached to DRAFT, SUBMITTED, NEEDS_INFO, or VERIFIED claims");
+      expect(result.error.message).toContain(
+        "Receipts can only be attached to DRAFT, SUBMITTED, NEEDS_INFO, or VERIFIED claims"
+      );
     });
 
     it("should reject attaching receipts by a different operator", () => {
@@ -3498,7 +3641,10 @@ describe("Api.js", () => {
         to: "REJECTED",
       });
       const { api_rejectClaim } = require("../Api.js");
-      const { data: result } = api_rejectClaim("CLAIM-001", "Insufficient documentation");
+      const { data: result } = api_rejectClaim(
+        "CLAIM-001",
+        "Insufficient documentation"
+      );
       expect(result.to).toBe("REJECTED");
       expect(global.Engine.transition).toHaveBeenCalledWith(
         "ExpenseClaim",

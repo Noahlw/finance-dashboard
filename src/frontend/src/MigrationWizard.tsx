@@ -49,10 +49,64 @@ export default function MigrationWizard() {
     setActionLoading("starting");
     try {
       await apiService.startMigration();
-      alert("Migration started! Year folder and spreadsheet created.");
       loadAll();
     } catch (e) {
       setError("Start failed: " + (e as Error).message);
+    } finally {
+      setActionLoading("");
+    }
+  };
+
+  const handleSaveMembers = async () => {
+    setActionLoading("members");
+    try {
+      await apiService.setMemberSelections(selections.memberIds);
+      loadAll();
+    } catch (e) {
+      setError("Save members failed: " + (e as Error).message);
+    } finally {
+      setActionLoading("");
+    }
+  };
+
+  const handleSaveAccounts = async () => {
+    setActionLoading("accounts");
+    try {
+      await apiService.setAccountSelections({
+        accountBalances: selections.accountBalances,
+        accountIds: selections.accountIds,
+        balanceReasons: selections.balanceReasons,
+      });
+      loadAll();
+    } catch (e) {
+      setError("Save accounts failed: " + (e as Error).message);
+    } finally {
+      setActionLoading("");
+    }
+  };
+
+  const handleSaveCategoriesEvents = async () => {
+    setActionLoading("categoriesEvents");
+    try {
+      await apiService.setCategoryEventSelections({
+        categoryIds: selections.categoryIds,
+        eventIds: selections.eventIds,
+      });
+      loadAll();
+    } catch (e) {
+      setError("Save categories/events failed: " + (e as Error).message);
+    } finally {
+      setActionLoading("");
+    }
+  };
+
+  const handleConfirmAllSelections = async () => {
+    setActionLoading("review");
+    try {
+      await apiService.setMigrationSelections(selections);
+      loadAll();
+    } catch (e) {
+      setError("Confirm selections failed: " + (e as Error).message);
     } finally {
       setActionLoading("");
     }
@@ -67,23 +121,6 @@ export default function MigrationWizard() {
       setter(list.filter((x) => x !== id));
     } else {
       setter([...list, id]);
-    }
-  };
-
-  const handleConfirmSelections = async () => {
-    if (selections.memberIds.length === 0) {
-      setError("At least one member must be selected");
-      return;
-    }
-    setActionLoading("configuring");
-    try {
-      await apiService.setMigrationSelections(selections);
-      alert("Selections saved! Review the selections.");
-      loadAll();
-    } catch (e) {
-      setError("Save failed: " + (e as Error).message);
-    } finally {
-      setActionLoading("");
     }
   };
 
@@ -221,295 +258,409 @@ export default function MigrationWizard() {
     );
   }
 
-  // Stage: CONFIGURE — select what to migrate
-  if (state.stage === "CONFIGURE") {
+  // Stage: INIT — folder + spreadsheet just created; show progress
+  if (state.stage === "INIT") {
     return (
       <div className="migration-wizard">
         <section className="glass-card">
-          <h2>Configure Migration — {state.year_label}</h2>
+          <h2>Migration Initialized — {state.year_label}</h2>
           <p className="muted-text">
-            Select what to carry forward to the new annual file.
+            Target spreadsheet: <code>{state.target_spreadsheet_id}</code>
           </p>
-          <button
-            className="danger-btn"
-            disabled={!!actionLoading}
-            onClick={handleCancel}
-            style={{ marginTop: "0.5rem" }}
-          >
-            Cancel Migration
-          </button>
+          <p>
+            Year folder and spreadsheet have been created. Continue with member
+            selection below.
+          </p>
+          {preview && (
+            <p>
+              {preview.active_members.length} active members,{" "}
+              {preview.inactive_members.length} inactive members,{" "}
+              {preview.operators.length} operators
+            </p>
+          )}
+          <div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem" }}>
+            <button
+              className="primary-btn"
+              disabled={!!actionLoading}
+              onClick={handleSaveMembers}
+            >
+              {actionLoading === "members" ? "Saving..." : "Continue to Members"}
+            </button>
+            <button
+              className="danger-btn"
+              disabled={!!actionLoading}
+              onClick={handleCancel}
+            >
+              Cancel Migration
+            </button>
+          </div>
         </section>
-
-        {preview && (
-          <>
-            <section className="glass-card">
-              <h3>Members ({selections.memberIds.length} selected)</h3>
-              <div className="table-scroll">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Select</th>
-                      <th>ID</th>
-                      <th>Name</th>
-                      <th>Role</th>
-                      <th>Active</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {preview.operators.map((o) => (
-                      <tr key={o.user_id}>
-                        <td>
-                          <input checked disabled type="checkbox" />
-                        </td>
-                        <td className="mono">{o.user_id}</td>
-                        <td>{o.display_name}</td>
-                        <td>{o.role}</td>
-                        <td>{o.active ? "✓" : ""}</td>
-                      </tr>
-                    ))}
-                    {preview.active_members.map((m) => (
-                      <tr key={m.user_id}>
-                        <td>
-                          <input
-                            checked={selections.memberIds.includes(m.user_id)}
-                            onChange={() =>
-                              toggleSelection(
-                                selections.memberIds,
-                                m.user_id,
-                                (ids) =>
-                                  setSelections((s) => ({
-                                    ...s,
-                                    memberIds: ids,
-                                  }))
-                              )
-                            }
-                            type="checkbox"
-                          />
-                        </td>
-                        <td className="mono">{m.user_id}</td>
-                        <td>{m.display_name}</td>
-                        <td>{m.role}</td>
-                        <td>✓</td>
-                      </tr>
-                    ))}
-                    {preview.inactive_members.map((m) => (
-                      <tr key={m.user_id} style={{ opacity: 0.6 }}>
-                        <td>
-                          <input
-                            checked={selections.memberIds.includes(m.user_id)}
-                            onChange={() =>
-                              toggleSelection(
-                                selections.memberIds,
-                                m.user_id,
-                                (ids) =>
-                                  setSelections((s) => ({
-                                    ...s,
-                                    memberIds: ids,
-                                  }))
-                              )
-                            }
-                            type="checkbox"
-                          />
-                        </td>
-                        <td className="mono">{m.user_id}</td>
-                        <td>{m.display_name}</td>
-                        <td>{m.role}</td>
-                        <td>—</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            <section className="glass-card">
-              <h3>
-                Finance Accounts ({selections.accountIds.length} selected)
-              </h3>
-              <div className="table-scroll">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Select</th>
-                      <th>ID</th>
-                      <th>Name</th>
-                      <th>Current Balance</th>
-                      <th>Opening Balance</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {preview.accounts.map((a) => (
-                      <tr key={a.account_id}>
-                        <td>
-                          <input
-                            checked={selections.accountIds.includes(
-                              a.account_id
-                            )}
-                            onChange={() =>
-                              toggleSelection(
-                                selections.accountIds,
-                                a.account_id,
-                                (ids) =>
-                                  setSelections((s) => ({
-                                    ...s,
-                                    accountIds: ids,
-                                  }))
-                              )
-                            }
-                            type="checkbox"
-                          />
-                        </td>
-                        <td className="mono">{a.account_id}</td>
-                        <td>{a.name}</td>
-                        <td className="amount">
-                          HKD {a.current_balance.toFixed(2)}
-                        </td>
-                        <td>
-                          <input
-                            className="filter-date"
-                            onChange={(e) =>
-                              setSelections((s) => ({
-                                ...s,
-                                accountBalances: {
-                                  ...s.accountBalances,
-                                  [a.account_id]: Number(e.target.value),
-                                },
-                              }))
-                            }
-                            style={{ width: "120px" }}
-                            type="number"
-                            value={
-                              selections.accountBalances[a.account_id] ??
-                              a.current_balance
-                            }
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            <section className="glass-card">
-              <h3>
-                Categories ({selections.categoryIds.length} selected) & Events (
-                {selections.eventIds.length} selected)
-              </h3>
-              <div className="table-scroll">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Select</th>
-                      <th>Type</th>
-                      <th>ID</th>
-                      <th>Name</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {preview.categories.map((c) => (
-                      <tr key={c.category_id}>
-                        <td>
-                          <input
-                            checked={selections.categoryIds.includes(
-                              c.category_id
-                            )}
-                            onChange={() =>
-                              toggleSelection(
-                                selections.categoryIds,
-                                c.category_id,
-                                (ids) =>
-                                  setSelections((s) => ({
-                                    ...s,
-                                    categoryIds: ids,
-                                  }))
-                              )
-                            }
-                            type="checkbox"
-                          />
-                        </td>
-                        <td>Category</td>
-                        <td className="mono">{c.category_id}</td>
-                        <td>{c.name}</td>
-                      </tr>
-                    ))}
-                    {preview.events.map((e) => (
-                      <tr key={e.event_id}>
-                        <td>
-                          <input
-                            checked={selections.eventIds.includes(e.event_id)}
-                            onChange={() =>
-                              toggleSelection(
-                                selections.eventIds,
-                                e.event_id,
-                                (ids) =>
-                                  setSelections((s) => ({
-                                    ...s,
-                                    eventIds: ids,
-                                  }))
-                              )
-                            }
-                            type="checkbox"
-                          />
-                        </td>
-                        <td>Event</td>
-                        <td className="mono">{e.event_id}</td>
-                        <td>{e.name}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            <section className="glass-card">
-              <div style={{ display: "flex", gap: "0.5rem" }}>
-                <button
-                  className="primary-btn"
-                  disabled={!!actionLoading}
-                  onClick={handleConfirmSelections}
-                >
-                  {actionLoading === "configuring"
-                    ? "Saving..."
-                    : "Confirm Selections"}
-                </button>
-                <button
-                  className="secondary-btn"
-                  onClick={() => {
-                    if (preview) {
-                      setSelections({
-                        accountBalances: {},
-                        accountIds: preview.accounts.map((a) => a.account_id),
-                        balanceReasons: {},
-                        categoryIds: preview.categories
-                          .filter((c) => c.active)
-                          .map((c) => c.category_id),
-                        eventIds: preview.events.map((e) => e.event_id),
-                        memberIds: [
-                          ...preview.operators.map((o) => o.user_id),
-                          ...preview.active_members.map((m) => m.user_id),
-                        ],
-                      });
-                    }
-                  }}
-                >
-                  Select All
-                </button>
-              </div>
-            </section>
-          </>
-        )}
       </div>
     );
   }
 
-  // Stage: REVIEW — execute and activate
+  // Stage: MEMBERS — select members to carry forward
+  if (state.stage === "MEMBERS" && preview) {
+    return (
+      <div className="migration-wizard">
+        <section className="glass-card">
+          <h2>Select Members — {state.year_label}</h2>
+          <p className="muted-text">
+            Step 3 of 8: Choose which members to carry forward.
+          </p>
+        </section>
+
+        <section className="glass-card">
+          <h3>Members ({selections.memberIds.length} selected)</h3>
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Select</th>
+                  <th>ID</th>
+                  <th>Name</th>
+                  <th>Role</th>
+                  <th>Active</th>
+                </tr>
+              </thead>
+              <tbody>
+                {preview.operators.map((o) => (
+                  <tr key={o.user_id}>
+                    <td>
+                      <input checked disabled type="checkbox" />
+                    </td>
+                    <td className="mono">{o.user_id}</td>
+                    <td>{o.display_name}</td>
+                    <td>{o.role}</td>
+                    <td>{o.active ? "✓" : ""}</td>
+                  </tr>
+                ))}
+                {preview.active_members.map((m) => (
+                  <tr key={m.user_id}>
+                    <td>
+                      <input
+                        checked={selections.memberIds.includes(m.user_id)}
+                        onChange={() =>
+                          toggleSelection(
+                            selections.memberIds,
+                            m.user_id,
+                            (ids) =>
+                              setSelections((s) => ({
+                                ...s,
+                                memberIds: ids,
+                              }))
+                          )
+                        }
+                        type="checkbox"
+                      />
+                    </td>
+                    <td className="mono">{m.user_id}</td>
+                    <td>{m.display_name}</td>
+                    <td>{m.role}</td>
+                    <td>✓</td>
+                  </tr>
+                ))}
+                {preview.inactive_members.map((m) => (
+                  <tr key={m.user_id} style={{ opacity: 0.6 }}>
+                    <td>
+                      <input
+                        checked={selections.memberIds.includes(m.user_id)}
+                        onChange={() =>
+                          toggleSelection(
+                            selections.memberIds,
+                            m.user_id,
+                            (ids) =>
+                              setSelections((s) => ({
+                                ...s,
+                                memberIds: ids,
+                              }))
+                          )
+                        }
+                        type="checkbox"
+                      />
+                    </td>
+                    <td className="mono">{m.user_id}</td>
+                    <td>{m.display_name}</td>
+                    <td>{m.role}</td>
+                    <td>—</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="glass-card">
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button
+              className="primary-btn"
+              disabled={!!actionLoading || selections.memberIds.length === 0}
+              onClick={handleSaveMembers}
+            >
+              {actionLoading === "members"
+                ? "Saving..."
+                : "Save Members & Continue"}
+            </button>
+            <button
+              className="secondary-btn"
+              onClick={() => {
+                setSelections((s) => ({
+                  ...s,
+                  memberIds: [
+                    ...preview.operators.map((o) => o.user_id),
+                    ...preview.active_members.map((m) => m.user_id),
+                  ],
+                }));
+              }}
+            >
+              Select All Active
+            </button>
+            <button
+              className="danger-btn"
+              disabled={!!actionLoading}
+              onClick={handleCancel}
+            >
+              Cancel
+            </button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  // Stage: ACCOUNTS — select accounts with opening balances
+  if (state.stage === "ACCOUNTS" && preview) {
+    return (
+      <div className="migration-wizard">
+        <section className="glass-card">
+          <h2>Select Accounts — {state.year_label}</h2>
+          <p className="muted-text">
+            Step 4 of 8: Choose which accounts to carry forward and confirm
+            opening balances.
+          </p>
+        </section>
+
+        <section className="glass-card">
+          <h3>
+            Finance Accounts ({selections.accountIds.length} selected)
+          </h3>
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Select</th>
+                  <th>ID</th>
+                  <th>Name</th>
+                  <th>Current Balance</th>
+                  <th>Opening Balance</th>
+                </tr>
+              </thead>
+              <tbody>
+                {preview.accounts.map((a) => (
+                  <tr key={a.account_id}>
+                    <td>
+                      <input
+                        checked={selections.accountIds.includes(a.account_id)}
+                        onChange={() =>
+                          toggleSelection(
+                            selections.accountIds,
+                            a.account_id,
+                            (ids) =>
+                              setSelections((s) => ({
+                                ...s,
+                                accountIds: ids,
+                              }))
+                          )
+                        }
+                        type="checkbox"
+                      />
+                    </td>
+                    <td className="mono">{a.account_id}</td>
+                    <td>{a.name}</td>
+                    <td className="amount">
+                      HKD {a.current_balance.toFixed(2)}
+                    </td>
+                    <td>
+                      <input
+                        className="filter-date"
+                        onChange={(e) =>
+                          setSelections((s) => ({
+                            ...s,
+                            accountBalances: {
+                              ...s.accountBalances,
+                              [a.account_id]: Number(e.target.value),
+                            },
+                          }))
+                        }
+                        style={{ width: "120px" }}
+                        type="number"
+                        value={
+                          selections.accountBalances[a.account_id] ??
+                          a.current_balance
+                        }
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="glass-card">
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button
+              className="primary-btn"
+              disabled={!!actionLoading || selections.accountIds.length === 0}
+              onClick={handleSaveAccounts}
+            >
+              {actionLoading === "accounts"
+                ? "Saving..."
+                : "Save Accounts & Continue"}
+            </button>
+            <button
+              className="danger-btn"
+              disabled={!!actionLoading}
+              onClick={handleCancel}
+            >
+              Cancel
+            </button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  // Stage: CATEGORIES_EVENTS — select categories and events
+  if (state.stage === "CATEGORIES_EVENTS" && preview) {
+    return (
+      <div className="migration-wizard">
+        <section className="glass-card">
+          <h2>Select Categories & Events — {state.year_label}</h2>
+          <p className="muted-text">
+            Step 5 of 8: Choose which categories and events to carry forward.
+          </p>
+        </section>
+
+        <section className="glass-card">
+          <h3>
+            Categories ({selections.categoryIds.length} selected) & Events (
+            {selections.eventIds.length} selected)
+          </h3>
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Select</th>
+                  <th>Type</th>
+                  <th>ID</th>
+                  <th>Name</th>
+                </tr>
+              </thead>
+              <tbody>
+                {preview.categories.map((c) => (
+                  <tr key={c.category_id}>
+                    <td>
+                      <input
+                        checked={selections.categoryIds.includes(
+                          c.category_id
+                        )}
+                        onChange={() =>
+                          toggleSelection(
+                            selections.categoryIds,
+                            c.category_id,
+                            (ids) =>
+                              setSelections((s) => ({
+                                ...s,
+                                categoryIds: ids,
+                              }))
+                          )
+                        }
+                        type="checkbox"
+                      />
+                    </td>
+                    <td>Category</td>
+                    <td className="mono">{c.category_id}</td>
+                    <td>{c.name}</td>
+                  </tr>
+                ))}
+                {preview.events.map((e) => (
+                  <tr key={e.event_id}>
+                    <td>
+                      <input
+                        checked={selections.eventIds.includes(e.event_id)}
+                        onChange={() =>
+                          toggleSelection(
+                            selections.eventIds,
+                            e.event_id,
+                            (ids) =>
+                              setSelections((s) => ({
+                                ...s,
+                                eventIds: ids,
+                              }))
+                          )
+                        }
+                        type="checkbox"
+                      />
+                    </td>
+                    <td>Event</td>
+                    <td className="mono">{e.event_id}</td>
+                    <td>{e.name}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="glass-card">
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button
+              className="primary-btn"
+              disabled={!!actionLoading}
+              onClick={handleSaveCategoriesEvents}
+            >
+              {actionLoading === "categoriesEvents"
+                ? "Saving..."
+                : "Save Categories & Events"}
+            </button>
+            <button
+              className="secondary-btn"
+              onClick={() => {
+                setSelections((s) => ({
+                  ...s,
+                  categoryIds: preview.categories
+                    .filter((c) => c.active)
+                    .map((c) => c.category_id),
+                  eventIds: preview.events.map((e) => e.event_id),
+                }));
+              }}
+            >
+              Select All Active
+            </button>
+            <button
+              className="danger-btn"
+              disabled={!!actionLoading}
+              onClick={handleCancel}
+            >
+              Cancel
+            </button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  // Stage: REVIEW — final review before execute
   if (state.stage === "REVIEW") {
     return (
       <div className="migration-wizard">
         <section className="glass-card">
           <h2>Review Migration — {state.year_label}</h2>
           <p className="muted-text">
+            Step 6 of 8: Confirm all selections before executing.
+          </p>
+          <p>
             Target spreadsheet: <code>{state.target_spreadsheet_id}</code>
           </p>
           <p>
@@ -528,6 +679,40 @@ export default function MigrationWizard() {
                 ? "Executing..."
                 : "Execute Migration"}
             </button>
+            <button
+              className="secondary-btn"
+              disabled={!!actionLoading}
+              onClick={handleConfirmAllSelections}
+            >
+              Re-confirm Selections
+            </button>
+            <button
+              className="danger-btn"
+              disabled={!!actionLoading}
+              onClick={handleCancel}
+            >
+              Cancel
+            </button>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  // Stage: EXECUTE — migration data written, ready to activate
+  if (state.stage === "EXECUTE") {
+    return (
+      <div className="migration-wizard">
+        <section className="glass-card">
+          <h2>Migration Executed — {state.year_label}</h2>
+          <p className="muted-text">
+            Step 7 of 8: Data has been written to the new spreadsheet. Review
+            the target spreadsheet before activating.
+          </p>
+          <p>
+            Target spreadsheet: <code>{state.target_spreadsheet_id}</code>
+          </p>
+          <div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem" }}>
             <button
               className="primary-btn"
               disabled={!!actionLoading}

@@ -346,8 +346,10 @@ var Payouts = {
         return { ok: false, reason: "ENTITY_NOT_FOUND" };
       }
       var pc = COLS.Payouts;
-      if (row.values[pc.status - 1] !== STATUS.Payout.QUEUED &&
-          row.values[pc.status - 1] !== STATUS.Payout.SENT) {
+      if (
+        row.values[pc.status - 1] !== STATUS.Payout.QUEUED &&
+        row.values[pc.status - 1] !== STATUS.Payout.SENT
+      ) {
         return {
           ok: false,
           reason: "Only QUEUED or SENT payouts can be marked as failed.",
@@ -373,7 +375,7 @@ var Payouts = {
 
       Audit.append(actorUserId, "Payout", payoutId, "FAILED", {
         reason: failureReason,
-        wasSent: wasSent,
+        wasSent,
       });
       Discord.postTreasury(
         "🚫 **" +

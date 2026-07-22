@@ -22,11 +22,11 @@ function doGet(e) {
 }
 
 function _ok(data) {
-  return { ok: true, data: data };
+  return { data, ok: true };
 }
 
 function _err(code, message, details) {
-  return { ok: false, error: { code: code, message: message, details: details || {} } };
+  return { error: { code, details: details || {}, message }, ok: false };
 }
 
 function api_resolveSession() {
@@ -65,7 +65,10 @@ function api_resolveSession() {
 function api_getMyClaims() {
   var email = Session.getActiveUser().getEmail();
   if (!email) {
-    return _err("NOT_AUTHENTICATED", "User not authenticated (no active session)");
+    return _err(
+      "NOT_AUTHENTICATED",
+      "User not authenticated (no active session)"
+    );
   }
 
   var user = _resolveUser(email);
@@ -100,16 +103,13 @@ function api_getMyClaims() {
 
   for (var i = 1; i < allLines.length; i++) {
     var rId = allLines[i][c_brl.request_id - 1];
-    if (
-      requestIds[rId] &&
-      allLines[i][c_brl.line_status - 1] === "APPROVED"
-    ) {
+    if (requestIds[rId] && allLines[i][c_brl.line_status - 1] === "APPROVED") {
       var remaining = allLines[i][c_brl.remaining - 1];
       budgetLines.push({
         description: allLines[i][c_brl.description - 1],
         line_id: allLines[i][c_brl.line_id - 1],
         overBudget: remaining <= 0,
-        remaining: remaining,
+        remaining,
         request_id: rId,
       });
     }
@@ -163,7 +163,10 @@ function api_uploadReceipt(
   }
 
   if (allowedReceiptMimes.indexOf(mimeType) === -1) {
-    return _err("INVALID_PARAMETER", "Unsupported file type. Allowed: PNG, JPEG, GIF, PDF.");
+    return _err(
+      "INVALID_PARAMETER",
+      "Unsupported file type. Allowed: PNG, JPEG, GIF, PDF."
+    );
   }
 
   var sha256 = _sha256Hex(bytes);
@@ -182,7 +185,10 @@ function api_uploadReceipt(
       if (receiptData[i][uploaderCol] === user.userId) {
         return _ok({ receiptId: receiptData[i][idCol] });
       }
-      return _err("UNAUTHORIZED", "Duplicate receipt detected (uploaded by another user).");
+      return _err(
+        "UNAUTHORIZED",
+        "Duplicate receipt detected (uploaded by another user)."
+      );
     }
     if (
       vendor &&
@@ -254,7 +260,10 @@ function api_deleteOrphanedReceipt(receiptId) {
   }
 
   if (receiptRow.values[COLS.Receipts.uploaded_by - 1] !== user.userId) {
-    return _err("UNAUTHORIZED", "Unauthorized: only the uploader can delete this receipt");
+    return _err(
+      "UNAUTHORIZED",
+      "Unauthorized: only the uploader can delete this receipt"
+    );
   }
 
   var driveFileId = receiptRow.values[COLS.Receipts.drive_file_id - 1];
@@ -288,7 +297,10 @@ function api_submitClaim(payload) {
     return _err("INVALID_PARAMETER", "Claimant is required");
   }
   if (!_findVaultByUserId(payload.claimantId)) {
-    return _err("INVALID_PARAMETER", "Claimant SID not found in member directory");
+    return _err(
+      "INVALID_PARAMETER",
+      "Claimant SID not found in member directory"
+    );
   }
 
   if (
@@ -529,7 +541,10 @@ function api_editClaim(payload) {
 function api_getMyBudgetRequests() {
   var email = Session.getActiveUser().getEmail();
   if (!email) {
-    return _err("NOT_AUTHENTICATED", "User not authenticated (no active session)");
+    return _err(
+      "NOT_AUTHENTICATED",
+      "User not authenticated (no active session)"
+    );
   }
 
   var user = _resolveUser(email);
@@ -550,33 +565,35 @@ function api_getMyBudgetRequests() {
   var lineC = COLS.BudgetRequestLines;
   var lineSheet = getSheet_(TABS.BUDGET_REQUEST_LINES);
 
-  return _ok(reqRows.map((r) => {
-    var id = r.values[c.request_id - 1];
-    var lineRows = Engine._findRowsByColumn(lineSheet, lineC.request_id, id);
-    return {
-      decided_at: r.values[c.decided_at - 1],
-      decided_by: r.values[c.decided_by - 1],
-      decision_note: r.values[c.decision_note - 1],
-      event_id: r.values[c.event_id - 1],
-      justification: r.values[c.justification - 1],
-      lines: lineRows.map((l) => ({
-        approved_amount: l.values[lineC.approved_amount - 1],
-        category_id: l.values[lineC.category_id - 1],
-        claimed_amount: l.values[lineC.claimed_amount - 1] || 0,
-        description: l.values[lineC.description - 1],
-        line_id: l.values[lineC.line_id - 1],
-        line_status: l.values[lineC.line_status - 1],
-        remaining: l.values[lineC.remaining - 1] || 0,
-        requested_amount: l.values[lineC.requested_amount - 1],
-      })),
-      needed_by: r.values[c.needed_by - 1],
-      request_id: id,
-      requester_id: r.values[c.requester_id - 1],
-      status: r.values[c.status - 1],
-      submitted_at: r.values[c.submitted_at - 1],
-      title: r.values[c.title - 1],
-    };
-  }));
+  return _ok(
+    reqRows.map((r) => {
+      var id = r.values[c.request_id - 1];
+      var lineRows = Engine._findRowsByColumn(lineSheet, lineC.request_id, id);
+      return {
+        decided_at: r.values[c.decided_at - 1],
+        decided_by: r.values[c.decided_by - 1],
+        decision_note: r.values[c.decision_note - 1],
+        event_id: r.values[c.event_id - 1],
+        justification: r.values[c.justification - 1],
+        lines: lineRows.map((l) => ({
+          approved_amount: l.values[lineC.approved_amount - 1],
+          category_id: l.values[lineC.category_id - 1],
+          claimed_amount: l.values[lineC.claimed_amount - 1] || 0,
+          description: l.values[lineC.description - 1],
+          line_id: l.values[lineC.line_id - 1],
+          line_status: l.values[lineC.line_status - 1],
+          remaining: l.values[lineC.remaining - 1] || 0,
+          requested_amount: l.values[lineC.requested_amount - 1],
+        })),
+        needed_by: r.values[c.needed_by - 1],
+        request_id: id,
+        requester_id: r.values[c.requester_id - 1],
+        status: r.values[c.status - 1],
+        submitted_at: r.values[c.submitted_at - 1],
+        title: r.values[c.title - 1],
+      };
+    })
+  );
 }
 
 /**
@@ -609,7 +626,10 @@ function api_saveBudgetRequestDraft(payload) {
         curStatus !== STATUS.BudgetRequest.DRAFT &&
         curStatus !== STATUS.BudgetRequest.NEEDS_INFO
       ) {
-        return _err("ILLEGAL_STATE", "Cannot edit a " + curStatus + " budget request");
+        return _err(
+          "ILLEGAL_STATE",
+          "Cannot edit a " + curStatus + " budget request"
+        );
       }
       requestId = payload.request_id;
     }
@@ -718,7 +738,10 @@ function api_submitBudgetRequest(requestId) {
   } else if (curStatus === STATUS.BudgetRequest.NEEDS_INFO) {
     action = "RESUBMIT";
   } else {
-    return _err("ILLEGAL_STATE", "Cannot submit a " + curStatus + " budget request");
+    return _err(
+      "ILLEGAL_STATE",
+      "Cannot submit a " + curStatus + " budget request"
+    );
   }
 
   var result = Engine.transition(
@@ -889,7 +912,11 @@ function _findVaultByStudentId(studentId) {
  * List all members (Users with role=MEMBER). Excludes Vault PII (SID, payout details).
  */
 function api_getMembers() {
-  try { _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
 
   var sheet = getSheet_(TABS.USERS);
   var values = sheet.getDataRange().getValues();
@@ -915,7 +942,11 @@ function api_getMembers() {
  */
 function api_addMember(payload) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   if (!(payload.student_id && String(payload.student_id).trim())) {
     return _err("INVALID_PARAMETER", "Student ID is required");
   }
@@ -927,7 +958,10 @@ function api_addMember(payload) {
   if (existing) {
     var user = _findUserById(existing.values[COLS.Vault.user_id - 1]);
     if (user && user.values[COLS.Users.active - 1] === true) {
-      return _err("ILLEGAL_STATE", "Active member with this SID already exists");
+      return _err(
+        "ILLEGAL_STATE",
+        "Active member with this SID already exists"
+      );
     }
     return _err(
       "ILLEGAL_STATE",
@@ -979,7 +1013,11 @@ function api_addMember(payload) {
  */
 function api_reactivateMember(userId) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   var user = _findUserById(userId);
   if (!user) {
     return _err("NOT_FOUND", "Member not found");
@@ -1007,12 +1045,19 @@ function api_reactivateMember(userId) {
  */
 function api_saveClaimDraft(payload) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   if (!payload.claimantId) {
     return _err("INVALID_PARAMETER", "Claimant is required");
   }
   if (!_findVaultByUserId(payload.claimantId)) {
-    return _err("INVALID_PARAMETER", "Claimant SID not found in member directory");
+    return _err(
+      "INVALID_PARAMETER",
+      "Claimant SID not found in member directory"
+    );
   }
   if (!payload.uuid) {
     return _err("INVALID_PARAMETER", "uuid is required");
@@ -1164,7 +1209,11 @@ function api_saveClaimDraft(payload) {
  */
 function api_attachReceipts(claimId, receiptIds) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   if (!(receiptIds && Array.isArray(receiptIds)) || receiptIds.length === 0) {
     return _err("INVALID_PARAMETER", "receiptIds array is required");
   }
@@ -1226,7 +1275,11 @@ function api_attachReceipts(claimId, receiptIds) {
  */
 function api_submitDraftClaim(claimId) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   var existing = Engine._loadRow("ExpenseClaim", claimId);
   if (!existing) {
     return _err("NOT_FOUND", "Claim not found");
@@ -1264,7 +1317,11 @@ function api_submitDraftClaim(claimId) {
  */
 function api_atomicSubmitClaim(payload) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
 
   // ── Upfront validation ─────────────────────────────────────────────
   var errors = []; // { field: String, message: String }
@@ -1272,7 +1329,10 @@ function api_atomicSubmitClaim(payload) {
   if (!payload.claimantId) {
     errors.push({ field: "claimantId", message: "Claimant is required" });
   } else if (!_findVaultByUserId(payload.claimantId)) {
-    errors.push({ field: "claimantId", message: "Claimant SID not found in member directory" });
+    errors.push({
+      field: "claimantId",
+      message: "Claimant SID not found in member directory",
+    });
   }
 
   var total = Number(payload.amount) || 0;
@@ -1280,7 +1340,10 @@ function api_atomicSubmitClaim(payload) {
     errors.push({ field: "amount", message: "Amount must be greater than 0" });
   }
   if (total > 0 && total !== Math.round(total * 100) / 100) {
-    errors.push({ field: "amount", message: "Amount must have at most two decimal places" });
+    errors.push({
+      field: "amount",
+      message: "Amount must have at most two decimal places",
+    });
   }
 
   if (!payload.expenseDate) {
@@ -1290,56 +1353,86 @@ function api_atomicSubmitClaim(payload) {
     errors.push({ field: "notes", message: "Notes are required" });
   }
   if (!payload.uuid) {
-    errors.push({ field: "uuid", message: "Idempotency key (uuid) is required" });
+    errors.push({
+      field: "uuid",
+      message: "Idempotency key (uuid) is required",
+    });
   }
 
   var validMethods = ["FPS", "PAYME", "BANK", "CASH", "OTHER"];
-  if (payload.payoutMethod && validMethods.indexOf(payload.payoutMethod) === -1) {
-    errors.push({ field: "payoutMethod", message: "Invalid payout method: " + payload.payoutMethod });
+  if (
+    payload.payoutMethod &&
+    validMethods.indexOf(payload.payoutMethod) === -1
+  ) {
+    errors.push({
+      field: "payoutMethod",
+      message: "Invalid payout method: " + payload.payoutMethod,
+    });
   }
   if (
     (payload.payoutMethod === "FPS" || payload.payoutMethod === "PAYME") &&
     !payload.payoutHandle
   ) {
-    errors.push({ field: "payoutHandle", message: "Payout handle is required for " + payload.payoutMethod });
+    errors.push({
+      field: "payoutHandle",
+      message: "Payout handle is required for " + payload.payoutMethod,
+    });
   }
 
   // Validate receipt files upfront
   var receipts = payload.receipts || [];
   for (var ri = 0; ri < receipts.length; ri++) {
     var rf = receipts[ri];
-    if (!rf.fileName || !rf.mimeType || !rf.base64Data) {
-      errors.push({ field: "receipts[" + ri + "]", message: "Receipt " + (ri + 1) + " is missing file data" });
+    if (!(rf.fileName && rf.mimeType && rf.base64Data)) {
+      errors.push({
+        field: "receipts[" + ri + "]",
+        message: "Receipt " + (ri + 1) + " is missing file data",
+      });
       continue;
     }
     if (allowedReceiptMimes.indexOf(rf.mimeType) === -1) {
-      errors.push({ field: "receipts[" + ri + "]", message: "Unsupported file type for receipt " + (ri + 1) + ". Allowed: PNG, JPEG, GIF, PDF." });
+      errors.push({
+        field: "receipts[" + ri + "]",
+        message:
+          "Unsupported file type for receipt " +
+          (ri + 1) +
+          ". Allowed: PNG, JPEG, GIF, PDF.",
+      });
     }
     var receiptBytes = Utilities.base64Decode(rf.base64Data);
     if (receiptBytes.length > maxReceiptBytes) {
-      errors.push({ field: "receipts[" + ri + "]", message: "Receipt " + (ri + 1) + " exceeds 5 MB limit." });
+      errors.push({
+        field: "receipts[" + ri + "]",
+        message: "Receipt " + (ri + 1) + " exceeds 5 MB limit.",
+      });
     }
   }
 
   // Validate QR file if present
   var qrFile = payload.qrFile || null;
   if (qrFile) {
-    if (!qrFile.fileName || !qrFile.mimeType || !qrFile.base64Data) {
-      errors.push({ field: "qrFile", message: "QR file is missing file data" });
-    } else {
+    if (qrFile.fileName && qrFile.mimeType && qrFile.base64Data) {
       var qrMimes = ["image/png", "image/jpeg", "image/jpg"];
       if (qrMimes.indexOf(qrFile.mimeType) === -1) {
-        errors.push({ field: "qrFile", message: "QR file must be PNG or JPEG" });
+        errors.push({
+          field: "qrFile",
+          message: "QR file must be PNG or JPEG",
+        });
       }
       var qrBytes = Utilities.base64Decode(qrFile.base64Data);
       if (qrBytes.length > maxReceiptBytes) {
-        errors.push({ field: "qrFile", message: "QR file exceeds 5 MB limit." });
+        errors.push({
+          field: "qrFile",
+          message: "QR file exceeds 5 MB limit.",
+        });
       }
+    } else {
+      errors.push({ field: "qrFile", message: "QR file is missing file data" });
     }
   }
 
   if (errors.length > 0) {
-    return _err("VALIDATION_ERROR", "Multiple validation errors", { errors: errors });
+    return _err("VALIDATION_ERROR", "Multiple validation errors", { errors });
   }
 
   // ── Idempotency check ──────────────────────────────────────────────
@@ -1362,30 +1455,46 @@ function api_atomicSubmitClaim(payload) {
       try {
         if (art.type === "claim") {
           var claimSheet = getSheet_(TABS.EXPENSE_CLAIMS);
-          var claimRows = Engine._findRowsByColumn(claimSheet, COLS.ExpenseClaims.claim_id, art.entityId);
+          var claimRows = Engine._findRowsByColumn(
+            claimSheet,
+            COLS.ExpenseClaims.claim_id,
+            art.entityId
+          );
           for (var cdi = claimRows.length - 1; cdi >= 0; cdi--) {
             claimSheet.deleteRow(claimRows[cdi].rowIndex);
           }
         }
         if (art.type === "claimline") {
           var cliSheet = getSheet_(TABS.CLAIM_LINE_ITEMS);
-          var cliRows = Engine._findRowsByColumn(cliSheet, COLS.ClaimLineItems.claim_id, art.entityId);
+          var cliRows = Engine._findRowsByColumn(
+            cliSheet,
+            COLS.ClaimLineItems.claim_id,
+            art.entityId
+          );
           for (var li = cliRows.length - 1; li >= 0; li--) {
             cliSheet.deleteRow(cliRows[li].rowIndex);
           }
         }
         if (art.type === "receipt") {
           var rcSheet = getSheet_(TABS.RECEIPTS);
-          var rcRows = Engine._findRowsByColumn(rcSheet, COLS.Receipts.receipt_id, art.entityId);
+          var rcRows = Engine._findRowsByColumn(
+            rcSheet,
+            COLS.Receipts.receipt_id,
+            art.entityId
+          );
           for (var rdi = rcRows.length - 1; rdi >= 0; rdi--) {
             rcSheet.deleteRow(rcRows[rdi].rowIndex);
           }
         }
         if (art.type === "drivefile" && art.driveFileId) {
-          try { DriveApp.getFileById(art.driveFileId).setTrashed(true); } catch (e) {}
+          try {
+            DriveApp.getFileById(art.driveFileId).setTrashed(true);
+          } catch (e) {}
         }
         if (art.type === "drivefolder" && art.driveFileId) {
-          try { DriveApp.getFolderById(art.driveFileId).setTrashed(true); } catch (e) {}
+          try {
+            DriveApp.getFolderById(art.driveFileId).setTrashed(true);
+          } catch (e) {}
         }
       } catch (e) {
         // Best-effort cleanup
@@ -1405,24 +1514,43 @@ function api_atomicSubmitClaim(payload) {
       if (!existing) {
         throw new Error("Claim not found");
       }
-      if (existing.values[COLS.ExpenseClaims.created_by - 1] !== operator.userId) {
+      if (
+        existing.values[COLS.ExpenseClaims.created_by - 1] !== operator.userId
+      ) {
         throw new Error("Unauthorized");
       }
-      if (existing.values[COLS.ExpenseClaims.status - 1] !== STATUS.ExpenseClaim.DRAFT) {
+      if (
+        existing.values[COLS.ExpenseClaims.status - 1] !==
+        STATUS.ExpenseClaim.DRAFT
+      ) {
         throw new Error("Only DRAFT claims can be submitted");
       }
       // Update existing draft
       var sheet = existing.sheet;
-      sheet.getRange(existing.rowIndex, c.claimant_id).setValue(payload.claimantId);
+      sheet
+        .getRange(existing.rowIndex, c.claimant_id)
+        .setValue(payload.claimantId);
       sheet.getRange(existing.rowIndex, c.total_amount).setValue(total);
       sheet.getRange(existing.rowIndex, c.notes).setValue(payload.notes || "");
       sheet.getRange(existing.rowIndex, c.late_flag).setValue(lateFlag);
-      sheet.getRange(existing.rowIndex, c.expense_date).setValue(payload.expenseDate || "");
-      sheet.getRange(existing.rowIndex, c.semester).setValue(payload.semester || "");
-      sheet.getRange(existing.rowIndex, c.event_id).setValue(payload.eventId || "");
-      sheet.getRange(existing.rowIndex, c.payout_method).setValue(payload.payoutMethod || "FPS");
-      sheet.getRange(existing.rowIndex, c.payout_handle).setValue(payload.payoutHandle || "");
-      sheet.getRange(existing.rowIndex, c.processed_response_id).setValue(payload.uuid);
+      sheet
+        .getRange(existing.rowIndex, c.expense_date)
+        .setValue(payload.expenseDate || "");
+      sheet
+        .getRange(existing.rowIndex, c.semester)
+        .setValue(payload.semester || "");
+      sheet
+        .getRange(existing.rowIndex, c.event_id)
+        .setValue(payload.eventId || "");
+      sheet
+        .getRange(existing.rowIndex, c.payout_method)
+        .setValue(payload.payoutMethod || "FPS");
+      sheet
+        .getRange(existing.rowIndex, c.payout_handle)
+        .setValue(payload.payoutHandle || "");
+      sheet
+        .getRange(existing.rowIndex, c.processed_response_id)
+        .setValue(payload.uuid);
     } else {
       _appendRow(getSheet_(TABS.EXPENSE_CLAIMS), [
         claimId,
@@ -1447,12 +1575,13 @@ function api_atomicSubmitClaim(payload) {
         payload.payoutMethod || "FPS",
         payload.payoutHandle || "",
       ]);
-      createdIds.push({ type: "claim", entityId: claimId });
+      createdIds.push({ entityId: claimId, type: "claim" });
     }
 
     // ── Upload receipt files ──────────────────────────────────────────
     var receiptIdList = [];
-    var folderId = PropertiesService.getScriptProperties().getProperty("RECEIPTS_FOLDER_ID");
+    var folderId =
+      PropertiesService.getScriptProperties().getProperty("RECEIPTS_FOLDER_ID");
     var receiptFolder = folderId ? DriveApp.getFolderById(folderId) : null;
 
     for (var i = 0; i < receipts.length; i++) {
@@ -1474,12 +1603,19 @@ function api_atomicSubmitClaim(payload) {
             foundDup = true;
           } else {
             _cleanup();
-            return _err("UNAUTHORIZED", "Duplicate receipt detected (receipt " + (i + 1) + " uploaded by another user).");
+            return _err(
+              "UNAUTHORIZED",
+              "Duplicate receipt detected (receipt " +
+                (i + 1) +
+                " uploaded by another user)."
+            );
           }
           break;
         }
       }
-      if (foundDup) { continue; }
+      if (foundDup) {
+        continue;
+      }
 
       // Upload to Drive
       var blob = Utilities.newBlob(bytes, rf.mimeType, rf.fileName);
@@ -1488,9 +1624,12 @@ function api_atomicSubmitClaim(payload) {
       blob.setName(newName);
       var file = receiptFolder.createFile(blob);
       var driveFileId = file.getId();
-      createdIds.push({ type: "drivefile", entityId: receiptId, driveFileId: driveFileId });
+      createdIds.push({ driveFileId, entityId: receiptId, type: "drivefile" });
 
-      var fileLink = '=HYPERLINK("https://drive.google.com/open?id=' + driveFileId + '", "View Receipt")';
+      var fileLink =
+        '=HYPERLINK("https://drive.google.com/open?id=' +
+        driveFileId +
+        '", "View Receipt")';
 
       _appendRow(rcSheet, [
         receiptId,
@@ -1503,7 +1642,7 @@ function api_atomicSubmitClaim(payload) {
         Number(rf.receiptTotal) || 0,
         fileLink,
       ]);
-      createdIds.push({ type: "receipt", entityId: receiptId });
+      createdIds.push({ entityId: receiptId, type: "receipt" });
       receiptIdList.push(receiptId);
     }
 
@@ -1517,9 +1656,16 @@ function api_atomicSubmitClaim(payload) {
       qrBlob.setName(qrNewName);
       var qrDriveFile = receiptFolder.createFile(qrBlob);
       var qrDriveFileId = qrDriveFile.getId();
-      createdIds.push({ type: "drivefile", entityId: qrReceiptId, driveFileId: qrDriveFileId });
+      createdIds.push({
+        driveFileId: qrDriveFileId,
+        entityId: qrReceiptId,
+        type: "drivefile",
+      });
 
-      var qrFileLink = '=HYPERLINK("https://drive.google.com/open?id=' + qrDriveFileId + '", "View QR")';
+      var qrFileLink =
+        '=HYPERLINK("https://drive.google.com/open?id=' +
+        qrDriveFileId +
+        '", "View QR")';
       _appendRow(getSheet_(TABS.RECEIPTS), [
         qrReceiptId,
         qrDriveFileId,
@@ -1531,7 +1677,7 @@ function api_atomicSubmitClaim(payload) {
         0,
         qrFileLink,
       ]);
-      createdIds.push({ type: "receipt", entityId: qrReceiptId });
+      createdIds.push({ entityId: qrReceiptId, type: "receipt" });
 
       // Add QR as an extra claim line item with note "PayMe QR"
       var qrCliId = Ids.childId(claimId, receiptIdList.length + 1, "CLAIMLINE");
@@ -1573,7 +1719,7 @@ function api_atomicSubmitClaim(payload) {
         true,
       ]);
     }
-    createdIds.push({ type: "claimline", entityId: claimId });
+    createdIds.push({ entityId: claimId, type: "claimline" });
 
     // ── Transition DRAFT → SUBMITTED ──────────────────────────────────
     var transitionResult = Engine.transition(
@@ -1592,8 +1738,8 @@ function api_atomicSubmitClaim(payload) {
     createdIds = [];
 
     Audit.append(operator.userId, "ExpenseClaim", claimId, "ATOMIC_SUBMIT", {
-      lines: receiptIdList.length,
       hasQr: !!qrFile,
+      lines: receiptIdList.length,
       uuid: payload.uuid,
     });
     try {
@@ -1602,13 +1748,16 @@ function api_atomicSubmitClaim(payload) {
 
     return _ok({
       claim_id: claimId,
+      receipt_ids: receiptIdList,
       status: transitionResult.to,
       submitted_at: Audit._nowIso(),
-      receipt_ids: receiptIdList,
     });
   } catch (e) {
     _cleanup();
-    return _err("ATOMIC_SUBMIT_FAILED", "Atomic submission failed: " + e.message);
+    return _err(
+      "ATOMIC_SUBMIT_FAILED",
+      "Atomic submission failed: " + e.message
+    );
   }
 }
 
@@ -1618,7 +1767,11 @@ function api_atomicSubmitClaim(payload) {
 
 function api_getClaimsQueue(filters) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   filters = filters || {};
 
   var sheet = getSheet_(TABS.EXPENSE_CLAIMS);
@@ -1704,7 +1857,11 @@ function api_getClaimsQueue(filters) {
  */
 function api_verifyClaim(claimId, payload) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   payload = payload || {};
 
   var result = Engine.transition(
@@ -1725,7 +1882,11 @@ function api_verifyClaim(claimId, payload) {
  */
 function api_rejectClaim(claimId, reason) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   if (!(reason && String(reason).trim())) {
     return _err("INVALID_PARAMETER", "Rejection reason is required");
   }
@@ -1748,7 +1909,11 @@ function api_rejectClaim(claimId, reason) {
  */
 function api_requestInfo(claimId, reason) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   if (!(reason && String(reason).trim())) {
     return _err("INVALID_PARAMETER", "Request note is required");
   }
@@ -1771,7 +1936,11 @@ function api_requestInfo(claimId, reason) {
  */
 function api_resubmitClaim(claimId) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
 
   var existing = Engine._loadRow("ExpenseClaim", claimId);
   if (!existing) {
@@ -1806,7 +1975,11 @@ function api_resubmitClaim(claimId) {
  * Available to all operators (COMMITTEE and TREASURER).
  */
 function api_getAccounts() {
-  try { _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   var sheet = getSheet_(TABS.FINANCE_ACCOUNTS);
   var values = sheet.getDataRange().getValues();
   var c = COLS.FinanceAccounts;
@@ -1835,7 +2008,11 @@ function api_getAccounts() {
  */
 function api_addAccount(payload) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   if (operator.role !== ROLES.TREASURER) {
     return _err("UNAUTHORIZED", "Unauthorized");
   }
@@ -1875,7 +2052,11 @@ function api_addAccount(payload) {
  */
 function api_renameAccount(accountId, newName) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   if (operator.role !== ROLES.TREASURER) {
     return _err("UNAUTHORIZED", "Unauthorized");
   }
@@ -1907,7 +2088,11 @@ function api_renameAccount(accountId, newName) {
  */
 function api_deactivateAccount(accountId) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   if (operator.role !== ROLES.TREASURER) {
     return _err("UNAUTHORIZED", "Unauthorized");
   }
@@ -1943,7 +2128,11 @@ function api_deactivateAccount(accountId) {
  */
 function api_recordIncome(payload) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   if (!payload.date) {
     return _err("INVALID_PARAMETER", "Date is required");
   }
@@ -1979,7 +2168,11 @@ function api_recordIncome(payload) {
  */
 function api_getPendingIncome() {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
 
   var sheet = getSheet_(TABS.INCOME);
   var values = sheet.getDataRange().getValues();
@@ -2016,7 +2209,11 @@ function api_getPendingIncome() {
  */
 function api_confirmIncome(incomeId, accountId) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   if (operator.role !== ROLES.TREASURER) {
     return _err("UNAUTHORIZED", "Unauthorized");
   }
@@ -2037,7 +2234,11 @@ function api_confirmIncome(incomeId, accountId) {
  */
 function api_rejectIncome(incomeId, reason) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   if (operator.role !== ROLES.TREASURER) {
     return _err("UNAUTHORIZED", "Unauthorized");
   }
@@ -2057,7 +2258,11 @@ function api_rejectIncome(incomeId, reason) {
  */
 function api_requestIncomeInfo(incomeId, reason) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   if (operator.role !== ROLES.TREASURER) {
     return _err("UNAUTHORIZED", "Unauthorized");
   }
@@ -2078,7 +2283,11 @@ function api_requestIncomeInfo(incomeId, reason) {
  */
 function api_recordAdjustment(payload) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   if (operator.role !== ROLES.TREASURER) {
     return _err("UNAUTHORIZED", "Unauthorized");
   }
@@ -2102,7 +2311,10 @@ function api_recordAdjustment(payload) {
   if (!result.ok) {
     return _err("ENGINE_ERROR", result.reason);
   }
-  return _ok({ account_id: payload.accountId, adjustment_id: result.adjustmentId });
+  return _ok({
+    account_id: payload.accountId,
+    adjustment_id: result.adjustmentId,
+  });
 }
 
 /**
@@ -2110,7 +2322,11 @@ function api_recordAdjustment(payload) {
  */
 function api_recordTransfer(payload) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   if (operator.role !== ROLES.TREASURER) {
     return _err("UNAUTHORIZED", "Unauthorized");
   }
@@ -2143,7 +2359,11 @@ function api_recordTransfer(payload) {
  */
 function api_getTransfers() {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   var sheet = getSheet_(TABS.ACCOUNT_TRANSFERS);
   var values = sheet.getDataRange().getValues();
   var c = COLS.AccountTransfers;
@@ -2170,7 +2390,11 @@ function api_getTransfers() {
  */
 function api_getAdjustments(accountId) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   var sheet = getSheet_(TABS.ACCOUNT_ADJUSTMENTS);
   var values = sheet.getDataRange().getValues();
   var c = COLS.AccountAdjustments;
@@ -2205,7 +2429,11 @@ function api_getAdjustments(accountId) {
  */
 function api_approvePayout(claimId, accountId) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   if (operator.role !== ROLES.TREASURER) {
     return _err("UNAUTHORIZED", "Unauthorized");
   }
@@ -2233,7 +2461,11 @@ function api_approvePayout(claimId, accountId) {
  */
 function api_getQueuedPayouts() {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   var sheet = getSheet_(TABS.PAYOUTS);
   var values = sheet.getDataRange().getValues();
   var c = COLS.Payouts;
@@ -2266,7 +2498,11 @@ function api_getQueuedPayouts() {
  */
 function api_markPayoutSent(payoutId, payload) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   if (operator.role !== ROLES.TREASURER) {
     return _err("UNAUTHORIZED", "Unauthorized");
   }
@@ -2305,7 +2541,11 @@ function api_markPayoutSent(payoutId, payload) {
  */
 function api_recordPayoutFailed(payoutId, failureReason) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   if (operator.role !== ROLES.TREASURER) {
     return _err("UNAUTHORIZED", "Unauthorized");
   }
@@ -2329,7 +2569,11 @@ function api_recordPayoutFailed(payoutId, failureReason) {
  */
 function api_retryPayout(payoutId) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   if (operator.role !== ROLES.TREASURER) {
     return _err("UNAUTHORIZED", "Unauthorized");
   }
@@ -2351,7 +2595,11 @@ function api_retryPayout(payoutId) {
  */
 function api_getDashboardSummary() {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
 
   var claimsSheet = getSheet_(TABS.EXPENSE_CLAIMS);
   var claimsValues = claimsSheet.getDataRange().getValues();
@@ -2520,7 +2768,11 @@ function api_getDashboardSummary() {
  */
 function api_getReportsData(reportType, filters) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   filters = filters || {};
 
   switch (reportType) {
@@ -2792,7 +3044,11 @@ function _buildAccountsReport() {
  * Returns a downloadable CSV string.
  */
 function api_exportCsv(reportType, filters) {
-  try { _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   var data = api_getReportsData(reportType, filters);
   var rows = data.rows || [];
   if (rows.length === 0) {
@@ -2816,23 +3072,25 @@ function api_exportCsv(reportType, filters) {
         "Expense Date",
         "Method",
       ];
-      return _ok(_csvRows(
-        headers,
-        rows.map((r) => [
-          r.claim_id,
-          r.claimant_id,
-          r.status,
-          r.submitted_at,
-          r.verified_at,
-          r.paid_at,
-          r.total_amount,
-          _csvEscape(r.notes),
-          r.event_id,
-          r.semester,
-          r.expense_date,
-          r.payout_method,
-        ])
-      ));
+      return _ok(
+        _csvRows(
+          headers,
+          rows.map((r) => [
+            r.claim_id,
+            r.claimant_id,
+            r.status,
+            r.submitted_at,
+            r.verified_at,
+            r.paid_at,
+            r.total_amount,
+            _csvEscape(r.notes),
+            r.event_id,
+            r.semester,
+            r.expense_date,
+            r.payout_method,
+          ])
+        )
+      );
     case "budget":
       headers = [
         "Request ID",
@@ -2843,18 +3101,20 @@ function api_exportCsv(reportType, filters) {
         "Total Requested",
         "Total Approved",
       ];
-      return _ok(_csvRows(
-        headers,
-        rows.map((r) => [
-          r.request_id,
-          r.title,
-          r.status,
-          r.submitted_at,
-          r.decided_at,
-          r.total_requested,
-          r.total_approved,
-        ])
-      ));
+      return _ok(
+        _csvRows(
+          headers,
+          rows.map((r) => [
+            r.request_id,
+            r.title,
+            r.status,
+            r.submitted_at,
+            r.decided_at,
+            r.total_requested,
+            r.total_approved,
+          ])
+        )
+      );
     case "income":
       headers = [
         "Income ID",
@@ -2867,20 +3127,22 @@ function api_exportCsv(reportType, filters) {
         "Account",
         "Status",
       ];
-      return _ok(_csvRows(
-        headers,
-        rows.map((r) => [
-          r.income_id,
-          r.date,
-          r.category_id,
-          r.amount,
-          r.received_by,
-          r.source_ref,
-          _csvEscape(r.notes),
-          r.account_id,
-          r.status,
-        ])
-      ));
+      return _ok(
+        _csvRows(
+          headers,
+          rows.map((r) => [
+            r.income_id,
+            r.date,
+            r.category_id,
+            r.amount,
+            r.received_by,
+            r.source_ref,
+            _csvEscape(r.notes),
+            r.account_id,
+            r.status,
+          ])
+        )
+      );
     case "payouts":
       headers = [
         "Payout ID",
@@ -2894,21 +3156,23 @@ function api_exportCsv(reportType, filters) {
         "Confirmed",
         "Failure Reason",
       ];
-      return _ok(_csvRows(
-        headers,
-        rows.map((r) => [
-          r.payout_id,
-          r.claim_id,
-          r.amount,
-          r.method,
-          r.txn_reference,
-          r.status,
-          r.account_id,
-          r.paid_at,
-          r.confirmed_at,
-          _csvEscape(r.failure_reason),
-        ])
-      ));
+      return _ok(
+        _csvRows(
+          headers,
+          rows.map((r) => [
+            r.payout_id,
+            r.claim_id,
+            r.amount,
+            r.method,
+            r.txn_reference,
+            r.status,
+            r.account_id,
+            r.paid_at,
+            r.confirmed_at,
+            _csvEscape(r.failure_reason),
+          ])
+        )
+      );
     default:
       return _ok("");
   }
@@ -2941,7 +3205,11 @@ function _csvEscape(val) {
  * Get the current semester status, including close blockers.
  */
 function api_getSemesterStatus() {
-  try { _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   return _ok(Engine.getSemesterStatus());
 }
 
@@ -2949,7 +3217,11 @@ function api_getSemesterStatus() {
  * Suggest a semester for a given expense date.
  */
 function api_suggestSemester(expenseDate) {
-  try { _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   return _ok({ semester: Engine.suggestSemester(expenseDate) });
 }
 
@@ -2958,7 +3230,11 @@ function api_suggestSemester(expenseDate) {
  */
 function api_correctSemester(entityType, entityId, newSemester) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   var result = Engine.correctSemester(
     entityType,
     entityId,
@@ -2976,7 +3252,11 @@ function api_correctSemester(entityType, entityId, newSemester) {
  */
 function api_closeSemester() {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   if (operator.role !== ROLES.TREASURER) {
     return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
   }
@@ -2996,7 +3276,11 @@ function api_closeSemester() {
  * Get the current migration state (null if none in progress).
  */
 function api_getMigrationState() {
-  try { _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   return _ok(Migration.getState());
 }
 
@@ -3004,7 +3288,11 @@ function api_getMigrationState() {
  * Get a preview of what would be migrated.
  */
 function api_getMigrationPreview() {
-  try { _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   return _ok(Migration.getPreview());
 }
 
@@ -3014,7 +3302,11 @@ function api_getMigrationPreview() {
  */
 function api_startMigration() {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   if (operator.role !== ROLES.TREASURER) {
     return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
   }
@@ -3031,7 +3323,11 @@ function api_startMigration() {
  */
 function api_setMigrationSelections(selections) {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   if (operator.role !== ROLES.TREASURER) {
     return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
   }
@@ -3043,10 +3339,77 @@ function api_setMigrationSelections(selections) {
 }
 
 /**
+ * Save member selections only (per-entity step in the 8-stage flow).
+ * Treasurer only.
+ */
+function api_setMemberSelections(memberIds) {
+  var operator;
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
+  if (operator.role !== ROLES.TREASURER) {
+    return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
+  }
+  var result = Migration.setMemberSelections(operator.userId, memberIds);
+  if (!result.ok) {
+    return _err("ENGINE_ERROR", result.reason);
+  }
+  return _ok(result);
+}
+
+/**
+ * Save account selections + opening balances (per-entity step).
+ * Treasurer only.
+ */
+function api_setAccountSelections(payload) {
+  var operator;
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
+  if (operator.role !== ROLES.TREASURER) {
+    return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
+  }
+  var result = Migration.setAccountSelections(operator.userId, payload);
+  if (!result.ok) {
+    return _err("ENGINE_ERROR", result.reason);
+  }
+  return _ok(result);
+}
+
+/**
+ * Save category and event selections (per-entity step).
+ * Treasurer only.
+ */
+function api_setCategoryEventSelections(payload) {
+  var operator;
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
+  if (operator.role !== ROLES.TREASURER) {
+    return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
+  }
+  var result = Migration.setCategoryEventSelections(operator.userId, payload);
+  if (!result.ok) {
+    return _err("ENGINE_ERROR", result.reason);
+  }
+  return _ok(result);
+}
+
+/**
  * Get the current selections for review.
  */
 function api_getMigrationSelections() {
-  try { _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   return _ok(Migration.getSelections());
 }
 
@@ -3056,7 +3419,11 @@ function api_getMigrationSelections() {
  */
 function api_executeMigration() {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   if (operator.role !== ROLES.TREASURER) {
     return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
   }
@@ -3073,7 +3440,11 @@ function api_executeMigration() {
  */
 function api_activateMigration() {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   if (operator.role !== ROLES.TREASURER) {
     return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
   }
@@ -3090,7 +3461,11 @@ function api_activateMigration() {
  */
 function api_cancelMigration() {
   var operator;
-  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
   if (operator.role !== ROLES.TREASURER) {
     return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
   }
@@ -3112,6 +3487,7 @@ if (typeof module !== "undefined") {
     api_addAccount,
     api_addMember,
     api_approvePayout,
+    api_atomicSubmitClaim,
     api_attachReceipts,
     api_cancelMigration,
     api_closeSemester,
@@ -3157,9 +3533,11 @@ if (typeof module !== "undefined") {
     api_saveBudgetRequestDraft,
     api_saveClaimDraft,
     api_setMigrationSelections,
+    api_setMemberSelections,
+    api_setAccountSelections,
+    api_setCategoryEventSelections,
     api_startMigration,
     api_submitBudgetRequest,
-    api_atomicSubmitClaim,
     api_submitClaim,
     api_submitDraftClaim,
     api_suggestSemester,

@@ -39,8 +39,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_activateMigration();
     }),
@@ -64,8 +67,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_addAccount(payload);
     }),
@@ -84,8 +90,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_addMember(payload);
     }),
@@ -106,8 +115,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .withFailureHandler(reject)
         .api_approvePayout(claimId);
@@ -132,8 +144,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .withFailureHandler(reject)
         .api_approvePayout(claimId, accountId);
@@ -147,8 +162,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_cancelMigration();
     }),
@@ -175,8 +193,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_closeSemester();
     }),
@@ -192,8 +213,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_confirmIncome(incomeId, payload);
     }),
@@ -213,8 +237,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_correctSemester(entityType, entityId, newSemester);
     }),
@@ -227,8 +254,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_deactivateAccount(accountId);
     }),
@@ -251,8 +281,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_decisionBudgetRequest(entityId, action, payload);
     }),
@@ -267,8 +300,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .withFailureHandler(reject)
         .api_deleteOrphanedReceipt(receiptId);
@@ -286,8 +322,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_discardBudgetRequest(requestId);
     }),
@@ -303,8 +342,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .withFailureHandler(reject)
         .api_editClaim(payload);
@@ -318,8 +360,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_executeMigration();
     }),
@@ -339,8 +384,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_exportCsv(reportType, filters || {});
     }),
@@ -368,8 +416,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_getAccounts();
     }),
@@ -382,8 +433,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_getAdjustments();
     }),
@@ -418,8 +472,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .withFailureHandler(reject)
         .api_getClaimsQueue(filters || {});
@@ -488,8 +545,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_getDashboardSummary();
     }),
@@ -507,8 +567,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_getMembers();
     }),
@@ -566,8 +629,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_getMigrationPreview();
     }),
@@ -591,8 +657,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_getMigrationSelections();
     }),
@@ -607,8 +676,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_getMigrationState();
     }),
@@ -650,8 +722,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_getMyBudgetRequests();
     }),
@@ -701,8 +776,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .withFailureHandler(reject)
         .api_getMyClaims();
@@ -728,8 +806,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_getPendingBudgetRequests();
     }),
@@ -742,8 +823,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_getPendingIncome();
     }),
@@ -758,8 +842,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_getQueuedPayouts();
     }),
@@ -846,8 +933,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_getReportsData(reportType, filters || {});
     }),
@@ -878,8 +968,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_getSemesterStatus();
     }),
@@ -892,8 +985,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_getTransfers();
     }),
@@ -909,8 +1005,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_markPayoutSent(payoutId, payload);
     }),
@@ -927,8 +1026,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_reactivateMember(userId);
     }),
@@ -948,8 +1050,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_recordAdjustment(payload);
     }),
@@ -969,8 +1074,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_recordIncome(payload);
     }),
@@ -986,8 +1094,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_recordPayoutFailed(payoutId, reason);
     }),
@@ -1005,8 +1116,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_recordTransfer(payload);
     }),
@@ -1023,8 +1137,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .withFailureHandler(reject)
         .api_rejectClaim(claimId, reason);
@@ -1041,8 +1158,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_rejectIncome(incomeId, note);
     }),
@@ -1058,8 +1178,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_renameAccount(accountId, name);
     }),
@@ -1075,8 +1198,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_requestIncomeInfo(incomeId, note);
     }),
@@ -1093,8 +1219,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .withFailureHandler(reject)
         .api_requestInfo(claimId, reason);
@@ -1154,8 +1283,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .withFailureHandler(reject)
         .api_resubmitClaim(claimId);
@@ -1169,8 +1301,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_retryPayout(payoutId);
     }),
@@ -1187,8 +1322,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_saveBudgetRequestDraft(payload);
     }),
@@ -1208,8 +1346,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_saveClaimDraft(payload);
     }),
@@ -1224,10 +1365,77 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_setMigrationSelections(selections);
+    }),
+
+  setMemberSelections: (
+    memberIds: string[]
+  ): Promise<{ ok: boolean; stage: string }> =>
+    new Promise((resolve, reject) => {
+      if (typeof google === "undefined" || !google.script) {
+        setTimeout(() => resolve({ ok: true, stage: "MEMBERS" }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
+        })
+        .api_setMemberSelections(memberIds);
+    }),
+
+  setAccountSelections: (
+    payload: {
+      accountIds: string[];
+      accountBalances: Record<string, number>;
+      balanceReasons: Record<string, string>;
+    }
+  ): Promise<{ ok: boolean; stage: string }> =>
+    new Promise((resolve, reject) => {
+      if (typeof google === "undefined" || !google.script) {
+        setTimeout(() => resolve({ ok: true, stage: "ACCOUNTS" }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
+        })
+        .api_setAccountSelections(payload);
+    }),
+
+  setCategoryEventSelections: (
+    payload: { categoryIds: string[]; eventIds: string[] }
+  ): Promise<{ ok: boolean; stage: string }> =>
+    new Promise((resolve, reject) => {
+      if (typeof google === "undefined" || !google.script) {
+        setTimeout(
+          () => resolve({ ok: true, stage: "CATEGORIES_EVENTS" }),
+          300
+        );
+        return;
+      }
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
+        })
+        .api_setCategoryEventSelections(payload);
     }),
 
   startMigration: (): Promise<{
@@ -1246,8 +1454,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_startMigration();
     }),
@@ -1264,8 +1475,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_submitBudgetRequest(requestId);
     }),
@@ -1281,8 +1495,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .withFailureHandler(reject)
         .api_submitClaim(payload);
@@ -1300,8 +1517,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_submitDraftClaim(claimId);
     }),
@@ -1314,8 +1534,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .api_suggestSemester(expenseDate);
     }),
@@ -1338,8 +1561,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .withFailureHandler(reject)
         .api_uploadReceipt(
@@ -1364,8 +1590,11 @@ export const apiService = {
       }
       google.script.run
         .withSuccessHandler((result: any) => {
-          if (result.ok) resolve(result.data);
-          else reject(new Error(result.error.message));
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
         })
         .withFailureHandler(reject)
         .api_verifyClaim(claimId, payload || {});
