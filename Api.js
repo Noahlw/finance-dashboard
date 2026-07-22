@@ -3381,10 +3381,10 @@ function api_setAccountSelections(payload) {
 }
 
 /**
- * Save category and event selections (per-entity step).
+ * Save event selections (per-entity step).
  * Treasurer only.
  */
-function api_setCategoryEventSelections(payload) {
+function api_setEventSelections(eventIds) {
   var operator;
   try {
     operator = _requireOperator();
@@ -3394,9 +3394,75 @@ function api_setCategoryEventSelections(payload) {
   if (operator.role !== ROLES.TREASURER) {
     return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
   }
-  var result = Migration.setCategoryEventSelections(operator.userId, payload);
+  var result = Migration.setEventSelections(operator.userId, eventIds);
   if (!result.ok) {
     return _err("ENGINE_ERROR", result.reason);
+  }
+  return _ok(result);
+}
+
+/**
+ * Save category selections (per-entity step).
+ * Treasurer only.
+ */
+function api_setCategorySelections(categoryIds) {
+  var operator;
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
+  if (operator.role !== ROLES.TREASURER) {
+    return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
+  }
+  var result = Migration.setCategorySelections(operator.userId, categoryIds);
+  if (!result.ok) {
+    return _err("ENGINE_ERROR", result.reason);
+  }
+  return _ok(result);
+}
+
+/**
+ * Save allowlisted operator selections for the new annual file (USERS step).
+ * Treasurer only.
+ */
+function api_setUserSelections(userIds) {
+  var operator;
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
+  if (operator.role !== ROLES.TREASURER) {
+    return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
+  }
+  var result = Migration.setUserSelections(operator.userId, userIds);
+  if (!result.ok) {
+    return _err("ENGINE_ERROR", result.reason);
+  }
+  return _ok(result);
+}
+
+/**
+ * Run the migration validation gate.
+ * Treasurer only.
+ */
+function api_validateMigration() {
+  var operator;
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
+  if (operator.role !== ROLES.TREASURER) {
+    return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
+  }
+  var result = Migration.validateMigration(operator.userId);
+  if (!result.ok) {
+    return _err("VALIDATION_FAILED", result.reason || "Validation failed", {
+      errors: result.errors,
+      warnings: result.warnings,
+    });
   }
   return _ok(result);
 }
@@ -3535,13 +3601,16 @@ if (typeof module !== "undefined") {
     api_setMigrationSelections,
     api_setMemberSelections,
     api_setAccountSelections,
-    api_setCategoryEventSelections,
+    api_setEventSelections,
+    api_setCategorySelections,
+    api_setUserSelections,
     api_startMigration,
     api_submitBudgetRequest,
     api_submitClaim,
     api_submitDraftClaim,
     api_suggestSemester,
     api_uploadReceipt,
+    api_validateMigration,
     api_verifyClaim,
   };
 }

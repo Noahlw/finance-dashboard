@@ -650,6 +650,7 @@ export const apiService = {
               categoryIds: ["CAT-1"],
               eventIds: ["EVT-1"],
               memberIds: ["M-1"],
+              userIds: ["U-1"],
             }),
           300
         );
@@ -1416,15 +1417,12 @@ export const apiService = {
         .api_setAccountSelections(payload);
     }),
 
-  setCategoryEventSelections: (
-    payload: { categoryIds: string[]; eventIds: string[] }
+  setEventSelections: (
+    eventIds: string[]
   ): Promise<{ ok: boolean; stage: string }> =>
     new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
-        setTimeout(
-          () => resolve({ ok: true, stage: "CATEGORIES_EVENTS" }),
-          300
-        );
+        setTimeout(() => resolve({ ok: true, stage: "EVENTS" }), 300);
         return;
       }
       google.script.run
@@ -1435,7 +1433,69 @@ export const apiService = {
             reject(new Error(result.error.message));
           }
         })
-        .api_setCategoryEventSelections(payload);
+        .api_setEventSelections(eventIds);
+    }),
+
+  setCategorySelections: (
+    categoryIds: string[]
+  ): Promise<{ ok: boolean; stage: string }> =>
+    new Promise((resolve, reject) => {
+      if (typeof google === "undefined" || !google.script) {
+        setTimeout(() => resolve({ ok: true, stage: "CATEGORIES" }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
+        })
+        .api_setCategorySelections(categoryIds);
+    }),
+
+  setUserSelections: (
+    userIds: string[]
+  ): Promise<{ ok: boolean; stage: string }> =>
+    new Promise((resolve, reject) => {
+      if (typeof google === "undefined" || !google.script) {
+        setTimeout(() => resolve({ ok: true, stage: "USERS" }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
+        })
+        .api_setUserSelections(userIds);
+    }),
+
+  validateMigration: (): Promise<{
+    errors: string[];
+    ok: boolean;
+    warnings: string[];
+  }> =>
+    new Promise((resolve, reject) => {
+      if (typeof google === "undefined" || !google.script) {
+        setTimeout(
+          () => resolve({ errors: [], ok: true, warnings: [] }),
+          300
+        );
+        return;
+      }
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(result.error);
+          }
+        })
+        .api_validateMigration();
     }),
 
   startMigration: (): Promise<{

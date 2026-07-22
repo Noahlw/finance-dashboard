@@ -25,7 +25,7 @@ global.DriveApp = {
 };
 global.PropertiesService = {
   getScriptProperties: () => ({
-    getProperty: jest.fn(() => ""),
+    getProperty: jest.fn((key) => (key === "LEDGER_ID" ? "FILE-OLD" : "")),
     setProperty: jest.fn(),
   }),
 };
@@ -33,18 +33,19 @@ global.SpreadsheetApp = {
   create: jest.fn(() => ({
     deleteSheet: jest.fn(),
     getId: () => "NEW-SS-ID",
-    getSheetByName: jest.fn(() => ({ appendRow: jest.fn(), getRange: () => ({ setValues: jest.fn() }) })),
+    getSheetByName: jest.fn(() => ({ appendRow: jest.fn(), getDataRange: () => ({ getValues: () => [] }), getRange: () => ({ setValues: jest.fn() }) })),
     getSheets: () => [],
     insertSheet: jest.fn(() => ({ appendRow: jest.fn() })),
   })),
   openById: jest.fn(() => ({
     deleteSheet: jest.fn(),
-    getSheetByName: jest.fn(() => ({ appendRow: jest.fn(), getRange: () => ({ setValues: jest.fn() }) })),
+    getSheetByName: jest.fn(() => ({ appendRow: jest.fn(), getDataRange: () => ({ getValues: () => [] }), getRange: () => ({ setValues: jest.fn() }) })),
     getSheets: () => [],
     insertSheet: jest.fn(() => ({ appendRow: jest.fn() })),
   })),
 };
 global.Session = { getActiveUser: jest.fn(() => ({ getEmail: () => "test@example.com" })) };
+global.Discord = { postTreasury: jest.fn() };
 global.TABS = {
   ACCOUNT_ADJUSTMENTS: "AccountAdjustments",
   ACCOUNT_TRANSFERS: "AccountTransfers",
@@ -112,7 +113,6 @@ function resetConfig() {
 
 global.Setup_setConfigValue_ = jest.fn((key, value) => {
   configStore[key] = String(value);
-  // Mirror to configData sheet so _clearConfig can find and remove it
   const existingIdx = configData.findIndex((r) => r[0] === key);
   if (existingIdx >= 0) {
     configData[existingIdx] = [key, String(value)];
@@ -204,13 +204,13 @@ describe("Annual Migration: 8-stage resumable flow", () => {
   it("exposes all 8 stages in MIGRATION_STAGES", () => {
     expect(MIGRATION_STAGES).toEqual([
       "PREVIEW",
-      "INIT",
       "MEMBERS",
       "ACCOUNTS",
-      "CATEGORIES_EVENTS",
-      "REVIEW",
-      "EXECUTE",
-      "ACTIVATED",
+      "EVENTS",
+      "CATEGORIES",
+      "USERS",
+      "VALIDATE",
+      "ACTIVATE",
     ]);
   });
 
@@ -225,14 +225,26 @@ describe("Annual Migration: 8-stage resumable flow", () => {
     expect(preview.has_treasurer).toBe(true);
   });
 
-  it("startMigration advances from PREVIEW to INIT", () => {
+  it("startMigration creates folder + spreadsheet and lands on MEMBERS", () => {
     const result = Migration.startMigration("U-001");
     expect(result.ok).toBe(true);
-    expect(result.stage).toBe("INIT");
-    expect(Migration.getState().stage).toBe("INIT");
+    expect(result.stage).toBe("MEMBERS");
+    expect(result.folder_id).toBeTruthy();
+    expect(result.spreadsheet_id).toBeTruthy();
+    expect(configStore["MIGRATION_STAGE"]).toBe("MEMBERS");
+    expect(configStore["MIGRATION_TARGET_SPREADSHEET_ID"]).toBeTruthy();
+    expect(configStore["MIGRATION_TARGET_FOLDER_ID"]).toBeTruthy();
   });
 
-  it("setMemberSelections advances INIT -> MEMBERS and stores member_ids", () => {
+  it("startMigration is idempotent: a second call resumes instead of duplicating", () => {
+    const first = Migration.startMigration("U-001");
+    const second = Migration.startMigration("U-001");
+    expect(second.ok).toBe(true);
+    expect(second.spreadsheet_id).toBe(first.spreadsheet_id);
+    expect(second.folder_id).toBe(first.folder_id);
+  });
+
+  it("setMemberSelections stores member_ids and advances to MEMBERS", () => {
     Migration.startMigration("U-001");
     const result = Migration.setMemberSelections("U-001", ["M-001", "M-002"]);
     expect(result.ok).toBe(true);
@@ -258,7 +270,7 @@ describe("Annual Migration: 8-stage resumable flow", () => {
     expect(selections.balance_reasons["AC-1"]).toBe("Carried over");
   });
 
-  it("setCategoryEventSelections advances to CATEGORIES_EVENTS and preserves prior selections", () => {
+  it("setEventSelections stores event_ids and advances to EVENTS", () => {
     Migration.startMigration("U-001");
     Migration.setMemberSelections("U-001", ["M-001"]);
     Migration.setAccountSelections("U-001", {
@@ -266,32 +278,132 @@ describe("Annual Migration: 8-stage resumable flow", () => {
       accountIds: ["AC-1"],
       balanceReasons: {},
     });
-    const result = Migration.setCategoryEventSelections("U-001", {
-      categoryIds: ["CAT-1"],
-      eventIds: ["EVT-1"],
-    });
+    const result = Migration.setEventSelections("U-001", ["EVT-1"]);
     expect(result.ok).toBe(true);
-    expect(result.stage).toBe("CATEGORIES_EVENTS");
+    expect(result.stage).toBe("EVENTS");
     const selections = JSON.parse(configStore["MIGRATION_SELECTIONS"]);
-    expect(selections.member_ids).toEqual(["M-001"]);
-    expect(selections.account_ids).toEqual(["AC-1"]);
-    expect(selections.category_ids).toEqual(["CAT-1"]);
     expect(selections.event_ids).toEqual(["EVT-1"]);
+    expect(selections.member_ids).toEqual(["M-001"]);
   });
 
-  it("setSelections transitions to REVIEW from any earlier stage", () => {
+  it("setCategorySelections stores category_ids and advances to CATEGORIES", () => {
     Migration.startMigration("U-001");
     Migration.setMemberSelections("U-001", ["M-001"]);
-    const result = Migration.setSelections("U-001", {
+    Migration.setAccountSelections("U-001", {
       accountBalances: {},
       accountIds: ["AC-1"],
       balanceReasons: {},
-      categoryIds: ["CAT-1"],
-      eventIds: ["EVT-1"],
-      memberIds: ["M-001"],
     });
+    Migration.setEventSelections("U-001", ["EVT-1"]);
+    const result = Migration.setCategorySelections("U-001", ["CAT-1"]);
     expect(result.ok).toBe(true);
-    expect(result.stage).toBe("REVIEW");
+    expect(result.stage).toBe("CATEGORIES");
+    const selections = JSON.parse(configStore["MIGRATION_SELECTIONS"]);
+    expect(selections.category_ids).toEqual(["CAT-1"]);
+  });
+
+  it("setUserSelections stores user_ids and requires >=1 active Treasurer", () => {
+    Migration.startMigration("U-001");
+    Migration.setMemberSelections("U-001", ["M-001"]);
+    Migration.setAccountSelections("U-001", {
+      accountBalances: {},
+      accountIds: ["AC-1"],
+      balanceReasons: {},
+    });
+    Migration.setEventSelections("U-001", ["EVT-1"]);
+    Migration.setCategorySelections("U-001", ["CAT-1"]);
+    // Carry only the committee operator — should fail validation later.
+    const result = Migration.setUserSelections("U-001", ["U-002"]);
+    expect(result.ok).toBe(true);
+    expect(result.stage).toBe("USERS");
+    const selections = JSON.parse(configStore["MIGRATION_SELECTIONS"]);
+    expect(selections.user_ids).toEqual(["U-002"]);
+  });
+
+  it("validateMigration passes when every step has valid selections + Treasurer", () => {
+    Migration.startMigration("U-001");
+    Migration.setMemberSelections("U-001", ["M-001", "M-002"]);
+    Migration.setAccountSelections("U-001", {
+      accountBalances: {},
+      accountIds: ["AC-1"],
+      balanceReasons: {},
+    });
+    Migration.setEventSelections("U-001", ["EVT-1"]);
+    Migration.setCategorySelections("U-001", ["CAT-1"]);
+    Migration.setUserSelections("U-001", ["U-001", "U-002"]);
+    const result = Migration.validateMigration("U-001");
+    expect(result.ok).toBe(true);
+    expect(result.stage).toBe("VALIDATE");
+    expect(configStore["MIGRATION_STAGE"]).toBe("VALIDATE");
+  });
+
+  it("validateMigration fails when no Treasurer is selected", () => {
+    Migration.startMigration("U-001");
+    Migration.setMemberSelections("U-001", ["M-001"]);
+    Migration.setAccountSelections("U-001", {
+      accountBalances: {},
+      accountIds: ["AC-1"],
+      balanceReasons: {},
+    });
+    Migration.setEventSelections("U-001", ["EVT-1"]);
+    Migration.setCategorySelections("U-001", ["CAT-1"]);
+    Migration.setUserSelections("U-001", ["U-002"]);
+    const result = Migration.validateMigration("U-001");
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(" ")).toMatch(/Treasurer/);
+  });
+
+  it("validateMigration fails when an account has a changed balance without a reason", () => {
+    Migration.startMigration("U-001");
+    Migration.setMemberSelections("U-001", ["M-001"]);
+    Migration.setAccountSelections("U-001", {
+      accountBalances: { "AC-1": 9999 },
+      accountIds: ["AC-1"],
+      balanceReasons: {}, // missing for AC-1
+    });
+    Migration.setEventSelections("U-001", ["EVT-1"]);
+    Migration.setCategorySelections("U-001", ["CAT-1"]);
+    Migration.setUserSelections("U-001", ["U-001"]);
+    const result = Migration.validateMigration("U-001");
+    expect(result.ok).toBe(false);
+    expect(result.errors.join(" ")).toMatch(/reason/);
+  });
+
+  it("activateMigration blocks until VALIDATE succeeds", () => {
+    Migration.startMigration("U-001");
+    Migration.setMemberSelections("U-001", ["M-001"]);
+    Migration.setAccountSelections("U-001", {
+      accountBalances: {},
+      accountIds: ["AC-1"],
+      balanceReasons: {},
+    });
+    Migration.setEventSelections("U-001", ["EVT-1"]);
+    Migration.setCategorySelections("U-001", ["CAT-1"]);
+    Migration.setUserSelections("U-001", ["U-001"]);
+    // Skip VALIDATE
+    const result = Migration.activateMigration("U-001");
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/VALIDATE/);
+  });
+
+  it("activateMigration is idempotent: a repeat call returns ok without re-archiving", () => {
+    Migration.startMigration("U-001");
+    Migration.setMemberSelections("U-001", ["M-001"]);
+    Migration.setAccountSelections("U-001", {
+      accountBalances: {},
+      accountIds: ["AC-1"],
+      balanceReasons: {},
+    });
+    Migration.setEventSelections("U-001", ["EVT-1"]);
+    Migration.setCategorySelections("U-001", ["CAT-1"]);
+    Migration.setUserSelections("U-001", ["U-001"]);
+    Migration.validateMigration("U-001");
+    const first = Migration.activateMigration("U-001");
+    expect(first.ok).toBe(true);
+    expect(first.stage).toBe("ACTIVATE");
+    const second = Migration.activateMigration("U-001");
+    expect(second.ok).toBe(true);
+    expect(second.stage).toBe("ACTIVATE");
   });
 
   it("setMemberSelections before startMigration returns ok:false", () => {
@@ -308,21 +420,15 @@ describe("Annual Migration: 8-stage resumable flow", () => {
       accountIds: ["AC-1"],
       balanceReasons: {},
     });
-    // Re-edit members mid-flow
     Migration.setMemberSelections("U-001", ["M-001", "M-002"]);
     const selections = JSON.parse(configStore["MIGRATION_SELECTIONS"]);
     expect(selections.member_ids).toEqual(["M-001", "M-002"]);
-    expect(selections.account_ids).toEqual(["AC-1"]); // preserved
+    expect(selections.account_ids).toEqual(["AC-1"]);
   });
 
   it("cancelMigration clears all migration config keys", () => {
     Migration.startMigration("U-001");
     Migration.setMemberSelections("U-001", ["M-001"]);
-    Migration.setAccountSelections("U-001", {
-      accountBalances: {},
-      accountIds: ["AC-1"],
-      balanceReasons: {},
-    });
     Migration.cancelMigration("U-001");
     expect(configStore["MIGRATION_STAGE"]).toBeUndefined();
     expect(configStore["MIGRATION_SELECTIONS"]).toBeUndefined();

@@ -501,4 +501,11 @@ export interface MigrationSelections {
   categoryIds: string[];
   eventIds: string[];
   memberIds: string[];
+  userIds: string[];
+}
+
+export interface MigrationValidation {
+  errors: string[];
+  ok: boolean;
+  warnings: string[];
 }
