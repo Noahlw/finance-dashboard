@@ -772,6 +772,44 @@ function api_saveClaimDraft(payload) {
 }
 
 /**
+ * Attach receipt IDs to an existing claim.
+ * Allows adding receipts to claims that have not yet reached APPROVED_FOR_PAYOUT.
+ * Does not remove existing lines — only appends new ClaimLineItems.
+ */
+function api_attachReceipts(claimId, receiptIds) {
+  var operator = _requireOperator();
+  if (!receiptIds || !Array.isArray(receiptIds) || receiptIds.length === 0) {
+    throw new Error('receiptIds array is required');
+  }
+
+  var existing = Engine._loadRow('ExpenseClaim', claimId);
+  if (!existing) throw new Error('Claim not found');
+  if (existing.values[COLS.ExpenseClaims.created_by - 1] !== operator.userId) {
+    throw new Error('Unauthorized');
+  }
+
+  var attachableStatuses = [STATUS.ExpenseClaim.DRAFT, STATUS.ExpenseClaim.SUBMITTED, STATUS.ExpenseClaim.NEEDS_INFO, STATUS.ExpenseClaim.VERIFIED];
+  var claimStatus = existing.values[COLS.ExpenseClaims.status - 1];
+  if (attachableStatuses.indexOf(claimStatus) === -1) {
+    throw new Error('Receipts can only be attached to DRAFT, SUBMITTED, NEEDS_INFO, or VERIFIED claims');
+  }
+
+  var cliSheet = getSheet_(TABS.CLAIM_LINE_ITEMS);
+  var existingLines = Engine._findRowsByColumn(cliSheet, COLS.ClaimLineItems.claim_id, claimId);
+  var budgetLineId = existingLines.length > 0 ? existingLines[0].values[COLS.ClaimLineItems.budget_line_id - 1] : '';
+
+  for (var i = 0; i < receiptIds.length; i++) {
+    var nextLineNum = existingLines.length + i + 1;
+    _appendRow(cliSheet, [
+      Ids.childId(claimId, nextLineNum, 'CLAIMLINE'), claimId, budgetLineId, receiptIds[i], 0, '', false
+    ]);
+  }
+
+  Audit.append(operator.userId, 'ExpenseClaim', claimId, 'RECEIPTS_ATTACHED', { receiptIds: receiptIds });
+  return { claim_id: claimId, status: claimStatus };
+}
+
+/**
  * Submit a DRAFT claim for review.
  */
 function api_submitDraftClaim(claimId) {
@@ -796,7 +834,7 @@ if (typeof module !== 'undefined') {
     api_getMyBudgetRequests, api_saveBudgetRequestDraft, api_submitBudgetRequest,
     api_discardBudgetRequest, api_getPendingBudgetRequests, api_decisionBudgetRequest,
     api_getMembers, api_addMember, api_reactivateMember, api_saveClaimDraft, api_submitDraftClaim,
-    api_deleteOrphanedReceipt,
+    api_deleteOrphanedReceipt, api_attachReceipts,
     _sha256Hex, _isLate, _resolveUser
   };
 }

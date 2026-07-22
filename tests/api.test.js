@@ -18,7 +18,7 @@ global.COLS = {
   Counters: { entity: 1, last_n: 2 }
 };
 global.STATUS = {
-  ExpenseClaim: { DRAFT: 'DRAFT', SUBMITTED: 'SUBMITTED' },
+  ExpenseClaim: { DRAFT: 'DRAFT', SUBMITTED: 'SUBMITTED', NEEDS_INFO: 'NEEDS_INFO', VERIFIED: 'VERIFIED', APPROVED_FOR_PAYOUT: 'APPROVED_FOR_PAYOUT', PAID: 'PAID', REJECTED: 'REJECTED', LOCKED: 'LOCKED' },
   BudgetRequest: { DRAFT: 'DRAFT', PENDING: 'PENDING', NEEDS_INFO: 'NEEDS_INFO', APPROVED: 'APPROVED', PARTIALLY_APPROVED: 'PARTIALLY_APPROVED', REJECTED: 'REJECTED', WITHDRAWN: 'WITHDRAWN', CLOSED: 'CLOSED' },
   BudgetRequestLine: { PENDING: 'PENDING', APPROVED: 'APPROVED', REDUCED: 'REDUCED', REJECTED: 'REJECTED' }
 };
@@ -820,6 +820,97 @@ describe('Api.js', () => {
       // _appendRow is called per receipt via setValues
       const setValuesCalls = cliSheet.getRange.mock.results.filter(r => r.value.setValues.mock.calls.length > 0);
       expect(setValuesCalls.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  describe('api_submitClaim idempotent retry', () => {
+    it('should return Already processed when uuid is reused', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.Ids.nextId.mockReturnValueOnce('C-RETRY');
+      global.Ids.childId.mockReturnValueOnce('CL-RETRY');
+      global.Audit = { _nowIso: () => '2026-07-21T12:00:00Z', append: jest.fn() };
+      global.Config = { getNum: () => 14 };
+
+      var claimsSheet = {
+        getLastRow: () => 2,
+        getRange: jest.fn(() => ({ getValues: jest.fn(() => [['uuid-existing']]) }))
+      };
+
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [[], ['USER-1', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        if (tab === 'ExpenseClaims') return claimsSheet;
+        return { getLastRow: () => 1, getRange: () => ({ getValues: () => [], setValues: jest.fn() }), getMaxRows: () => 10, insertRowAfter: jest.fn() };
+      });
+
+      const { api_submitClaim } = require('../Api.js');
+      const first = api_submitClaim({ uuid: 'uuid-existing', amount: 100, notes: 'Retry test', claimantId: 'M-001', budgetLineId: 'BL-1' });
+      expect(first.success).toBe(true);
+      expect(first.message).toBe('Already processed');
+    });
+  });
+
+  describe('api_attachReceipts', () => {
+    beforeEach(() => {
+      global.Session.getActiveUser.mockReturnValue({ getEmail: () => 'test@example.com' });
+      global.Ids.childId = jest.fn(() => 'CLAIMLINE-ATTACH-N');
+      global.Audit = { _nowIso: jest.fn(() => '2026-07-21T12:00:00Z'), append: jest.fn() };
+    });
+
+    it('should attach receipts to a SUBMITTED claim', () => {
+      global.Engine._loadRow.mockReturnValueOnce({
+        rowIndex: 2,
+        sheet: { getRange: jest.fn(() => ({ setValue: jest.fn(), setValues: jest.fn() })) },
+        values: ['CLAIM-ATTACH-001', 'M-001', 'SUBMITTED', '2026-07-20', '', '', '', '', '', '', 200, false, false, 'Test', 'uuid', 'U-001', '2026-07-20', '26A', '', 'FPS', '91234567']
+      });
+
+      var cliSheet = {
+        appendRow: jest.fn(),
+        getRange: jest.fn(() => ({ setValues: jest.fn(), getValues: jest.fn(() => [['']]) })),
+        getLastRow: () => 5,
+        getMaxRows: () => 10,
+        insertRowAfter: jest.fn()
+      };
+
+      global.Engine._findRowsByColumn.mockReturnValueOnce([
+        { rowIndex: 2, values: ['CLI-001', 'CLAIM-ATTACH-001', 'BL-001', '', 200, 'Test note', false] }
+      ]);
+
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [[], ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        if (tab === 'ClaimLineItems') return cliSheet;
+        return { getRange: jest.fn(() => ({ setValue: jest.fn(), setValues: jest.fn(), getValues: jest.fn(() => [['']]) })) };
+      });
+
+      const { api_attachReceipts } = require('../Api.js');
+      const result = api_attachReceipts('CLAIM-ATTACH-001', ['RECEIPT-ATTACH-1', 'RECEIPT-ATTACH-2']);
+      expect(result.claim_id).toBe('CLAIM-ATTACH-001');
+      expect(result.status).toBe('SUBMITTED');
+      expect(global.Audit.append).toHaveBeenCalledWith('U-001', 'ExpenseClaim', 'CLAIM-ATTACH-001', 'RECEIPTS_ATTACHED', { receiptIds: ['RECEIPT-ATTACH-1', 'RECEIPT-ATTACH-2'] });
+    });
+
+    it('should reject attaching receipts to an APPROVED_FOR_PAYOUT claim', () => {
+      global.Engine._loadRow.mockReturnValueOnce({
+        rowIndex: 2,
+        values: ['CLAIM-ATTACH-002', 'M-001', 'APPROVED_FOR_PAYOUT', '', '', '', '', '', '', '', 200, false, false, '', 'uuid', 'U-001', '2026-07-20', '26A', '', 'FPS', '91234567']
+      });
+
+      const { api_attachReceipts } = require('../Api.js');
+      expect(() => api_attachReceipts('CLAIM-ATTACH-002', ['RECEIPT-X'])).toThrow('Receipts can only be attached to DRAFT, SUBMITTED, NEEDS_INFO, or VERIFIED claims');
+    });
+
+    it('should reject attaching receipts by a different operator', () => {
+      global.Engine._loadRow.mockReturnValueOnce({
+        rowIndex: 2,
+        values: ['CLAIM-ATTACH-003', 'M-001', 'SUBMITTED', '', '', '', '', '', '', '', 200, false, false, '', 'uuid', 'U-OTHER', '2026-07-20', '26A', '', 'FPS', '91234567']
+      });
+
+      const { api_attachReceipts } = require('../Api.js');
+      expect(() => api_attachReceipts('CLAIM-ATTACH-003', ['RECEIPT-Y'])).toThrow('Unauthorized');
+    });
+
+    it('should reject empty receiptIds array', () => {
+      const { api_attachReceipts } = require('../Api.js');
+      expect(() => api_attachReceipts('CLAIM-001', [])).toThrow('receiptIds array is required');
     });
   });
 });
