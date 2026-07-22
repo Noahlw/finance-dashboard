@@ -56,7 +56,8 @@ var COLS = Object.freeze({
     claim_id: 1, claimant_id: 2, status: 3, submitted_at: 4, verified_at: 5,
     approved_at: 6, paid_at: 7, locked_at: 8, verified_by: 9, approved_by: 10,
     total_amount: 11, late_flag: 12, self_approved: 13, notes: 14,
-    processed_response_id: 15
+    processed_response_id: 15, created_by: 16, expense_date: 17, semester: 18,
+    event_id: 19, payout_method: 20, payout_handle: 21
   }),
   ClaimLineItems: Object.freeze({
     claim_line_id: 1, claim_id: 2, budget_line_id: 3, receipt_id: 4,
@@ -111,7 +112,7 @@ var STATUS = Object.freeze({
     REJECTED: 'REJECTED'
   }),
   ExpenseClaim: Object.freeze({
-    SUBMITTED: 'SUBMITTED', NEEDS_INFO: 'NEEDS_INFO', VERIFIED: 'VERIFIED',
+    DRAFT: 'DRAFT', SUBMITTED: 'SUBMITTED', NEEDS_INFO: 'NEEDS_INFO', VERIFIED: 'VERIFIED',
     REJECTED: 'REJECTED', APPROVED_FOR_PAYOUT: 'APPROVED_FOR_PAYOUT',
     PAID: 'PAID', LOCKED: 'LOCKED'
   }),

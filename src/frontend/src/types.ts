@@ -1,4 +1,4 @@
-export type WorkspaceView = 'claims' | 'budget-requests' | 'income' | 'payouts' | 'reports';
+export type WorkspaceView = 'claims' | 'members' | 'budget-requests' | 'income' | 'payouts' | 'reports';
 export type SessionRole = 'COMMITTEE' | 'TREASURER' | 'MEMBER' | 'ADVISOR_AUDITOR';
 
 export interface SessionInfo {
@@ -48,17 +48,28 @@ export interface MyClaimsResponse {
 
 export interface ClaimPayload {
   uuid: string;
+  claimantId: string;
   amount: number;
   notes: string;
-  receiptDate: string;
-  budgetLineId: string;
+  expenseDate: string;
+  budgetLineId?: string;
   receiptId?: string;
+  semester?: string;
+  eventId?: string;
+  payoutMethod: 'FPS' | 'PAYME' | 'BANK' | 'CASH' | 'OTHER';
+  payoutHandle?: string;
 }
 
 export interface EditClaimPayload {
   claimId: string;
+  claimantId: string;
   amount: number;
   notes: string;
+  expenseDate?: string;
+  budgetLineId?: string;
+  receiptId?: string;
+  payoutMethod?: 'FPS' | 'PAYME' | 'BANK' | 'CASH' | 'OTHER';
+  payoutHandle?: string;
 }
 
 // Budget Request types
@@ -115,3 +126,45 @@ export interface BudgetDecisionPayload {
 }
 
 export type BudgetRequestsTab = 'my-requests' | 'create' | 'pending';
+
+// Member directory types
+export interface Member {
+  user_id: string;
+  display_name: string;
+  active: boolean;
+}
+
+export interface AddMemberPayload {
+  student_id: string;
+  display_name: string;
+  full_name?: string;
+  payout_method?: 'FPS' | 'PAYME' | 'BANK' | 'CASH' | 'OTHER';
+  payout_handle?: string;
+}
+
+// Claim intake types
+export interface ClaimDraftPayload {
+  uuid: string;
+  claimId?: string;
+  claimantId: string;
+  amount: number;
+  notes: string;
+  budgetLineId?: string;
+  receiptId?: string;
+  expenseDate?: string;
+  semester?: string;
+  eventId?: string;
+  payoutMethod?: 'FPS' | 'PAYME' | 'BANK' | 'CASH' | 'OTHER';
+  payoutHandle?: string;
+}
+
+export interface Claim {
+  claim_id: string;
+  claimant_id: string;
+  status: string;
+  submitted_at: string;
+  total_amount: number;
+  notes: string;
+  missingReceipt?: boolean;
+  payout_method?: string;
+}

@@ -2,20 +2,23 @@ global.Session = {
   getActiveUser: jest.fn(() => ({ getEmail: jest.fn(() => 'test@example.com') }))
 };
 global.getSheet_ = jest.fn();
+global.getVaultSheet_ = jest.fn();
 global.Engine = {
   _findRowsByColumn: jest.fn()
 };
-global.TABS = { EXPENSE_CLAIMS: 'ExpenseClaims', BUDGET_REQUESTS: 'BudgetRequests', BUDGET_REQUEST_LINES: 'BudgetRequestLines', USERS: 'Users', CLAIM_LINE_ITEMS: 'ClaimLineItems', RECEIPTS: 'Receipts' };
+global.TABS = { EXPENSE_CLAIMS: 'ExpenseClaims', BUDGET_REQUESTS: 'BudgetRequests', BUDGET_REQUEST_LINES: 'BudgetRequestLines', USERS: 'Users', CLAIM_LINE_ITEMS: 'ClaimLineItems', RECEIPTS: 'Receipts', VAULT: 'Vault', COUNTERS: 'Counters' };
 global.COLS = {
-  ExpenseClaims: { claim_id: 1, claimant_id: 2, status: 3, submitted_at: 4, total_amount: 11, notes: 14, processed_response_id: 15 },
+  ExpenseClaims: { claim_id: 1, claimant_id: 2, status: 3, submitted_at: 4, total_amount: 11, notes: 14, processed_response_id: 15, created_by: 16, expense_date: 17, semester: 18, event_id: 19, payout_method: 20, payout_handle: 21 },
   BudgetRequests: { request_id: 1, requester_id: 2, event_id: 3, title: 4, justification: 5, needed_by: 6, status: 7, submitted_at: 8, decided_at: 9, decided_by: 10, decision_note: 11, self_approved: 12, processed_response_id: 13 },
   BudgetRequestLines: { line_id: 1, request_id: 2, category_id: 3, description: 4, requested_amount: 5, approved_amount: 6, line_status: 7, claimed_amount: 8, remaining: 9 },
   Users: { user_id: 1, display_name: 2, role: 3, email: 4, active: 5, created_at: 6 },
   ClaimLineItems: { claim_id: 2, amount: 5, description: 6 },
-  Receipts: { receipt_id: 1, file_id: 2, sha256: 3, uploaded_by: 4 }
+  Receipts: { receipt_id: 1, file_id: 2, sha256: 3, uploaded_by: 4 },
+  Vault: { user_id: 1, full_name: 2, student_id: 3, payout_method: 4, payout_handle: 5, consent_ts: 6 },
+  Counters: { entity: 1, last_n: 2 }
 };
 global.STATUS = {
-  ExpenseClaim: { SUBMITTED: 'SUBMITTED' },
+  ExpenseClaim: { DRAFT: 'DRAFT', SUBMITTED: 'SUBMITTED' },
   BudgetRequest: { DRAFT: 'DRAFT', PENDING: 'PENDING', NEEDS_INFO: 'NEEDS_INFO', APPROVED: 'APPROVED', PARTIALLY_APPROVED: 'PARTIALLY_APPROVED', REJECTED: 'REJECTED', WITHDRAWN: 'WITHDRAWN', CLOSED: 'CLOSED' },
   BudgetRequestLine: { PENDING: 'PENDING', APPROVED: 'APPROVED', REDUCED: 'REDUCED', REJECTED: 'REJECTED' }
 };
@@ -39,6 +42,9 @@ describe('Api.js', () => {
     jest.clearAllMocks();
     // Shared mocks for all tests
     global.Session.getActiveUser.mockReturnValue({ getEmail: () => testUserEmail });
+    global.Audit = { _nowIso: jest.fn(() => '2026-07-21T12:00:00Z'), append: jest.fn() };
+    global.Ids = { nextId: jest.fn(() => 'BUDGET-26A-001'), childId: jest.fn(() => 'BUDGETLINE-26A-001-01') };
+    global.getVaultSheet_ = jest.fn(() => ({ getDataRange: () => ({ getValues: () => [[]] }), appendRow: jest.fn(), getLastRow: () => 1, getRange: jest.fn(() => ({ setNumberFormat: jest.fn().mockReturnThis(), setValue: jest.fn() })) }));
     const mockUsersData = [
       ['user_id', 'display_name', 'role', 'email', 'active', 'created_at'],
       [testUserId, 'Test User', 'COMMITTEE', testUserEmail, true, '2026-01-01']
@@ -59,7 +65,7 @@ describe('Api.js', () => {
       expect(result.role).toBe('COMMITTEE');
       expect(result.user_id).toBe('U-001');
       expect(result.display_name).toBe('Test User');
-      expect(result.views).toEqual(['claims', 'budget-requests']);
+      expect(result.views).toEqual(['claims', 'members', 'budget-requests']);
     });
 
     it('should allow TREASURER role with all views', () => {
@@ -78,7 +84,7 @@ describe('Api.js', () => {
       const result = api_resolveSession();
       expect(result.allowed).toBe(true);
       expect(result.role).toBe('TREASURER');
-      expect(result.views).toEqual(['claims', 'budget-requests', 'income', 'payouts', 'reports']);
+      expect(result.views).toEqual(['claims', 'members', 'budget-requests', 'income', 'payouts', 'reports']);
     });
 
     it('should deny unknown user', () => {
@@ -360,11 +366,12 @@ describe('Api.js', () => {
         };
       });
       
-      global.Ids = { nextId: () => 'C-2', childId: () => 'CL-2' };
+      global.Ids.nextId.mockReturnValueOnce('C-2');
+      global.Ids.childId.mockReturnValueOnce('CL-2');
       global.Audit = { _nowIso: () => '2023-01-03', append: jest.fn() };
       global.Config = { getNum: () => 14 };
 
-      const payload = { uuid: 'abc', amount: 200, notes: 'Office chairs', budgetLineId: 'BL-1', receiptId: 'R-1' };
+      const payload = { uuid: 'abc', amount: 200, notes: 'Office chairs', budgetLineId: 'BL-1', receiptId: 'R-1', claimantId: 'MEMBER-001', payoutMethod: 'FPS', payoutHandle: '91234567' };
       
       const { api_submitClaim } = require('../Api.js');
       const result = api_submitClaim(payload);
@@ -429,6 +436,145 @@ describe('Api.js', () => {
       
       const { api_editClaim } = require('../Api.js');
       expect(() => api_editClaim(payload)).toThrow('Only SUBMITTED claims can be edited.');
+    });
+  });
+
+  describe('api_getMembers', () => {
+    it('should return all members with role MEMBER', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return {
+          getDataRange: () => ({
+            getValues: () => [
+              ['user_id', 'display_name', 'role', 'email', 'active', 'created_at'],
+              ['U-001', 'Alice', 'COMMITTEE', 'test@example.com', true, '2026-01-01'],
+              ['M-001', 'Bob', 'MEMBER', '', true, '2026-01-01'],
+              ['M-002', 'Carol', 'MEMBER', '', false, '2026-01-01']
+            ]
+          })
+        };
+        return { getRange: jest.fn(() => ({ setValue: jest.fn(), setValues: jest.fn() })) };
+      });
+      const { api_getMembers } = require('../Api.js');
+      const result = api_getMembers();
+      expect(result.length).toBe(2);
+      expect(result[0].user_id).toBe('M-001');
+      expect(result[1].active).toBe(false);
+    });
+  });
+
+  describe('api_addMember', () => {
+    it('should create a new member with unique SID', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.Ids.nextId.mockReturnValueOnce('M-003');
+      global.Audit._nowIso.mockReturnValueOnce('2026-07-21T12:00:00Z');
+
+      const usersSheet = { getDataRange: () => ({ getValues: () => [
+        ['user_id', 'display_name', 'role', 'email', 'active', 'created_at'],
+        ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']
+      ] }), appendRow: jest.fn(), getLastRow: () => 1, getMaxRows: () => 10, insertRowAfter: jest.fn(), getRange: jest.fn(() => ({ getValues: () => [[]], setNumberFormat: jest.fn().mockReturnThis(), setValue: jest.fn(), setValues: jest.fn() })) };
+      const vaultSheet = { getDataRange: () => ({ getValues: () => [[]] }), appendRow: jest.fn(), getLastRow: () => 2, getMaxRows: () => 10, insertRowAfter: jest.fn(), getRange: jest.fn(() => ({ getValues: () => [[]], setNumberFormat: jest.fn().mockReturnThis(), setValue: jest.fn(), setValues: jest.fn() })) };
+
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return usersSheet;
+        return { getRange: jest.fn(() => ({ setValue: jest.fn(), setValues: jest.fn() })) };
+      });
+      global.getVaultSheet_.mockReturnValue(vaultSheet);
+
+      const { api_addMember } = require('../Api.js');
+      const result = api_addMember({ student_id: 'S123456', display_name: 'Dave', full_name: 'David', payout_method: 'FPS', payout_handle: '91234567' });
+      expect(result.user_id).toBe('M-003');
+      expect(usersSheet.getRange).toHaveBeenCalled();
+      expect(vaultSheet.getRange).toHaveBeenCalled();
+    });
+
+    it('should reject duplicate SID', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.getVaultSheet_.mockReturnValueOnce({
+        getDataRange: () => ({
+          getValues: () => [
+            ['user_id', 'full_name', 'student_id', 'payout_method', 'payout_handle', 'consent_ts'],
+            ['M-001', 'Bob', 'S123456', 'FPS', '91234567', '2026-01-01']
+          ]
+        })
+      });
+      const { api_addMember } = require('../Api.js');
+      expect(() => api_addMember({ student_id: 'S123456', display_name: 'Dave' })).toThrow('member');
+    });
+  });
+
+  describe('api_reactivateMember', () => {
+    it('should reactivate an inactive member', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      const usersSheet = {
+        getDataRange: () => ({
+          getValues: () => [
+            ['user_id', 'display_name', 'role', 'email', 'active', 'created_at'],
+            ['U-001', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01'],
+            ['M-002', 'Carol', 'MEMBER', '', false, '2026-01-01']
+          ]
+        }),
+        getRange: jest.fn(() => ({ setValue: jest.fn() }))
+      };
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return usersSheet;
+        return { getRange: jest.fn(() => ({ setValue: jest.fn() })) };
+      });
+      const { api_reactivateMember } = require('../Api.js');
+      const result = api_reactivateMember('M-002');
+      expect(result.active).toBe(true);
+    });
+  });
+
+  describe('api_saveClaimDraft', () => {
+    it('should create a new draft claim', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.Ids.nextId.mockReturnValueOnce('CLAIM-26A-001');
+      global.Ids.childId.mockReturnValueOnce('CLAIMLINE-26A-001-01');
+      global.Config = { getNum: () => 14 };
+
+      const expenseSheet = {
+        getRange: () => ({ getValues: () => [[]], setValues: jest.fn() }),
+        getLastRow: () => 1,
+        getMaxRows: () => 10,
+        insertRowAfter: jest.fn()
+      };
+      const cliSheet = {
+        getRange: () => ({ getValues: () => [[]], setValues: jest.fn() }),
+        getLastRow: () => 1,
+        getMaxRows: () => 10,
+        insertRowAfter: jest.fn()
+      };
+
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === 'Users') return { getDataRange: () => ({ getValues: () => [[], ['USER-1', 'Test User', 'COMMITTEE', 'test@example.com', true, '2026-01-01']] }) };
+        if (tab === 'ExpenseClaims') return expenseSheet;
+        if (tab === 'ClaimLineItems') return cliSheet;
+        return { getRange: jest.fn(() => ({ setValue: jest.fn(), setValues: jest.fn() })) };
+      });
+
+      const { api_saveClaimDraft } = require('../Api.js');
+      const result = api_saveClaimDraft({
+        uuid: 'draft-1', claimantId: 'M-001', amount: 100, notes: 'Draft note',
+        budgetLineId: 'BL-1', expenseDate: '2026-07-15', payoutMethod: 'FPS', payoutHandle: '91234567'
+      });
+      expect(result.claim_id).toBe('CLAIM-26A-001');
+      expect(result.status).toBe('DRAFT');
+    });
+  });
+
+  describe('api_submitDraftClaim', () => {
+    it('should submit a DRAFT claim', () => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => 'test@example.com' });
+      global.Engine._loadRow.mockReturnValueOnce({
+        rowIndex: 2,
+        values: ['CLAIM-26A-001', 'M-001', 'DRAFT', '', '', '', '', '', '', '', 100, false, false, 'Note', 'uuid-1', 'U-001', '2026-07-15', '26A', '', 'FPS', '91234567']
+      });
+      global.Engine.transition.mockReturnValueOnce({ ok: true, from: 'DRAFT', to: 'SUBMITTED' });
+      const { api_submitDraftClaim } = require('../Api.js');
+      const result = api_submitDraftClaim('CLAIM-26A-001');
+      expect(result.status).toBe('SUBMITTED');
+      expect(global.Engine.transition).toHaveBeenCalledWith('ExpenseClaim', 'CLAIM-26A-001', 'SUBMIT', 'U-001', {});
     });
   });
 });

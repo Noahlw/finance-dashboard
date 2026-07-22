@@ -441,6 +441,8 @@ var Engine = {
       sheet.getRange(row.rowIndex, c.verified_at).setValue(now);
       sheet.getRange(row.rowIndex, c.verified_by).setValue(actorUserId);
       sheet.getRange(row.rowIndex, c.total_amount).setValue(Engine._sumClaimLineItems(claimId));
+    } else if (action === 'SUBMIT') {
+      sheet.getRange(row.rowIndex, c.submitted_at).setValue(now);
     } else if (action === 'APPROVE_PAYOUT') {
       sheet.getRange(row.rowIndex, c.approved_at).setValue(now);
       sheet.getRange(row.rowIndex, c.approved_by).setValue(actorUserId);

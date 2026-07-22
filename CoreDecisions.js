@@ -34,6 +34,8 @@ var TRANSITIONS = {
     { from: STATUS_.BudgetRequest.PARTIALLY_APPROVED, action: 'CLOSE', to: STATUS_.BudgetRequest.CLOSED, allowedRoles: [ROLES_.TREASURER] }
   ],
   ExpenseClaim: [
+    { from: STATUS_.ExpenseClaim.DRAFT, action: 'SUBMIT', to: STATUS_.ExpenseClaim.SUBMITTED, allowedRoles: [ROLES_.COMMITTEE, ROLES_.TREASURER] },
+    { from: STATUS_.ExpenseClaim.DRAFT, action: 'WITHDRAW', to: STATUS_.ExpenseClaim.REJECTED, allowedRoles: [ROLES_.COMMITTEE, ROLES_.TREASURER], requiresNote: true },
     { from: STATUS_.ExpenseClaim.SUBMITTED, action: 'REQUEST_INFO', to: STATUS_.ExpenseClaim.NEEDS_INFO, allowedRoles: [ROLES_.COMMITTEE, ROLES_.TREASURER], requiresNote: true },
     { from: STATUS_.ExpenseClaim.NEEDS_INFO, action: 'RESUBMIT', to: STATUS_.ExpenseClaim.SUBMITTED, allowedRoles: null },
     { from: STATUS_.ExpenseClaim.SUBMITTED, action: 'VERIFY', to: STATUS_.ExpenseClaim.VERIFIED, allowedRoles: [ROLES_.COMMITTEE, ROLES_.TREASURER] },

@@ -13,7 +13,11 @@
   "scripts": {
     "test": "jest"
   },
-  "jest": {},
+  "jest": {
+    "testPathIgnorePatterns": [
+      "archive/"
+    ]
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",

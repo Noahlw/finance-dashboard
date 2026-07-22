@@ -24,7 +24,7 @@ function api_resolveSession() {
 
   if (!user.active) return { allowed: false, reason: 'inactive_user' };
 
-  var views = [ 'claims', 'budget-requests' ];
+  var views = [ 'claims', 'members', 'budget-requests' ];
   if (user.role === ROLES.TREASURER) views.push('income', 'payouts', 'reports');
 
   return {
@@ -46,7 +46,7 @@ function api_getMyClaims() {
   }
 
   var claimsSheet = getSheet_(TABS.EXPENSE_CLAIMS);
-  var claimsRows = Engine._findRowsByColumn(claimsSheet, COLS.ExpenseClaims.claimant_id, user.userId);
+  var claimsRows = Engine._findRowsByColumn(claimsSheet, COLS.ExpenseClaims.created_by, user.userId);
   var requestsSheet = getSheet_(TABS.BUDGET_REQUESTS);
   var requestsRows = Engine._findRowsByColumn(requestsSheet, COLS.BudgetRequests.requester_id, user.userId);
   var requestIds = {};
@@ -58,7 +58,7 @@ function api_getMyClaims() {
   var allLines = linesSheet.getDataRange().getValues();
   var c_brl = COLS.BudgetRequestLines;
   var budgetLines = [];
-  
+
   for (var i = 1; i < allLines.length; i++) {
     var rId = allLines[i][c_brl.request_id - 1];
     if (requestIds[rId] && allLines[i][c_brl.line_status - 1] === 'APPROVED' && allLines[i][c_brl.remaining - 1] > 0) {
@@ -71,8 +71,9 @@ function api_getMyClaims() {
     }
   }
 
+  var c = COLS.ExpenseClaims;
   return {
-    claims: claimsRows.map(function(r) { return { claim_id: r.values[COLS.ExpenseClaims.claim_id - 1], status: r.values[COLS.ExpenseClaims.status - 1], submitted_at: r.values[COLS.ExpenseClaims.submitted_at - 1], total_amount: r.values[COLS.ExpenseClaims.total_amount - 1], notes: r.values[COLS.ExpenseClaims.notes - 1] }; }),
+    claims: claimsRows.map(function(r) { return { claim_id: r.values[c.claim_id - 1], status: r.values[c.status - 1], submitted_at: r.values[c.submitted_at - 1], total_amount: r.values[c.total_amount - 1], notes: r.values[c.notes - 1], claimant_id: r.values[c.claimant_id - 1] }; }),
     requests: requestsRows.map(function(r) { return { request_id: r.values[COLS.BudgetRequests.request_id - 1], title: r.values[COLS.BudgetRequests.title - 1], status: r.values[COLS.BudgetRequests.status - 1], submitted_at: r.values[COLS.BudgetRequests.submitted_at - 1] }; }),
     budgetLines: budgetLines
   };
@@ -128,6 +129,7 @@ function api_submitClaim(payload) {
   if (!email) throw new Error('Not authenticated');
   var user = _resolveUser(email);
   if (user.isUnknown) throw new Error('Unregistered user');
+  if (!payload.claimantId) throw new Error('Claimant is required');
 
   if (_alreadyProcessed(TABS.EXPENSE_CLAIMS, COLS.ExpenseClaims.processed_response_id, payload.uuid)) {
     return { success: true, message: 'Already processed' }; // Idempotent
@@ -135,12 +137,14 @@ function api_submitClaim(payload) {
 
   var claimId = Ids.nextId('ExpenseClaim');
   var now = Audit._nowIso();
-  var lateFlag = _isLate(payload.receiptDate);
+  var lateFlag = _isLate(payload.expenseDate);
   var total = Number(payload.amount);
 
   _appendRow(getSheet_(TABS.EXPENSE_CLAIMS), [
-    claimId, user.userId, STATUS.ExpenseClaim.SUBMITTED, now, '', '', '', '',
-    '', '', total, lateFlag, false, payload.notes, payload.uuid
+    claimId, payload.claimantId, STATUS.ExpenseClaim.SUBMITTED, now, '', '', '', '',
+    '', '', total, lateFlag, false, payload.notes, payload.uuid, user.userId,
+    payload.expenseDate || '', payload.semester || '', payload.eventId || '',
+    payload.payoutMethod || 'FPS', payload.payoutHandle || ''
   ]);
 
   var cliId = Ids.childId(claimId, 1, 'CLAIMLINE');
@@ -486,11 +490,234 @@ function api_decisionBudgetRequest(entityId, action, payload) {
   return { request_id: entityId, from: result.from, to: result.to };
 }
 
+// ---------------------------------------------------------------------------
+// Member Directory API
+// ---------------------------------------------------------------------------
+
+function _requireOperator() {
+  var email = Session.getActiveUser().getEmail();
+  if (!email) throw new Error('Not authenticated');
+  var user = _resolveUser(email);
+  if (user.isUnknown) throw new Error('Unregistered user');
+  if (user.role !== ROLES.COMMITTEE && user.role !== ROLES.TREASURER) {
+    throw new Error('Unauthorized');
+  }
+  return user;
+}
+
+function _findUserById(userId) {
+  var sheet = getSheet_(TABS.USERS);
+  var values = sheet.getDataRange().getValues();
+  var c = COLS.Users;
+  for (var i = 1; i < values.length; i++) {
+    if (values[i][c.user_id - 1] === userId) {
+      return { rowIndex: i + 1, values: values[i] };
+    }
+  }
+  return null;
+}
+
+function _findVaultByUserId(userId) {
+  var sheet = getVaultSheet_();
+  var values = sheet.getDataRange().getValues();
+  var c = COLS.Vault;
+  for (var i = 1; i < values.length; i++) {
+    if (values[i][c.user_id - 1] === userId) {
+      return { rowIndex: i + 1, values: values[i] };
+    }
+  }
+  return null;
+}
+
+function _findVaultByStudentId(studentId) {
+  var sheet = getVaultSheet_();
+  var values = sheet.getDataRange().getValues();
+  var c = COLS.Vault;
+  for (var i = 1; i < values.length; i++) {
+    if (String(values[i][c.student_id - 1]) === String(studentId)) {
+      return { rowIndex: i + 1, values: values[i] };
+    }
+  }
+  return null;
+}
+
+/**
+ * List all members (Users with role=MEMBER). Excludes Vault PII (SID, payout details).
+ */
+function api_getMembers() {
+  _requireOperator();
+
+  var sheet = getSheet_(TABS.USERS);
+  var values = sheet.getDataRange().getValues();
+  var c = COLS.Users;
+  var out = [];
+  for (var i = 1; i < values.length; i++) {
+    if (values[i][c.role - 1] === ROLES.MEMBER) {
+      out.push({
+        user_id: values[i][c.user_id - 1],
+        display_name: values[i][c.display_name - 1],
+        active: String(values[i][c.active - 1]).trim().toUpperCase() === 'TRUE'
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Add a new member with unique SID. Does not create login access (email blank).
+ */
+function api_addMember(payload) {
+  var operator = _requireOperator();
+  if (!payload.student_id || !String(payload.student_id).trim()) {
+    throw new Error('Student ID is required');
+  }
+  if (!payload.display_name || !String(payload.display_name).trim()) {
+    throw new Error('Display name is required');
+  }
+
+  var existing = _findVaultByStudentId(payload.student_id);
+  if (existing) {
+    var user = _findUserById(existing.values[COLS.Vault.user_id - 1]);
+    if (user && user.values[COLS.Users.active - 1] === true) {
+      throw new Error('Active member with this SID already exists');
+    }
+    throw new Error('Inactive member with this SID already exists. Use reactivate instead.');
+  }
+
+  var userId = Ids.nextId('User');
+  var now = Audit._nowIso();
+  var displayName = String(payload.display_name).trim();
+  _appendRow(getSheet_(TABS.USERS), [userId, displayName, ROLES.MEMBER, '', true, now]);
+
+  var vaultRow = [
+    userId,
+    String(payload.full_name || displayName).trim(),
+    String(payload.student_id).trim(),
+    String(payload.payout_method || 'FPS').trim(),
+    String(payload.payout_handle || '').trim(),
+    now
+  ];
+  var vaultSheet = getVaultSheet_();
+  _appendRow(vaultSheet, vaultRow);
+  // Force text format for ID / phone fields to preserve leading zeros
+  var targetRow = vaultSheet.getLastRow();
+  vaultSheet.getRange(targetRow, COLS.Vault.student_id).setNumberFormat('@').setValue(vaultRow[2]);
+  vaultSheet.getRange(targetRow, COLS.Vault.payout_handle).setNumberFormat('@').setValue(vaultRow[4]);
+
+  Audit.append(operator.userId, 'User', userId, 'MEMBER_CREATE', { sid: String(payload.student_id).trim() });
+  return { user_id: userId, display_name: displayName, active: true };
+}
+
+/**
+ * Reactivate an inactive member by user_id.
+ */
+function api_reactivateMember(userId) {
+  var operator = _requireOperator();
+  var user = _findUserById(userId);
+  if (!user) throw new Error('Member not found');
+  if (user.values[COLS.Users.role - 1] !== ROLES.MEMBER) {
+    throw new Error('User is not a member');
+  }
+  if (user.values[COLS.Users.active - 1] === true) {
+    throw new Error('Member is already active');
+  }
+
+  getSheet_(TABS.USERS).getRange(user.rowIndex, COLS.Users.active).setValue(true);
+  Audit.append(operator.userId, 'User', userId, 'MEMBER_REACTIVATE', {});
+  return { user_id: userId, active: true };
+}
+
+// ---------------------------------------------------------------------------
+// Claim Draft + Intake API
+// ---------------------------------------------------------------------------
+
+/**
+ * Save a claim as a DRAFT. operator is the current user; claimant is the member.
+ */
+function api_saveClaimDraft(payload) {
+  var operator = _requireOperator();
+  if (!payload.claimantId) throw new Error('Claimant is required');
+  if (!payload.uuid) throw new Error('uuid is required');
+
+  if (payload.claimId) {
+    var existing = Engine._loadRow('ExpenseClaim', payload.claimId);
+    if (!existing) throw new Error('Claim not found');
+    if (existing.values[COLS.ExpenseClaims.created_by - 1] !== operator.userId) {
+      throw new Error('Unauthorized');
+    }
+    if (existing.values[COLS.ExpenseClaims.status - 1] !== STATUS.ExpenseClaim.DRAFT) {
+      throw new Error('Only DRAFT claims can be updated as draft');
+    }
+  }
+
+  var claimId = payload.claimId || Ids.nextId('ExpenseClaim');
+  var now = Audit._nowIso();
+  var c = COLS.ExpenseClaims;
+  var lateFlag = _isLate(payload.expenseDate);
+  var total = Number(payload.amount) || 0;
+
+  if (!payload.claimId) {
+    _appendRow(getSheet_(TABS.EXPENSE_CLAIMS), [
+      claimId, payload.claimantId, STATUS.ExpenseClaim.DRAFT, '', '', '', '', '',
+      '', '', total, lateFlag, false, payload.notes || '', payload.uuid, operator.userId,
+      payload.expenseDate || '', payload.semester || '', payload.eventId || '',
+      payload.payoutMethod || 'FPS', payload.payoutHandle || ''
+    ]);
+  } else {
+    var row = Engine._loadRow('ExpenseClaim', claimId);
+    var sheet = row.sheet;
+    sheet.getRange(row.rowIndex, c.claimant_id).setValue(payload.claimantId);
+    sheet.getRange(row.rowIndex, c.total_amount).setValue(total);
+    sheet.getRange(row.rowIndex, c.notes).setValue(payload.notes || '');
+    sheet.getRange(row.rowIndex, c.late_flag).setValue(lateFlag);
+    sheet.getRange(row.rowIndex, c.expense_date).setValue(payload.expenseDate || '');
+    sheet.getRange(row.rowIndex, c.semester).setValue(payload.semester || '');
+    sheet.getRange(row.rowIndex, c.event_id).setValue(payload.eventId || '');
+    sheet.getRange(row.rowIndex, c.payout_method).setValue(payload.payoutMethod || 'FPS');
+    sheet.getRange(row.rowIndex, c.payout_handle).setValue(payload.payoutHandle || '');
+  }
+
+  // Upsert single claim line item
+  var cliSheet = getSheet_(TABS.CLAIM_LINE_ITEMS);
+  var cliRows = Engine._findRowsByColumn(cliSheet, COLS.ClaimLineItems.claim_id, claimId);
+  var missingReceipt = !payload.receiptId;
+  var cliValues = [Ids.childId(claimId, 1, 'CLAIMLINE'), claimId, payload.budgetLineId || '', payload.receiptId || '', total, payload.notes || '', missingReceipt];
+  if (cliRows.length > 0) {
+    var cliC = COLS.ClaimLineItems;
+    cliSheet.getRange(cliRows[0].rowIndex, 1, 1, cliValues.length).setValues([cliValues]);
+  } else {
+    _appendRow(cliSheet, cliValues);
+  }
+
+  Audit.append(operator.userId, 'ExpenseClaim', claimId, payload.claimId ? 'DRAFT_UPDATE' : 'DRAFT_CREATE', { uuid: payload.uuid });
+  return { claim_id: claimId, status: STATUS.ExpenseClaim.DRAFT };
+}
+
+/**
+ * Submit a DRAFT claim for review.
+ */
+function api_submitDraftClaim(claimId) {
+  var operator = _requireOperator();
+  var existing = Engine._loadRow('ExpenseClaim', claimId);
+  if (!existing) throw new Error('Claim not found');
+  if (existing.values[COLS.ExpenseClaims.created_by - 1] !== operator.userId) {
+    throw new Error('Unauthorized');
+  }
+  if (existing.values[COLS.ExpenseClaims.status - 1] !== STATUS.ExpenseClaim.DRAFT) {
+    throw new Error('Only DRAFT claims can be submitted');
+  }
+
+  var result = Engine.transition('ExpenseClaim', claimId, 'SUBMIT', operator.userId, {});
+  if (!result.ok) throw new Error(result.reason);
+  return { claim_id: claimId, status: result.to, submitted_at: Audit._nowIso() };
+}
+
 if (typeof module !== 'undefined') {
   module.exports = {
     api_resolveSession, api_getMyClaims, api_uploadReceipt, api_submitClaim, api_editClaim,
     api_getMyBudgetRequests, api_saveBudgetRequestDraft, api_submitBudgetRequest,
     api_discardBudgetRequest, api_getPendingBudgetRequests, api_decisionBudgetRequest,
+    api_getMembers, api_addMember, api_reactivateMember, api_saveClaimDraft, api_submitDraftClaim,
     _sha256Hex, _isLate, _resolveUser
   };
 }

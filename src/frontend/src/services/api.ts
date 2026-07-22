@@ -1,4 +1,4 @@
-import type { MyClaimsResponse, ClaimPayload, EditClaimPayload, SessionResponse, BudgetRequest, BudgetRequestDraftPayload, PendingBudgetRequest, BudgetDecisionPayload } from '../types';
+import type { MyClaimsResponse, ClaimPayload, EditClaimPayload, SessionResponse, BudgetRequest, BudgetRequestDraftPayload, PendingBudgetRequest, BudgetDecisionPayload, Member, AddMemberPayload, ClaimDraftPayload } from '../types';
 
 export const apiService = {
   resolveSession: (): Promise<SessionResponse> => {
@@ -43,8 +43,8 @@ export const apiService = {
         setTimeout(() => {
           resolve({
             claims: [
-              { claim_id: 'CLAIM-001', status: 'SUBMITTED', submitted_at: '2026-07-16', total_amount: 150.50, notes: 'Conference tickets' },
-              { claim_id: 'CLAIM-002', status: 'REIMBURSED', submitted_at: '2026-07-10', total_amount: 45.00, notes: 'Pizza for meeting' }
+              { claim_id: 'CLAIM-001', claimant_id: 'MEMBER-1', status: 'SUBMITTED', submitted_at: '2026-07-16', total_amount: 150.50, notes: 'Conference tickets' },
+              { claim_id: 'CLAIM-002', claimant_id: 'MEMBER-1', status: 'SUBMITTED', submitted_at: '2026-07-10', total_amount: 45.00, notes: 'Pizza for meeting' }
             ],
             requests: [
               { request_id: 'BUDGET-101', title: 'Fall Gala', status: 'APPROVED', submitted_at: '2026-07-01' }
@@ -108,6 +108,79 @@ export const apiService = {
         .withSuccessHandler(resolve)
         .withFailureHandler(reject)
         .api_uploadReceipt(fileName, mimeType, base64Data, vendor, receiptDate, receiptTotal);
+    });
+  },
+
+  getMembers: (): Promise<Member[]> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => {
+          resolve([
+            { user_id: 'MEMBER-1', display_name: 'Alice Member', active: true },
+            { user_id: 'MEMBER-2', display_name: 'Bob Member', active: false }
+          ]);
+        }, 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_getMembers();
+    });
+  },
+
+  addMember: (payload: AddMemberPayload): Promise<Member> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => {
+          resolve({ user_id: 'MEMBER-MOCK', display_name: payload.display_name, active: true });
+        }, 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_addMember(payload);
+    });
+  },
+
+  reactivateMember: (userId: string): Promise<{ user_id: string; active: boolean }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => {
+          resolve({ user_id: userId, active: true });
+        }, 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_reactivateMember(userId);
+    });
+  },
+
+  saveClaimDraft: (payload: ClaimDraftPayload): Promise<{ claim_id: string; status: string }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => {
+          resolve({ claim_id: payload.claimId || 'CLAIM-MOCK', status: 'DRAFT' });
+        }, 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_saveClaimDraft(payload);
+    });
+  },
+
+  submitDraftClaim: (claimId: string): Promise<{ claim_id: string; status: string }> => {
+    return new Promise((resolve) => {
+      if (typeof google === 'undefined' || !google.script) {
+        setTimeout(() => {
+          resolve({ claim_id: claimId, status: 'SUBMITTED' });
+        }, 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler(resolve)
+        .api_submitDraftClaim(claimId);
     });
   },
 
