@@ -352,6 +352,7 @@ describe("Api.js", () => {
         appendRow: jest.fn(),
         getDataRange: jest.fn(() => ({ getValues: jest.fn(() => [[]]) })),
         getLastRow: jest.fn(() => 1),
+        getMaxRows: jest.fn(() => 100),
         getRange: jest.fn(() => ({
           getValues: jest.fn(() => [[]]),
           setValue: jest.fn(),
@@ -1513,6 +1514,320 @@ describe("Api.js", () => {
         "U-001",
         {}
       );
+    });
+  });
+
+  describe("api_atomicSubmitClaim", () => {
+    it("should validate upfront and return structured errors", () => {
+      global.Session.getActiveUser.mockReturnValueOnce({
+        getEmail: () => "test@example.com",
+      });
+
+      const { api_atomicSubmitClaim } = require("../Api.js");
+      const result = api_atomicSubmitClaim({});
+
+      expect(result.ok).toBe(false);
+      expect(result.error.code).toBe("VALIDATION_ERROR");
+      expect(result.error.details.errors.length).toBeGreaterThanOrEqual(3);
+      var fields = result.error.details.errors.map(function (e) { return e.field; });
+      expect(fields).toContain("claimantId");
+      expect(fields).toContain("amount");
+      expect(fields).toContain("uuid");
+    });
+
+    it("should create a claim and submit atomically (no receipts)", () => {
+      global.Session.getActiveUser.mockReturnValueOnce({
+        getEmail: () => "test@example.com",
+      });
+      global.Ids.nextId.mockReturnValueOnce("CLAIM-ATOMIC");
+      global.Ids.childId.mockReturnValueOnce("CLI-ATOMIC-1");
+      global.Audit = { _nowIso: () => "2026-07-21T12:00:00Z", append: jest.fn() };
+      global.Config = { getNum: () => 14, getOptional: () => "" };
+
+      global.Engine.transition.mockReturnValueOnce({
+        from: "DRAFT",
+        ok: true,
+        to: "SUBMITTED",
+      });
+
+      var payload = {
+        amount: 200,
+        budgetLineId: "BL-1",
+        claimantId: "MEMBER-001",
+        expenseDate: "2026-07-15",
+        notes: "Office supplies",
+        payoutMethod: "FPS",
+        payoutHandle: "91234567",
+        semester: "26A",
+        uuid: "atomic-uuid-1",
+      };
+
+      var { api_atomicSubmitClaim } = require("../Api.js");
+      var result = api_atomicSubmitClaim(payload);
+
+      expect(result.ok).toBe(true);
+      expect(result.data.claim_id).toBe("CLAIM-ATOMIC");
+      expect(result.data.status).toBe("SUBMITTED");
+    }); // end atomic basic
+
+    it("should update existing draft and submit atomically", () => {
+      global.Session.getActiveUser.mockReturnValueOnce({
+        getEmail: () => "test@example.com",
+      });
+      global.Ids.nextId.mockReturnValueOnce("RECEIPT-DRAFT");
+      global.Ids.childId.mockReturnValueOnce("CLI-DRAFT-1");
+      global.Config = { getNum: () => 14, getOptional: () => "" };
+
+      var usersSheet = {
+        getDataRange: () => ({
+          getValues: () => [
+            [],
+            ["U-001", "Test User", "COMMITTEE", "test@example.com", true, "2026-01-01"],
+          ],
+        }),
+      };
+      var defSheet = {
+        getLastRow: () => 1,
+        getMaxRows: () => 10,
+        getRange: () => ({ getValues: () => [], setValues: jest.fn() }),
+      };
+
+      var existingSheet = { getRange: jest.fn(() => ({ setValue: jest.fn() })) };
+      global.Engine._loadRow.mockReturnValueOnce({
+        rowIndex: 2,
+        sheet: existingSheet,
+        values: [
+          "CLAIM-DRAFT-1", "M-001", "DRAFT", "", "", "", "", "", "", "",
+          100, false, false, "Old note", "old-uuid", "U-001",
+          "2026-07-10", "26A", "", "FPS", "",
+        ],
+      });
+      global.Engine.transition.mockReturnValueOnce({
+        from: "DRAFT",
+        ok: true,
+        to: "SUBMITTED",
+      });
+
+      global.getSheet_.mockImplementation(function (tab) {
+        if (tab === "Users") return usersSheet;
+        return defSheet;
+      });
+
+      var payload = {
+        claimId: "CLAIM-DRAFT-1",
+        amount: 250,
+        claimantId: "MEMBER-001",
+        expenseDate: "2026-07-20",
+        notes: "Updated notes",
+        payoutMethod: "PAYME",
+        payoutHandle: "payme-id",
+        semester: "26A",
+        uuid: "atomic-draft-uuid",
+      };
+
+      var { api_atomicSubmitClaim } = require("../Api.js");
+      var result = api_atomicSubmitClaim(payload);
+
+      if (!result.ok) throw new Error("DRAFTUPD: " + result.error.code + " " + result.error.message);
+      expect(result.ok).toBe(true);
+      expect(existingSheet.getRange).toHaveBeenCalled();
+      expect(global.Engine.transition).toHaveBeenCalledWith(
+        "ExpenseClaim", "CLAIM-DRAFT-1", "SUBMIT", "U-001", {}
+      );
+    });
+
+    it("should rollback on failure after partial writes", () => {
+      global.Session.getActiveUser.mockReturnValueOnce({
+        getEmail: () => "test@example.com",
+      });
+      global.Ids.nextId
+        .mockReturnValueOnce("CLAIM-ROLLBACK")
+        .mockReturnValueOnce("RECEIPT-RB");
+      global.Ids.childId.mockReturnValueOnce("CLI-RB-1");
+      global.Config = { getNum: () => 14, getOptional: () => "" };
+
+      var usersSheet = {
+        getDataRange: () => ({
+          getValues: () => [
+            [],
+            ["U-001", "Test User", "COMMITTEE", "test@example.com", true, "2026-01-01"],
+          ],
+        }),
+        getRange: () => ({ getValues: () => [], setValues: jest.fn(), setValue: jest.fn() }),
+        getMaxRows: () => 1000,
+      };
+      var receiptSheet = {
+        getDataRange: () => ({
+          getValues: () => [["receipt_id", "drive_file_id", "sha256", "uploaded_by"]],
+        }),
+        appendRow: jest.fn(),
+        getRange: () => ({ getValues: () => [[""]], setValues: jest.fn(), setValue: jest.fn() }),
+        getMaxRows: () => 1000,
+      };
+      var claimsSheet = { appendRow: jest.fn(), deleteRow: jest.fn(), getLastRow: () => 1, getMaxRows: () => 1000, getRange: () => ({ getValues: () => [[""]], setValues: jest.fn(), setValue: jest.fn() }) };
+      var cliSheet = { appendRow: jest.fn(), deleteRow: jest.fn(), getRange: () => ({ getValues: () => [[""]], setValues: jest.fn(), setValue: jest.fn() }), getMaxRows: () => 1000 };
+
+      global.getSheet_.mockImplementation(function (tab) {
+        if (tab === "Users") return usersSheet;
+        if (tab === "Receipts") return receiptSheet;
+        if (tab === "ExpenseClaims") return claimsSheet;
+        if (tab === "ClaimLineItems") return cliSheet;
+        return { getLastRow: () => 1, getMaxRows: () => 10, getRange: () => ({ getValues: () => [], setValues: jest.fn() }) };
+      });
+
+      // Simulate transition failure
+      global.Engine.transition.mockReturnValueOnce({
+        from: "DRAFT",
+        ok: false,
+        reason: "Budget line exhausted",
+      });
+
+      // Mock _findRowsByColumn to simulate rows that need cleanup
+      global.Engine._findRowsByColumn = jest.fn(function () {
+        return [{ rowIndex: 2, sheet: { deleteRow: jest.fn() } }];
+      });
+
+      var payload = {
+        amount: 100,
+        claimantId: "MEMBER-001",
+        expenseDate: "2026-07-15",
+        notes: "Test rollback",
+        payoutMethod: "FPS",
+        payoutHandle: "91234567",
+        uuid: "rollback-uuid",
+        receipts: [{
+          fileName: "rec.jpg",
+          mimeType: "image/jpeg",
+          base64Data: "dGVzdA==",
+        }],
+      };
+
+      var { api_atomicSubmitClaim } = require("../Api.js");
+      var result = api_atomicSubmitClaim(payload);
+
+      expect(result.ok).toBe(false);
+      expect(result.error.code).toBe("ENGINE_ERROR");
+    });
+
+    it("should create claim with receipt files and QR", () => {
+      global.Session.getActiveUser.mockReturnValueOnce({
+        getEmail: () => "test@example.com",
+      });
+      global.Ids.nextId
+        .mockReturnValueOnce("CLAIM-FILES")
+        .mockReturnValueOnce("REC-FILE-1")
+        .mockReturnValueOnce("REC-QR-1");
+      global.Ids.childId
+        .mockReturnValueOnce("CLI-FILE-1")
+        .mockReturnValueOnce("CLI-QR-1");
+      global.Config = { getNum: () => 14, getOptional: () => "" };
+      global.Engine.transition.mockReturnValueOnce({
+        from: "DRAFT", ok: true, to: "SUBMITTED",
+      });
+
+      var payload = {
+        amount: 150,
+        budgetLineId: "BL-1",
+        claimantId: "MEMBER-001",
+        expenseDate: "2026-07-15",
+        notes: "Food receipts",
+        payoutMethod: "FPS",
+        payoutHandle: "91234567",
+        uuid: "files-uuid",
+        receipts: [
+          {
+            fileName: "receipt1.jpg",
+            mimeType: "image/jpeg",
+            base64Data: "ZmlsZTE=",
+          },
+        ],
+        qrFile: {
+          fileName: "qr.png",
+          mimeType: "image/png",
+          base64Data: "cXJkYXRh",
+        },
+      };
+
+      var { api_atomicSubmitClaim } = require("../Api.js");
+      var result = api_atomicSubmitClaim(payload);
+
+      expect(result.ok).toBe(true);
+      expect(result.data.claim_id).toBe("CLAIM-FILES");
+      expect(result.data.receipt_ids.length).toBe(1);
+      expect(result.data.receipt_ids[0]).toBe("REC-FILE-1");
+      expect(global.DriveApp.getFolderById).toHaveBeenCalled();
+      expect(global.Utilities.newBlob).toHaveBeenCalledTimes(2); // receipt + QR
+    });
+
+    it("should reject invalid file type upfront", () => {
+      global.Session.getActiveUser.mockReturnValueOnce({
+        getEmail: () => "test@example.com",
+      });
+
+      var payload = {
+        amount: 100,
+        claimantId: "MEMBER-001",
+        expenseDate: "2026-07-15",
+        notes: "Bad file test",
+        payoutMethod: "FPS",
+        payoutHandle: "91234567",
+        uuid: "bad-file-uuid",
+        receipts: [{
+          fileName: "bad.exe",
+          mimeType: "application/x-msdownload",
+          base64Data: "dGVzdA==",
+        }],
+      };
+
+      var { api_atomicSubmitClaim } = require("../Api.js");
+      var result = api_atomicSubmitClaim(payload);
+
+      expect(result.ok).toBe(false);
+      expect(result.error.code).toBe("VALIDATION_ERROR");
+      expect(result.error.details.errors[0].field).toBe("receipts[0]");
+    });
+
+    it("should return Already processed for reused uuid", () => {
+      global.Session.getActiveUser.mockReturnValueOnce({
+        getEmail: () => "test@example.com",
+      });
+
+      var claimsSheet = {
+        getLastRow: () => 2,
+        getRange: jest.fn(() => ({
+          getValues: jest.fn(() => [["uuid-reused"]]),
+        })),
+      };
+      global.getSheet_.mockImplementation(function (tab) {
+        if (tab === "Users") {
+          return {
+            getDataRange: () => ({
+              getValues: () => [
+                [],
+                ["U-001", "Test User", "COMMITTEE", "test@example.com", true, "2026-01-01"],
+              ],
+            }),
+          };
+        }
+        if (tab === "ExpenseClaims") return claimsSheet;
+        return { getLastRow: () => 1, getMaxRows: () => 10, getRange: () => ({ getValues: () => [], setValues: jest.fn() }) };
+      });
+
+      var payload = {
+        amount: 100,
+        claimantId: "MEMBER-001",
+        expenseDate: "2026-07-15",
+        notes: "Idempotent test",
+        payoutMethod: "FPS",
+        payoutHandle: "91234567",
+        uuid: "uuid-reused",
+      };
+
+      var { api_atomicSubmitClaim } = require("../Api.js");
+      var result = api_atomicSubmitClaim(payload);
+
+      expect(result.ok).toBe(true);
+      expect(result.data.message).toBe("Already processed");
     });
   });
 

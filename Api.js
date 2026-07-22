@@ -1257,6 +1257,361 @@ function api_submitDraftClaim(claimId) {
   });
 }
 
+/**
+ * Atomic draft-first submission: validate everything, upload files, create
+ * the claim row and line items, and submit — all in one operation with
+ * rollback on failure.
+ */
+function api_atomicSubmitClaim(payload) {
+  var operator;
+  try { operator = _requireOperator(); } catch(e) { return _err("UNAUTHORIZED", e.message); }
+
+  // ── Upfront validation ─────────────────────────────────────────────
+  var errors = []; // { field: String, message: String }
+
+  if (!payload.claimantId) {
+    errors.push({ field: "claimantId", message: "Claimant is required" });
+  } else if (!_findVaultByUserId(payload.claimantId)) {
+    errors.push({ field: "claimantId", message: "Claimant SID not found in member directory" });
+  }
+
+  var total = Number(payload.amount) || 0;
+  if (total <= 0) {
+    errors.push({ field: "amount", message: "Amount must be greater than 0" });
+  }
+  if (total > 0 && total !== Math.round(total * 100) / 100) {
+    errors.push({ field: "amount", message: "Amount must have at most two decimal places" });
+  }
+
+  if (!payload.expenseDate) {
+    errors.push({ field: "expenseDate", message: "Expense date is required" });
+  }
+  if (!payload.notes) {
+    errors.push({ field: "notes", message: "Notes are required" });
+  }
+  if (!payload.uuid) {
+    errors.push({ field: "uuid", message: "Idempotency key (uuid) is required" });
+  }
+
+  var validMethods = ["FPS", "PAYME", "BANK", "CASH", "OTHER"];
+  if (payload.payoutMethod && validMethods.indexOf(payload.payoutMethod) === -1) {
+    errors.push({ field: "payoutMethod", message: "Invalid payout method: " + payload.payoutMethod });
+  }
+  if (
+    (payload.payoutMethod === "FPS" || payload.payoutMethod === "PAYME") &&
+    !payload.payoutHandle
+  ) {
+    errors.push({ field: "payoutHandle", message: "Payout handle is required for " + payload.payoutMethod });
+  }
+
+  // Validate receipt files upfront
+  var receipts = payload.receipts || [];
+  for (var ri = 0; ri < receipts.length; ri++) {
+    var rf = receipts[ri];
+    if (!rf.fileName || !rf.mimeType || !rf.base64Data) {
+      errors.push({ field: "receipts[" + ri + "]", message: "Receipt " + (ri + 1) + " is missing file data" });
+      continue;
+    }
+    if (allowedReceiptMimes.indexOf(rf.mimeType) === -1) {
+      errors.push({ field: "receipts[" + ri + "]", message: "Unsupported file type for receipt " + (ri + 1) + ". Allowed: PNG, JPEG, GIF, PDF." });
+    }
+    var receiptBytes = Utilities.base64Decode(rf.base64Data);
+    if (receiptBytes.length > maxReceiptBytes) {
+      errors.push({ field: "receipts[" + ri + "]", message: "Receipt " + (ri + 1) + " exceeds 5 MB limit." });
+    }
+  }
+
+  // Validate QR file if present
+  var qrFile = payload.qrFile || null;
+  if (qrFile) {
+    if (!qrFile.fileName || !qrFile.mimeType || !qrFile.base64Data) {
+      errors.push({ field: "qrFile", message: "QR file is missing file data" });
+    } else {
+      var qrMimes = ["image/png", "image/jpeg", "image/jpg"];
+      if (qrMimes.indexOf(qrFile.mimeType) === -1) {
+        errors.push({ field: "qrFile", message: "QR file must be PNG or JPEG" });
+      }
+      var qrBytes = Utilities.base64Decode(qrFile.base64Data);
+      if (qrBytes.length > maxReceiptBytes) {
+        errors.push({ field: "qrFile", message: "QR file exceeds 5 MB limit." });
+      }
+    }
+  }
+
+  if (errors.length > 0) {
+    return _err("VALIDATION_ERROR", "Multiple validation errors", { errors: errors });
+  }
+
+  // ── Idempotency check ──────────────────────────────────────────────
+  if (
+    _alreadyProcessed(
+      TABS.EXPENSE_CLAIMS,
+      COLS.ExpenseClaims.processed_response_id,
+      payload.uuid
+    )
+  ) {
+    return _ok({ message: "Already processed", success: true });
+  }
+
+  // ── Track created artifacts for rollback ────────────────────────────
+  var createdIds = []; // { type: 'receipt'|'claim'|'drivefile', entityId: String, driveFileId: String? }
+
+  function _cleanup() {
+    for (var ci = createdIds.length - 1; ci >= 0; ci--) {
+      var art = createdIds[ci];
+      try {
+        if (art.type === "claim") {
+          var claimSheet = getSheet_(TABS.EXPENSE_CLAIMS);
+          var claimRows = Engine._findRowsByColumn(claimSheet, COLS.ExpenseClaims.claim_id, art.entityId);
+          for (var cdi = claimRows.length - 1; cdi >= 0; cdi--) {
+            claimSheet.deleteRow(claimRows[cdi].rowIndex);
+          }
+        }
+        if (art.type === "claimline") {
+          var cliSheet = getSheet_(TABS.CLAIM_LINE_ITEMS);
+          var cliRows = Engine._findRowsByColumn(cliSheet, COLS.ClaimLineItems.claim_id, art.entityId);
+          for (var li = cliRows.length - 1; li >= 0; li--) {
+            cliSheet.deleteRow(cliRows[li].rowIndex);
+          }
+        }
+        if (art.type === "receipt") {
+          var rcSheet = getSheet_(TABS.RECEIPTS);
+          var rcRows = Engine._findRowsByColumn(rcSheet, COLS.Receipts.receipt_id, art.entityId);
+          for (var rdi = rcRows.length - 1; rdi >= 0; rdi--) {
+            rcSheet.deleteRow(rcRows[rdi].rowIndex);
+          }
+        }
+        if (art.type === "drivefile" && art.driveFileId) {
+          try { DriveApp.getFileById(art.driveFileId).setTrashed(true); } catch (e) {}
+        }
+        if (art.type === "drivefolder" && art.driveFileId) {
+          try { DriveApp.getFolderById(art.driveFileId).setTrashed(true); } catch (e) {}
+        }
+      } catch (e) {
+        // Best-effort cleanup
+      }
+    }
+  }
+
+  try {
+    // ── Claim row ──────────────────────────────────────────────────────
+    var claimId = payload.claimId || Ids.nextId("ExpenseClaim");
+    var now = Audit._nowIso();
+    var lateFlag = _isLate(payload.expenseDate);
+    var c = COLS.ExpenseClaims;
+
+    if (payload.claimId) {
+      var existing = Engine._loadRow("ExpenseClaim", claimId);
+      if (!existing) {
+        throw new Error("Claim not found");
+      }
+      if (existing.values[COLS.ExpenseClaims.created_by - 1] !== operator.userId) {
+        throw new Error("Unauthorized");
+      }
+      if (existing.values[COLS.ExpenseClaims.status - 1] !== STATUS.ExpenseClaim.DRAFT) {
+        throw new Error("Only DRAFT claims can be submitted");
+      }
+      // Update existing draft
+      var sheet = existing.sheet;
+      sheet.getRange(existing.rowIndex, c.claimant_id).setValue(payload.claimantId);
+      sheet.getRange(existing.rowIndex, c.total_amount).setValue(total);
+      sheet.getRange(existing.rowIndex, c.notes).setValue(payload.notes || "");
+      sheet.getRange(existing.rowIndex, c.late_flag).setValue(lateFlag);
+      sheet.getRange(existing.rowIndex, c.expense_date).setValue(payload.expenseDate || "");
+      sheet.getRange(existing.rowIndex, c.semester).setValue(payload.semester || "");
+      sheet.getRange(existing.rowIndex, c.event_id).setValue(payload.eventId || "");
+      sheet.getRange(existing.rowIndex, c.payout_method).setValue(payload.payoutMethod || "FPS");
+      sheet.getRange(existing.rowIndex, c.payout_handle).setValue(payload.payoutHandle || "");
+      sheet.getRange(existing.rowIndex, c.processed_response_id).setValue(payload.uuid);
+    } else {
+      _appendRow(getSheet_(TABS.EXPENSE_CLAIMS), [
+        claimId,
+        payload.claimantId,
+        STATUS.ExpenseClaim.DRAFT,
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        total,
+        lateFlag,
+        false,
+        payload.notes || "",
+        payload.uuid,
+        operator.userId,
+        payload.expenseDate || "",
+        payload.semester || "",
+        payload.eventId || "",
+        payload.payoutMethod || "FPS",
+        payload.payoutHandle || "",
+      ]);
+      createdIds.push({ type: "claim", entityId: claimId });
+    }
+
+    // ── Upload receipt files ──────────────────────────────────────────
+    var receiptIdList = [];
+    var folderId = PropertiesService.getScriptProperties().getProperty("RECEIPTS_FOLDER_ID");
+    var receiptFolder = folderId ? DriveApp.getFolderById(folderId) : null;
+
+    for (var i = 0; i < receipts.length; i++) {
+      var rf = receipts[i];
+      var bytes = Utilities.base64Decode(rf.base64Data);
+      var sha256 = _sha256Hex(bytes);
+
+      // Check for duplicate hash by same user
+      var rcSheet = getSheet_(TABS.RECEIPTS);
+      var rcData = rcSheet.getDataRange().getValues();
+      var rcHashCol = COLS.Receipts.sha256 - 1;
+      var rcUploaderCol = COLS.Receipts.uploaded_by - 1;
+      var rcIdCol = COLS.Receipts.receipt_id - 1;
+      var foundDup = false;
+      for (var d = 1; d < rcData.length; d++) {
+        if (rcData[d][rcHashCol] === sha256) {
+          if (rcData[d][rcUploaderCol] === operator.userId) {
+            receiptIdList.push(rcData[d][rcIdCol]);
+            foundDup = true;
+          } else {
+            _cleanup();
+            return _err("UNAUTHORIZED", "Duplicate receipt detected (receipt " + (i + 1) + " uploaded by another user).");
+          }
+          break;
+        }
+      }
+      if (foundDup) { continue; }
+
+      // Upload to Drive
+      var blob = Utilities.newBlob(bytes, rf.mimeType, rf.fileName);
+      var receiptId = Ids.nextId("Receipt");
+      var newName = receiptId + "_" + rf.fileName;
+      blob.setName(newName);
+      var file = receiptFolder.createFile(blob);
+      var driveFileId = file.getId();
+      createdIds.push({ type: "drivefile", entityId: receiptId, driveFileId: driveFileId });
+
+      var fileLink = '=HYPERLINK("https://drive.google.com/open?id=' + driveFileId + '", "View Receipt")';
+
+      _appendRow(rcSheet, [
+        receiptId,
+        driveFileId,
+        sha256,
+        operator.userId,
+        now,
+        rf.vendor || "",
+        rf.receiptDate || "",
+        Number(rf.receiptTotal) || 0,
+        fileLink,
+      ]);
+      createdIds.push({ type: "receipt", entityId: receiptId });
+      receiptIdList.push(receiptId);
+    }
+
+    // ── Upload QR file if present (separate record, NOT a purchase receipt) ─
+    if (qrFile) {
+      var qrBytes = Utilities.base64Decode(qrFile.base64Data);
+      var qrSha256 = _sha256Hex(qrBytes);
+      var qrBlob = Utilities.newBlob(qrBytes, qrFile.mimeType, qrFile.fileName);
+      var qrReceiptId = Ids.nextId("Receipt");
+      var qrNewName = qrReceiptId + "_QR_" + qrFile.fileName;
+      qrBlob.setName(qrNewName);
+      var qrDriveFile = receiptFolder.createFile(qrBlob);
+      var qrDriveFileId = qrDriveFile.getId();
+      createdIds.push({ type: "drivefile", entityId: qrReceiptId, driveFileId: qrDriveFileId });
+
+      var qrFileLink = '=HYPERLINK("https://drive.google.com/open?id=' + qrDriveFileId + '", "View QR")';
+      _appendRow(getSheet_(TABS.RECEIPTS), [
+        qrReceiptId,
+        qrDriveFileId,
+        qrSha256,
+        operator.userId,
+        now,
+        "QR Code",
+        payload.expenseDate || "",
+        0,
+        qrFileLink,
+      ]);
+      createdIds.push({ type: "receipt", entityId: qrReceiptId });
+
+      // Add QR as an extra claim line item with note "PayMe QR"
+      var qrCliId = Ids.childId(claimId, receiptIdList.length + 1, "CLAIMLINE");
+      _appendRow(getSheet_(TABS.CLAIM_LINE_ITEMS), [
+        qrCliId,
+        claimId,
+        payload.budgetLineId || "",
+        qrReceiptId,
+        0,
+        "PayMe QR Code",
+        false,
+      ]);
+    }
+
+    // ── Create ClaimLineItems ─────────────────────────────────────────
+    if (receiptIdList.length > 0) {
+      var perLineAmount = total / receiptIdList.length;
+      for (var ri2 = 0; ri2 < receiptIdList.length; ri2++) {
+        var cliId = Ids.childId(claimId, ri2 + 1, "CLAIMLINE");
+        _appendRow(getSheet_(TABS.CLAIM_LINE_ITEMS), [
+          cliId,
+          claimId,
+          payload.budgetLineId || "",
+          receiptIdList[ri2] || "",
+          perLineAmount,
+          payload.notes || "",
+          false,
+        ]);
+      }
+    } else {
+      var cliId = Ids.childId(claimId, 1, "CLAIMLINE");
+      _appendRow(getSheet_(TABS.CLAIM_LINE_ITEMS), [
+        cliId,
+        claimId,
+        payload.budgetLineId || "",
+        "",
+        total,
+        payload.notes || "",
+        true,
+      ]);
+    }
+    createdIds.push({ type: "claimline", entityId: claimId });
+
+    // ── Transition DRAFT → SUBMITTED ──────────────────────────────────
+    var transitionResult = Engine.transition(
+      "ExpenseClaim",
+      claimId,
+      "SUBMIT",
+      operator.userId,
+      {}
+    );
+    if (!transitionResult.ok) {
+      _cleanup();
+      return _err("ENGINE_ERROR", transitionResult.reason);
+    }
+
+    // ── Success: discard cleanup list, return result ──────────────────
+    createdIds = [];
+
+    Audit.append(operator.userId, "ExpenseClaim", claimId, "ATOMIC_SUBMIT", {
+      lines: receiptIdList.length,
+      hasQr: !!qrFile,
+      uuid: payload.uuid,
+    });
+    try {
+      Discord.postStatus(claimId, payload.notes, transitionResult.to, null);
+    } catch (e) {}
+
+    return _ok({
+      claim_id: claimId,
+      status: transitionResult.to,
+      submitted_at: Audit._nowIso(),
+      receipt_ids: receiptIdList,
+    });
+  } catch (e) {
+    _cleanup();
+    return _err("ATOMIC_SUBMIT_FAILED", "Atomic submission failed: " + e.message);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Claim Review API
 // ---------------------------------------------------------------------------
@@ -2804,6 +3159,7 @@ if (typeof module !== "undefined") {
     api_setMigrationSelections,
     api_startMigration,
     api_submitBudgetRequest,
+    api_atomicSubmitClaim,
     api_submitClaim,
     api_submitDraftClaim,
     api_suggestSemester,
