@@ -882,86 +882,96 @@ var Migration = {
         }
       });
 
-      Object.keys(memberMap).forEach((uid) => {
-        var m = memberMap[uid];
-        usersSheet.appendRow([
-          uid,
-          m.display_name,
-          m.role,
-          m.email || "",
-          m.active,
-          now,
-        ]);
-      });
+      if (usersSheet.getLastRow() <= 1) {
+        Object.keys(memberMap).forEach((uid) => {
+          var m = memberMap[uid];
+          usersSheet.appendRow([
+            uid,
+            m.display_name,
+            m.role,
+            m.email || "",
+            m.active,
+            now,
+          ]);
+        });
+      }
 
       // Migrate selected accounts with balances
       var accountsSheet = ss.getSheetByName(TABS.FINANCE_ACCOUNTS);
       var accountIds = selections.account_ids || [];
       var balanceReasons = selections.balance_reasons || {};
       var balances = selections.account_balances || {};
-      preview.accounts.forEach((acct) => {
-        if (accountIds.indexOf(acct.account_id) >= 0) {
-          var configuredBalance = Number(balances[acct.account_id]);
-          var openingBalance = Number.isFinite(configuredBalance)
-            ? configuredBalance
-            : acct.current_balance;
-          accountsSheet.appendRow([
-            acct.account_id,
-            acct.name,
-            openingBalance,
-            openingBalance,
-            0,
-            0,
-            STATUS.FinanceAccount.ACTIVE,
-            now,
-            "",
-          ]);
-        } else {
-          accountsSheet.appendRow([
-            acct.account_id,
-            acct.name + " (closed)",
-            0,
-            0,
-            0,
-            0,
-            STATUS.FinanceAccount.INACTIVE,
-            now,
-            now,
-          ]);
-        }
-      });
+      if (accountsSheet.getLastRow() <= 1) {
+        preview.accounts.forEach((acct) => {
+          if (accountIds.indexOf(acct.account_id) >= 0) {
+            var configuredBalance = Number(balances[acct.account_id]);
+            var openingBalance = Number.isFinite(configuredBalance)
+              ? configuredBalance
+              : acct.current_balance;
+            accountsSheet.appendRow([
+              acct.account_id,
+              acct.name,
+              openingBalance,
+              openingBalance,
+              0,
+              0,
+              STATUS.FinanceAccount.ACTIVE,
+              now,
+              "",
+            ]);
+          } else {
+            accountsSheet.appendRow([
+              acct.account_id,
+              acct.name + " (closed)",
+              0,
+              0,
+              0,
+              0,
+              STATUS.FinanceAccount.INACTIVE,
+              now,
+              now,
+            ]);
+          }
+        });
+      }
 
       // Migrate selected categories
       var catSheet = ss.getSheetByName(TABS.CATEGORIES);
       var catIds = selections.category_ids || [];
-      preview.categories.forEach((cat) => {
-        if (catIds.indexOf(cat.category_id) >= 0) {
-          catSheet.appendRow([
-            cat.category_id,
-            cat.name,
-            cat.kind,
-            0,
-            cat.active,
-          ]);
-        }
-      });
+      if (catSheet.getLastRow() <= 1) {
+        preview.categories.forEach((cat) => {
+          if (catIds.indexOf(cat.category_id) >= 0) {
+            catSheet.appendRow([
+              cat.category_id,
+              cat.name,
+              cat.kind,
+              0,
+              cat.active,
+            ]);
+          }
+        });
+      }
 
       // Migrate selected events
       var evtSheet = ss.getSheetByName(TABS.EVENTS);
       var eventIds = selections.event_ids || [];
       var eventCount = 0;
-      preview.events.forEach((evt) => {
-        if (eventIds.indexOf(evt.event_id) >= 0) {
-          eventCount++;
-          evtSheet.appendRow([
-            evt.event_id,
-            evt.name + " (" + (Number(preview.next_committee_year) - 1) + ")",
-            preview.current_year,
-            preview.operators.length > 0 ? preview.operators[0].user_id : "",
-            now,
-          ]);
-        }
-      });
+      if (evtSheet.getLastRow() <= 1) {
+        preview.events.forEach((evt) => {
+          if (eventIds.indexOf(evt.event_id) >= 0) {
+            eventCount++;
+            evtSheet.appendRow([
+              evt.event_id,
+              evt.name + " (" + (Number(preview.next_committee_year) - 1) + ")",
+              preview.current_year,
+              preview.operators.length > 0 ? preview.operators[0].user_id : "",
+              now,
+            ]);
+          }
+        });
+      } else {
+        eventCount = Math.max(evtSheet.getLastRow() - 1, 0);
+      }
 
       Audit.append(actorUserId, "Migration", preview.year_label, "EXECUTED", {
         accounts: accountIds.length,

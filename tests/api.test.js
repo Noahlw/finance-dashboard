@@ -1977,6 +1977,17 @@ describe("Api.js", () => {
       });
 
       var claimsSheet = {
+        getDataRange: () => ({
+          getValues: () => {
+            var header = [];
+            header[14] = "processed_response_id";
+            var row = [];
+            row[0] = "CLAIM-DONE";
+            row[2] = "SUBMITTED";
+            row[14] = "uuid-reused";
+            return [header, row];
+          },
+        }),
         getLastRow: () => 2,
         getRange: jest.fn(() => ({
           getValues: jest.fn(() => [["uuid-reused"]]),
@@ -2026,10 +2037,24 @@ describe("Api.js", () => {
       };
 
       var { api_atomicSubmitClaim } = require("../Api.js");
+      global.Engine._loadRow.mockImplementation((entityType) => {
+        if (entityType === "BudgetRequestLine") {
+          var values = [];
+          values[global.COLS.BudgetRequestLines.line_status - 1] = "APPROVED";
+          return { rowIndex: 2, values };
+        }
+        return null;
+      });
       var result = api_atomicSubmitClaim(payload);
 
-      expect(result.ok).toBe(true);
-      expect(result.data.message).toBe("Already processed");
+      expect(result).toEqual(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            message: "Already processed",
+          }),
+          ok: true,
+        })
+      );
     });
   });
 

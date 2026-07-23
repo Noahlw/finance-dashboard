@@ -305,13 +305,11 @@ function api_deleteOrphanedReceipt(receiptId) {
  * Submit a new Expense Claim. Idempotent based on `uuid`.
  */
 function api_submitClaim(payload) {
-  var email = Session.getActiveUser().getEmail();
-  if (!email) {
-    return _err("NOT_AUTHENTICATED", "Not authenticated");
-  }
-  var user = _resolveUser(email);
-  if (user.isUnknown) {
-    return _err("NOT_AUTHENTICATED", "Unregistered user");
+  var user;
+  try {
+    user = _requireOperator();
+  } catch (e) {
+    return e.authResponse || _err("AUTH_DENIED", "Access denied");
   }
   if (!payload.claimantId) {
     return _err("INVALID_PARAMETER", "Claimant is required");
@@ -476,6 +474,31 @@ function _alreadyProcessed(tabName, colIndex, uuid) {
     }
   }
   return false;
+}
+
+/**
+ * True when uuid already belongs to a non-DRAFT ExpenseClaim (finalized
+ * idempotency). Draft rows reuse the same uuid until submit.
+ */
+function _claimUuidAlreadySubmitted(uuid) {
+  var sheet = getSheet_(TABS.EXPENSE_CLAIMS);
+  if (!(sheet && typeof sheet.getDataRange === "function")) {
+    return null;
+  }
+  var values = sheet.getDataRange().getValues();
+  var c = COLS.ExpenseClaims;
+  for (var i = 1; i < values.length; i++) {
+    if (values[i][c.processed_response_id - 1] !== uuid) {
+      continue;
+    }
+    if (values[i][c.status - 1] !== STATUS.ExpenseClaim.DRAFT) {
+      return {
+        claim_id: values[i][c.claim_id - 1],
+        status: values[i][c.status - 1],
+      };
+    }
+  }
+  return null;
 }
 
 function _appendRow(sheet, values) {
@@ -1550,14 +1573,14 @@ function api_atomicSubmitClaim(payload) {
   }
 
   // ── Idempotency check ──────────────────────────────────────────────
-  if (
-    _alreadyProcessed(
-      TABS.EXPENSE_CLAIMS,
-      COLS.ExpenseClaims.processed_response_id,
-      payload.uuid
-    )
-  ) {
-    return _ok({ message: "Already processed", success: true });
+  var prior = _claimUuidAlreadySubmitted(payload.uuid);
+  if (prior) {
+    return _ok({
+      claim_id: prior.claim_id,
+      message: "Already processed",
+      status: prior.status,
+      success: true,
+    });
   }
 
   // ── Track created artifacts for rollback ────────────────────────────
@@ -3127,9 +3150,14 @@ function _buildPayoutsReport(filters) {
 }
 
 function _buildAccountsReport() {
-  var accounts = api_getAccounts();
-  var transfers = api_getTransfers();
-  var adjustments = api_getAdjustments();
+  var accountsResp = api_getAccounts();
+  var transfersResp = api_getTransfers();
+  var adjustmentsResp = api_getAdjustments();
+  var accounts = accountsResp && accountsResp.ok ? accountsResp.data || [] : [];
+  var transfers =
+    transfersResp && transfersResp.ok ? transfersResp.data || [] : [];
+  var adjustments =
+    adjustmentsResp && adjustmentsResp.ok ? adjustmentsResp.data || [] : [];
 
   return {
     accounts,
@@ -3153,8 +3181,11 @@ function api_exportCsv(reportType, filters) {
   } catch (e) {
     return _err("UNAUTHORIZED", e.message);
   }
-  var data = api_getReportsData(reportType, filters);
-  var rows = data.rows || [];
+  var report = api_getReportsData(reportType, filters);
+  if (!(report && report.ok)) {
+    return report;
+  }
+  var rows = (report.data && report.data.rows) || [];
   if (rows.length === 0) {
     return _ok("");
   }
