@@ -3,6 +3,7 @@ import type {
   AccountTransfer,
   AddAccountPayload,
   AddMemberPayload,
+  AtomicClaimPayload,
   BudgetDecisionPayload,
   BudgetRequest,
   BudgetRequestDraftPayload,
@@ -21,6 +22,7 @@ import type {
   MyClaimsResponse,
   PayoutQueueItem,
   PendingBudgetRequest,
+  ReconciliationData,
   RecordIncomePayload,
   ReportData,
   ReportFilters,
@@ -152,6 +154,34 @@ export const apiService = {
         })
         .withFailureHandler(reject)
         .api_approvePayout(claimId, accountId);
+    }),
+  atomicSubmitClaim: (
+    payload: AtomicClaimPayload
+  ): Promise<{ claim_id: string; status: string }> =>
+    new Promise((resolve, reject) => {
+      if (typeof google === "undefined" || !google.script) {
+        setTimeout(
+          () =>
+            resolve({
+              claim_id: payload.claimId || "CLAIM-MOCK",
+              status: "SUBMITTED",
+            }),
+          300
+        );
+        return;
+      }
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            const error = new Error(result.error.message);
+            Object.assign(error, { details: result.error.details });
+            reject(error);
+          }
+        })
+        .withFailureHandler(reject)
+        .api_atomicSubmitClaim(payload);
     }),
 
   cancelMigration: (): Promise<{ ok: boolean }> =>
@@ -648,6 +678,7 @@ export const apiService = {
               accountIds: ["AC-1"],
               balanceReasons: {},
               categoryIds: ["CAT-1"],
+              confirmedAccountIds: ["AC-1"],
               eventIds: ["EVT-1"],
               memberIds: ["M-1"],
               userIds: ["U-1"],
@@ -850,6 +881,32 @@ export const apiService = {
           }
         })
         .api_getQueuedPayouts();
+    }),
+
+  getReconciliation: (): Promise<ReconciliationData> =>
+    new Promise((resolve, reject) => {
+      if (typeof google === "undefined" || !google.script) {
+        setTimeout(
+          () =>
+            resolve({
+              accounts: [],
+              incomplete_payouts: [],
+              mismatches: [],
+              movement_count: 0,
+            }),
+          300
+        );
+        return;
+      }
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
+        })
+        .api_getReconciliation();
     }),
 
   // ─── Reports ───
@@ -1356,51 +1413,12 @@ export const apiService = {
         .api_saveClaimDraft(payload);
     }),
 
-  setMigrationSelections: (
-    selections: MigrationSelections
-  ): Promise<{ ok: boolean; stage: string }> =>
-    new Promise((resolve, reject) => {
-      if (typeof google === "undefined" || !google.script) {
-        setTimeout(() => resolve({ ok: true, stage: "REVIEW" }), 300);
-        return;
-      }
-      google.script.run
-        .withSuccessHandler((result: any) => {
-          if (result.ok) {
-            resolve(result.data);
-          } else {
-            reject(new Error(result.error.message));
-          }
-        })
-        .api_setMigrationSelections(selections);
-    }),
-
-  setMemberSelections: (
-    memberIds: string[]
-  ): Promise<{ ok: boolean; stage: string }> =>
-    new Promise((resolve, reject) => {
-      if (typeof google === "undefined" || !google.script) {
-        setTimeout(() => resolve({ ok: true, stage: "MEMBERS" }), 300);
-        return;
-      }
-      google.script.run
-        .withSuccessHandler((result: any) => {
-          if (result.ok) {
-            resolve(result.data);
-          } else {
-            reject(new Error(result.error.message));
-          }
-        })
-        .api_setMemberSelections(memberIds);
-    }),
-
-  setAccountSelections: (
-    payload: {
-      accountIds: string[];
-      accountBalances: Record<string, number>;
-      balanceReasons: Record<string, string>;
-    }
-  ): Promise<{ ok: boolean; stage: string }> =>
+  setAccountSelections: (payload: {
+    accountIds: string[];
+    accountBalances: Record<string, number>;
+    balanceReasons: Record<string, string>;
+    confirmedAccountIds: string[];
+  }): Promise<{ ok: boolean; stage: string }> =>
     new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
         setTimeout(() => resolve({ ok: true, stage: "ACCOUNTS" }), 300);
@@ -1415,25 +1433,6 @@ export const apiService = {
           }
         })
         .api_setAccountSelections(payload);
-    }),
-
-  setEventSelections: (
-    eventIds: string[]
-  ): Promise<{ ok: boolean; stage: string }> =>
-    new Promise((resolve, reject) => {
-      if (typeof google === "undefined" || !google.script) {
-        setTimeout(() => resolve({ ok: true, stage: "EVENTS" }), 300);
-        return;
-      }
-      google.script.run
-        .withSuccessHandler((result: any) => {
-          if (result.ok) {
-            resolve(result.data);
-          } else {
-            reject(new Error(result.error.message));
-          }
-        })
-        .api_setEventSelections(eventIds);
     }),
 
   setCategorySelections: (
@@ -1455,6 +1454,63 @@ export const apiService = {
         .api_setCategorySelections(categoryIds);
     }),
 
+  setEventSelections: (
+    eventIds: string[]
+  ): Promise<{ ok: boolean; stage: string }> =>
+    new Promise((resolve, reject) => {
+      if (typeof google === "undefined" || !google.script) {
+        setTimeout(() => resolve({ ok: true, stage: "EVENTS" }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
+        })
+        .api_setEventSelections(eventIds);
+    }),
+
+  setMemberSelections: (
+    memberIds: string[]
+  ): Promise<{ ok: boolean; stage: string }> =>
+    new Promise((resolve, reject) => {
+      if (typeof google === "undefined" || !google.script) {
+        setTimeout(() => resolve({ ok: true, stage: "MEMBERS" }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
+        })
+        .api_setMemberSelections(memberIds);
+    }),
+
+  setMigrationSelections: (
+    selections: MigrationSelections
+  ): Promise<{ ok: boolean; stage: string }> =>
+    new Promise((resolve, reject) => {
+      if (typeof google === "undefined" || !google.script) {
+        setTimeout(() => resolve({ ok: true, stage: "REVIEW" }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
+        })
+        .api_setMigrationSelections(selections);
+    }),
+
   setUserSelections: (
     userIds: string[]
   ): Promise<{ ok: boolean; stage: string }> =>
@@ -1472,30 +1528,6 @@ export const apiService = {
           }
         })
         .api_setUserSelections(userIds);
-    }),
-
-  validateMigration: (): Promise<{
-    errors: string[];
-    ok: boolean;
-    warnings: string[];
-  }> =>
-    new Promise((resolve, reject) => {
-      if (typeof google === "undefined" || !google.script) {
-        setTimeout(
-          () => resolve({ errors: [], ok: true, warnings: [] }),
-          300
-        );
-        return;
-      }
-      google.script.run
-        .withSuccessHandler((result: any) => {
-          if (result.ok) {
-            resolve(result.data);
-          } else {
-            reject(result.error);
-          }
-        })
-        .api_validateMigration();
     }),
 
   startMigration: (): Promise<{
@@ -1636,6 +1668,27 @@ export const apiService = {
           receiptDate,
           receiptTotal
         );
+    }),
+
+  validateMigration: (): Promise<{
+    errors: string[];
+    ok: boolean;
+    warnings: string[];
+  }> =>
+    new Promise((resolve, reject) => {
+      if (typeof google === "undefined" || !google.script) {
+        setTimeout(() => resolve({ errors: [], ok: true, warnings: [] }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(result.error);
+          }
+        })
+        .api_validateMigration();
     }),
 
   verifyClaim: (claimId: string, payload?: any): Promise<TransitionResult> =>

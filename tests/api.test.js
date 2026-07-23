@@ -121,18 +121,18 @@ global.COLS = {
     status: 10,
   },
   Payouts: {
-    account_id: 8,
+    account_id: 11,
     amount: 4,
     claim_id: 2,
-    created_at: 10,
-    failure_reason: 9,
+    confirmed_at: 10,
+    failure_reason: 12,
     method: 5,
+    paid_at: 9,
+    paid_by: 7,
     parent_payout_id: 13,
     payee_user_id: 3,
     payout_id: 1,
-    sent_at: 12,
-    sent_by: 11,
-    status: 7,
+    status: 8,
     txn_reference: 6,
   },
   Receipts: {
@@ -211,6 +211,11 @@ global.ROLES = {
   MEMBER: "MEMBER",
   TREASURER: "TREASURER",
 };
+global.PAYOUT_METHOD = {
+  FPS: "FPS",
+  OTHER: "OTHER",
+  PAYME: "PAYME",
+};
 global.Discord = { postStatus: jest.fn() };
 global.Audit = {
   _nowIso: jest.fn(() => "2026-07-21T12:00:00Z"),
@@ -283,6 +288,21 @@ describe("Api.js", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    global.Engine.transition.mockReset();
+    global.Engine.transition.mockImplementation(() => ({
+      from: "DRAFT",
+      ok: true,
+      selfApproved: false,
+      to: "PENDING",
+    }));
+    global.Engine._loadRow.mockImplementation((entityType) => {
+      if (entityType !== "BudgetRequestLine") {
+        return null;
+      }
+      const values = [];
+      values[global.COLS.BudgetRequestLines.line_status - 1] = "APPROVED";
+      return { rowIndex: 2, values };
+    });
     // Shared mocks for all tests
     global.Session.getActiveUser.mockReturnValue({
       getEmail: () => testUserEmail,
@@ -328,10 +348,10 @@ describe("Api.js", () => {
             "payout_handle",
             "consent_ts",
           ],
-          ["M-001", "Alice", "S12345", "FPS", "91234567", "2026-01-01"],
-          ["MEMBER-001", "Bob", "S67890", "FPS", "98887766", "2026-01-01"],
-          ["USER-1", "Charlie", "S11111", "FPS", "90000000", "2026-01-01"],
-          ["U-001", "Test User", "S-U001", "FPS", "91111111", "2026-01-01"],
+          ["M-001", "Alice", "12345678", "FPS", "91234567", "2026-01-01"],
+          ["MEMBER-001", "Bob", "87654321", "FPS", "98887766", "2026-01-01"],
+          ["USER-1", "Charlie", "11111111", "FPS", "90000000", "2026-01-01"],
+          ["U-001", "Test User", "22222222", "FPS", "91111111", "2026-01-01"],
         ],
       }),
       getLastRow: () => 5,
@@ -343,6 +363,9 @@ describe("Api.js", () => {
     const mockUsersData = [
       ["user_id", "display_name", "role", "email", "active", "created_at"],
       [testUserId, "Test User", "COMMITTEE", testUserEmail, true, "2026-01-01"],
+      ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
+      ["MEMBER-001", "Bob", "MEMBER", "", true, "2026-01-01"],
+      ["USER-1", "Charlie", "MEMBER", "", true, "2026-01-01"],
     ];
     global.getSheet_.mockImplementation((name) => {
       if (name === global.TABS.USERS) {
@@ -425,6 +448,7 @@ describe("Api.js", () => {
         "income",
         "payouts",
         "reports",
+        "reconciliation",
       ]);
     });
 
@@ -655,6 +679,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -802,7 +827,7 @@ describe("Api.js", () => {
       const { api_getPendingBudgetRequests } = require("../Api.js");
       const result = api_getPendingBudgetRequests();
       expect(result.ok).toBe(false);
-      expect(result.error.message).toContain("Unauthorized");
+      expect(result.error.message).toBe("Access denied");
     });
 
     it("should return pending requests for treasurer", () => {
@@ -887,7 +912,7 @@ describe("Api.js", () => {
       const { api_decisionBudgetRequest } = require("../Api.js");
       const result = api_decisionBudgetRequest("BUDGET-26A-001", "APPROVE", {});
       expect(result.ok).toBe(false);
-      expect(result.error.message).toContain("Unauthorized");
+      expect(result.error.message).toBe("Access denied");
     });
 
     it("should approve a pending request", () => {
@@ -942,16 +967,25 @@ describe("Api.js", () => {
   });
 
   describe("api_getMyClaims", () => {
-    it("should throw if no email is found", () => {
+    it("should return one minimal audited denial if no email is found", () => {
       global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => "" });
       const result = api_getMyClaims();
       expect(result.ok).toBe(false);
-      expect(result.error.message).toContain(
-        "User not authenticated (no active session)"
+      expect(result.error).toEqual({
+        code: "AUTH_DENIED",
+        details: {},
+        message: "Access denied",
+      });
+      expect(global.Audit.append).toHaveBeenCalledWith(
+        "SYSTEM",
+        "Authorization",
+        "SESSION",
+        "AUTH_DENIED",
+        { reason: "no_session" }
       );
     });
 
-    it("should return empty arrays if user is unknown", () => {
+    it("should deny access and audit if user is unknown", () => {
       global.Session.getActiveUser.mockReturnValueOnce({
         getEmail: () => "unknown@example.com",
       });
@@ -978,9 +1012,18 @@ describe("Api.js", () => {
         }
         return { name };
       });
-      const { data: result } = api_getMyClaims();
-      expect(result.claims).toEqual([]);
-      expect(result.requests).toEqual([]);
+      const result = api_getMyClaims();
+      expect(result).toEqual({
+        error: { code: "AUTH_DENIED", details: {}, message: "Access denied" },
+        ok: false,
+      });
+      expect(global.Audit.append).toHaveBeenCalledWith(
+        "SYSTEM",
+        "Authorization",
+        "SESSION",
+        "AUTH_DENIED",
+        { reason: "unknown_user" }
+      );
     });
 
     it("should map claims and requests properly", () => {
@@ -1057,6 +1100,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -1078,6 +1122,8 @@ describe("Api.js", () => {
         amount: 200,
         budgetLineId: "BL-1",
         claimantId: "MEMBER-001",
+        fpsAccount: "fps-account-1",
+        fpsPhone: "91234567",
         notes: "Office chairs",
         payoutHandle: "91234567",
         payoutMethod: "FPS",
@@ -1145,6 +1191,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -1186,6 +1233,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -1334,7 +1382,7 @@ describe("Api.js", () => {
         full_name: "David",
         payout_handle: "91234567",
         payout_method: "FPS",
-        student_id: "S123456",
+        student_id: "12345678",
       });
       expect(result.user_id).toBe("M-003");
       expect(usersSheet.getRange).toHaveBeenCalled();
@@ -1356,14 +1404,14 @@ describe("Api.js", () => {
               "payout_handle",
               "consent_ts",
             ],
-            ["M-001", "Bob", "S123456", "FPS", "91234567", "2026-01-01"],
+            ["M-001", "Bob", "12345678", "FPS", "91234567", "2026-01-01"],
           ],
         }),
       });
       const { api_addMember } = require("../Api.js");
       const result = api_addMember({
         display_name: "Dave",
-        student_id: "S123456",
+        student_id: "12345678",
       });
       expect(result.ok).toBe(false);
       expect(result.error.message).toContain("member");
@@ -1447,6 +1495,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -1471,6 +1520,8 @@ describe("Api.js", () => {
         budgetLineId: "BL-1",
         claimantId: "M-001",
         expenseDate: "2026-07-15",
+        fpsAccount: "fps-account-1",
+        fpsPhone: "91234567",
         notes: "Draft note",
         payoutHandle: "91234567",
         payoutMethod: "FPS",
@@ -1571,6 +1622,8 @@ describe("Api.js", () => {
         budgetLineId: "BL-1",
         claimantId: "MEMBER-001",
         expenseDate: "2026-07-15",
+        fpsAccount: "fps-account-1",
+        fpsPhone: "91234567",
         notes: "Office supplies",
         payoutHandle: "91234567",
         payoutMethod: "FPS",
@@ -1606,6 +1659,8 @@ describe("Api.js", () => {
               true,
               "2026-01-01",
             ],
+            ["MEMBER-001", "Bob", "MEMBER", "", true, "2026-01-01"],
+            ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
           ],
         }),
       };
@@ -1618,33 +1673,42 @@ describe("Api.js", () => {
       var existingSheet = {
         getRange: jest.fn(() => ({ setValue: jest.fn() })),
       };
-      global.Engine._loadRow.mockReturnValueOnce({
-        rowIndex: 2,
-        sheet: existingSheet,
-        values: [
-          "CLAIM-DRAFT-1",
-          "M-001",
-          "DRAFT",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          "",
-          100,
-          false,
-          false,
-          "Old note",
-          "old-uuid",
-          "U-001",
-          "2026-07-10",
-          "26A",
-          "",
-          "FPS",
-          "",
-        ],
-      });
+      global.Engine._loadRow
+        .mockReturnValueOnce({
+          rowIndex: 2,
+          values: (() => {
+            var values = [];
+            values[global.COLS.BudgetRequestLines.line_status - 1] = "APPROVED";
+            return values;
+          })(),
+        })
+        .mockReturnValueOnce({
+          rowIndex: 2,
+          sheet: existingSheet,
+          values: [
+            "CLAIM-DRAFT-1",
+            "M-001",
+            "DRAFT",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            100,
+            false,
+            false,
+            "Old note",
+            "old-uuid",
+            "U-001",
+            "2026-07-10",
+            "26A",
+            "",
+            "FPS",
+            "",
+          ],
+        });
       global.Engine.transition.mockReturnValueOnce({
         from: "DRAFT",
         ok: true,
@@ -1660,10 +1724,12 @@ describe("Api.js", () => {
 
       var payload = {
         amount: 250,
+        budgetLineId: "BL-1",
         claimantId: "MEMBER-001",
         claimId: "CLAIM-DRAFT-1",
         expenseDate: "2026-07-20",
         notes: "Updated notes",
+        paymePhone: "91234567",
         payoutHandle: "payme-id",
         payoutMethod: "PAYME",
         semester: "26A",
@@ -1711,6 +1777,7 @@ describe("Api.js", () => {
               true,
               "2026-01-01",
             ],
+            ["MEMBER-001", "Bob", "MEMBER", "", true, "2026-01-01"],
           ],
         }),
         getMaxRows: () => 1000,
@@ -1790,8 +1857,11 @@ describe("Api.js", () => {
 
       var payload = {
         amount: 100,
+        budgetLineId: "BL-1",
         claimantId: "MEMBER-001",
         expenseDate: "2026-07-15",
+        fpsAccount: "fps-account-1",
+        fpsPhone: "91234567",
         notes: "Test rollback",
         payoutHandle: "91234567",
         payoutMethod: "FPS",
@@ -1835,6 +1905,8 @@ describe("Api.js", () => {
         budgetLineId: "BL-1",
         claimantId: "MEMBER-001",
         expenseDate: "2026-07-15",
+        fpsAccount: "fps-account-1",
+        fpsPhone: "91234567",
         notes: "Food receipts",
         payoutHandle: "91234567",
         payoutMethod: "FPS",
@@ -1871,8 +1943,11 @@ describe("Api.js", () => {
 
       var payload = {
         amount: 100,
+        budgetLineId: "BL-1",
         claimantId: "MEMBER-001",
         expenseDate: "2026-07-15",
+        fpsAccount: "fps-account-1",
+        fpsPhone: "91234567",
         notes: "Bad file test",
         payoutHandle: "91234567",
         payoutMethod: "FPS",
@@ -1891,7 +1966,9 @@ describe("Api.js", () => {
 
       expect(result.ok).toBe(false);
       expect(result.error.code).toBe("VALIDATION_ERROR");
-      expect(result.error.details.errors[0].field).toBe("receipts[0]");
+      expect(result.error.details.errors.map((e) => e.field)).toContain(
+        "receipts[0]"
+      );
     });
 
     it("should return Already processed for reused uuid", () => {
@@ -1919,6 +1996,8 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
+                ["MEMBER-001", "Bob", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -1935,8 +2014,11 @@ describe("Api.js", () => {
 
       var payload = {
         amount: 100,
+        budgetLineId: "BL-1",
         claimantId: "MEMBER-001",
         expenseDate: "2026-07-15",
+        fpsAccount: "fps-account-1",
+        fpsPhone: "91234567",
         notes: "Idempotent test",
         payoutHandle: "91234567",
         payoutMethod: "FPS",
@@ -1988,6 +2070,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -2043,6 +2126,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -2091,6 +2175,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -2153,6 +2238,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -2219,6 +2305,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -2285,6 +2372,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -2334,6 +2422,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -2343,7 +2432,7 @@ describe("Api.js", () => {
       const { api_deleteOrphanedReceipt } = require("../Api.js");
       const result = api_deleteOrphanedReceipt("RECEIPT-001");
       expect(result.ok).toBe(false);
-      expect(result.error.message).toContain("Unauthorized");
+      expect(result.error.message).toContain("Access denied");
     });
 
     it("should throw for not found receipt", () => {
@@ -2369,6 +2458,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -2428,6 +2518,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -2455,6 +2546,8 @@ describe("Api.js", () => {
         amount: 200,
         claimantId: "M-001",
         expenseDate: "2026-07-15",
+        fpsAccount: "fps-account-1",
+        fpsPhone: "91234567",
         notes: "Multi receipt",
         payoutHandle: "91234567",
         payoutMethod: "FPS",
@@ -2575,6 +2668,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -2635,6 +2729,8 @@ describe("Api.js", () => {
         claimantId: "M-001",
         claimId: "CLAIM-26A-003",
         expenseDate: "2026-07-15",
+        fpsAccount: "fps-account-1",
+        fpsPhone: "91234567",
         notes: "Update receipts",
         payoutHandle: "91234567",
         payoutMethod: "FPS",
@@ -2685,6 +2781,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -2799,6 +2896,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -2898,7 +2996,7 @@ describe("Api.js", () => {
       const { api_attachReceipts } = require("../Api.js");
       const result = api_attachReceipts("CLAIM-ATTACH-003", ["RECEIPT-Y"]);
       expect(result.ok).toBe(false);
-      expect(result.error.message).toContain("Unauthorized");
+      expect(result.error.message).toContain("Access denied");
     });
 
     it("should reject empty receiptIds array", () => {
@@ -2935,6 +3033,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -3066,6 +3165,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -3174,6 +3274,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -3282,6 +3383,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -3409,6 +3511,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -3497,12 +3600,12 @@ describe("Api.js", () => {
               "payout_handle",
               "consent_ts",
             ],
-            ["M-001", "Alice", "S12345", "FPS", "91234567", "2026-01-01"],
+            ["M-001", "Alice", "12345678", "FPS", "91234567", "2026-01-01"],
           ],
         }),
       });
       const { api_getClaimsQueue } = require("../Api.js");
-      const { data: result } = api_getClaimsQueue({ sid: "S12345" });
+      const { data: result } = api_getClaimsQueue({ sid: "12345678" });
       expect(result.length).toBe(1);
       expect(result[0].claim_id).toBe("CLAIM-001");
     });
@@ -3534,6 +3637,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -3585,6 +3689,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -3628,6 +3733,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -3689,6 +3795,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -3776,6 +3883,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -3825,6 +3933,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -3906,6 +4015,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -3915,7 +4025,7 @@ describe("Api.js", () => {
       const { api_approvePayout } = require("../Api.js");
       const result = api_approvePayout("CLAIM-001");
       expect(result.ok).toBe(false);
-      expect(result.error.message).toContain("Unauthorized");
+      expect(result.error.message).toContain("Access denied");
     });
 
     it("should support optional accountId parameter for treasurer", () => {
@@ -3998,6 +4108,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -4156,6 +4267,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -4165,7 +4277,7 @@ describe("Api.js", () => {
       const { api_addAccount } = require("../Api.js");
       const result = api_addAccount({ name: "Test" });
       expect(result.ok).toBe(false);
-      expect(result.error.message).toContain("Unauthorized");
+      expect(result.error.message).toContain("Access denied");
     });
   });
 
@@ -4315,6 +4427,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -4358,6 +4471,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -4400,6 +4514,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -4534,6 +4649,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -4543,7 +4659,7 @@ describe("Api.js", () => {
       const { api_confirmIncome } = require("../Api.js");
       const result = api_confirmIncome("INC-001", "");
       expect(result.ok).toBe(false);
-      expect(result.error.message).toContain("Unauthorized");
+      expect(result.error.message).toContain("Access denied");
     });
   });
 
@@ -4712,6 +4828,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -4726,7 +4843,7 @@ describe("Api.js", () => {
         reason: "Test",
       });
       expect(result.ok).toBe(false);
-      expect(result.error.message).toContain("Unauthorized");
+      expect(result.error.message).toContain("Access denied");
     });
   });
 
@@ -4968,10 +5085,13 @@ describe("Api.js", () => {
                   150,
                   "FPS",
                   "",
+                  "",
                   "QUEUED",
+                  "",
+                  "",
                   "AC-001",
                   "",
-                  "2026-07-22",
+                  "",
                 ],
                 [
                   "PAYOUT-002",
@@ -4980,10 +5100,13 @@ describe("Api.js", () => {
                   200,
                   "OTHER",
                   "TX-123",
+                  "U-002",
                   "SENT",
+                  "2026-07-21",
+                  "",
                   "AC-001",
                   "",
-                  "2026-07-21",
+                  "",
                 ],
                 [
                   "PAYOUT-003",
@@ -4992,10 +5115,13 @@ describe("Api.js", () => {
                   50,
                   "FPS",
                   "",
+                  "",
                   "FAILED",
+                  "",
+                  "",
                   "AC-001",
                   "Insufficient balance",
-                  "2026-07-20",
+                  "",
                 ],
               ],
             }),
@@ -5035,6 +5161,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -5061,10 +5188,13 @@ describe("Api.js", () => {
           150,
           "FPS",
           "",
+          "",
           "QUEUED",
+          "",
+          "",
           "AC-001",
           "",
-          "2026-07-22",
+          "",
         ],
       });
       global.getSheet_.mockImplementation((tab) => {
@@ -5133,6 +5263,7 @@ describe("Api.js", () => {
                   true,
                   "2026-01-01",
                 ],
+                ["M-001", "Alice", "MEMBER", "", true, "2026-01-01"],
               ],
             }),
           };
@@ -5142,7 +5273,7 @@ describe("Api.js", () => {
       const { api_markPayoutSent } = require("../Api.js");
       const result = api_markPayoutSent("PAYOUT-001", {});
       expect(result.ok).toBe(false);
-      expect(result.error.message).toContain("Unauthorized");
+      expect(result.error.message).toContain("Access denied");
     });
   });
 

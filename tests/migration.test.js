@@ -3,23 +3,27 @@ global.getSheet_ = jest.fn();
 global.getVaultSheet_ = jest.fn();
 global.Audit = { _nowIso: () => "2026-07-22T00:00:00Z", append: jest.fn() };
 global.DriveApp = {
-  getFolderById: jest.fn(() => ({
-    addFile: jest.fn(),
-    createFolder: jest.fn(function (name) {
-      return {
-        addFile: jest.fn(),
-        createFolder: jest.fn(function () { return { addFile: jest.fn(), getId: () => "FOLDER-X" }; }),
-        getId: () => "FOLDER-" + name,
-      };
-    }),
-    getId: () => "PARENT-FOLDER",
-  })),
   getFileById: jest.fn(() => ({
     getId: () => "FILE-OLD",
     getName: () => "CF-Budget 25-26",
-    getParents: () => ({ hasNext: () => true, next: () => ({ getId: () => "PARENT-FOLDER" }) }),
+    getParents: () => ({
+      hasNext: () => true,
+      next: () => ({ getId: () => "PARENT-FOLDER" }),
+    }),
     setName: jest.fn(),
     setViewersCanCopyContent: jest.fn(),
+  })),
+  getFolderById: jest.fn(() => ({
+    addFile: jest.fn(),
+    createFolder: jest.fn((name) => ({
+      addFile: jest.fn(),
+      createFolder: jest.fn(() => ({
+        addFile: jest.fn(),
+        getId: () => "FOLDER-X",
+      })),
+      getId: () => "FOLDER-" + name,
+    })),
+    getId: () => "PARENT-FOLDER",
   })),
   getRootFolder: () => ({ removeFile: jest.fn() }),
 };
@@ -33,18 +37,28 @@ global.SpreadsheetApp = {
   create: jest.fn(() => ({
     deleteSheet: jest.fn(),
     getId: () => "NEW-SS-ID",
-    getSheetByName: jest.fn(() => ({ appendRow: jest.fn(), getDataRange: () => ({ getValues: () => [] }), getRange: () => ({ setValues: jest.fn() }) })),
+    getSheetByName: jest.fn(() => ({
+      appendRow: jest.fn(),
+      getDataRange: () => ({ getValues: () => [] }),
+      getRange: () => ({ setValues: jest.fn() }),
+    })),
     getSheets: () => [],
     insertSheet: jest.fn(() => ({ appendRow: jest.fn() })),
   })),
   openById: jest.fn(() => ({
     deleteSheet: jest.fn(),
-    getSheetByName: jest.fn(() => ({ appendRow: jest.fn(), getDataRange: () => ({ getValues: () => [] }), getRange: () => ({ setValues: jest.fn() }) })),
+    getSheetByName: jest.fn(() => ({
+      appendRow: jest.fn(),
+      getDataRange: () => ({ getValues: () => [] }),
+      getRange: () => ({ setValues: jest.fn() }),
+    })),
     getSheets: () => [],
     insertSheet: jest.fn(() => ({ appendRow: jest.fn() })),
   })),
 };
-global.Session = { getActiveUser: jest.fn(() => ({ getEmail: () => "test@example.com" })) };
+global.Session = {
+  getActiveUser: jest.fn(() => ({ getEmail: () => "test@example.com" })),
+};
 global.Discord = { postTreasury: jest.fn() };
 global.TABS = {
   ACCOUNT_ADJUSTMENTS: "AccountAdjustments",
@@ -100,7 +114,12 @@ global.ROLES = {
   TREASURER: "TREASURER",
 };
 global.STATUS = {
-  ExpenseClaim: { DRAFT: "DRAFT", SUBMITTED: "SUBMITTED", VERIFIED: "VERIFIED", APPROVED_FOR_PAYOUT: "APPROVED_FOR_PAYOUT" },
+  ExpenseClaim: {
+    APPROVED_FOR_PAYOUT: "APPROVED_FOR_PAYOUT",
+    DRAFT: "DRAFT",
+    SUBMITTED: "SUBMITTED",
+    VERIFIED: "VERIFIED",
+  },
   FinanceAccount: { ACTIVE: "ACTIVE", INACTIVE: "INACTIVE" },
 };
 
@@ -130,16 +149,38 @@ global.Config = {
 // Users sheet with operators and members for preview.
 const usersData = [
   ["user_id", "display_name", "role", "email", "active", "created_at"],
-  ["U-001", "Treasurer Test", "TREASURER", "test@example.com", true, "2026-01-01"],
-  ["U-002", "Committee", "COMMITTEE", "committee@example.com", true, "2026-01-01"],
+  [
+    "U-001",
+    "Treasurer Test",
+    "TREASURER",
+    "test@example.com",
+    true,
+    "2026-01-01",
+  ],
+  [
+    "U-002",
+    "Committee",
+    "COMMITTEE",
+    "committee@example.com",
+    true,
+    "2026-01-01",
+  ],
   ["M-001", "Alice Member", "MEMBER", "alice@example.com", true, "2026-01-01"],
   ["M-002", "Bob Member", "MEMBER", "bob@example.com", true, "2026-01-01"],
   ["M-003", "Old Member", "MEMBER", "old@example.com", false, "2026-01-01"],
 ];
 
 const accountsData = [
-  ["account_id", "name", "opening_balance", "current_balance", "pending_income", "reserved_payouts", "status"],
-  ["AC-1", "Main", 10000, 9500, 0, 0, "ACTIVE"],
+  [
+    "account_id",
+    "name",
+    "opening_balance",
+    "current_balance",
+    "pending_income",
+    "reserved_payouts",
+    "status",
+  ],
+  ["AC-1", "Main", 10_000, 9500, 0, 0, "ACTIVE"],
   ["AC-2", "Reserve", 5000, 5200, 0, 0, "ACTIVE"],
 ];
 
@@ -181,11 +222,15 @@ global.getSheet_.mockImplementation((tab) => {
     return {
       appendRow: jest.fn((row) => {
         configData.push(row);
-        if (row[0]) configStore[row[0]] = String(row[1]);
+        if (row[0]) {
+          configStore[row[0]] = String(row[1]);
+        }
       }),
       deleteRow: jest.fn((rowIndex) => {
         const row = configData[rowIndex - 1];
-        if (row && row[0]) delete configStore[row[0]];
+        if (row && row[0]) {
+          delete configStore[row[0]];
+        }
         configData.splice(rowIndex - 1, 1);
       }),
       getDataRange: () => ({ getValues: () => configData }),
@@ -257,8 +302,8 @@ describe("Annual Migration: 8-stage resumable flow", () => {
     Migration.startMigration("U-001");
     Migration.setMemberSelections("U-001", ["M-001"]);
     const result = Migration.setAccountSelections("U-001", {
-      accountIds: ["AC-1"],
       accountBalances: { "AC-1": 9500 },
+      accountIds: ["AC-1"],
       balanceReasons: { "AC-1": "Carried over" },
     });
     expect(result.ok).toBe(true);
@@ -274,9 +319,10 @@ describe("Annual Migration: 8-stage resumable flow", () => {
     Migration.startMigration("U-001");
     Migration.setMemberSelections("U-001", ["M-001"]);
     Migration.setAccountSelections("U-001", {
-      accountBalances: {},
+      accountBalances: { "AC-1": 1000 },
       accountIds: ["AC-1"],
-      balanceReasons: {},
+      balanceReasons: { "AC-1": "Carry forward opening balance" },
+      confirmedAccountIds: ["AC-1"],
     });
     const result = Migration.setEventSelections("U-001", ["EVT-1"]);
     expect(result.ok).toBe(true);
@@ -290,9 +336,10 @@ describe("Annual Migration: 8-stage resumable flow", () => {
     Migration.startMigration("U-001");
     Migration.setMemberSelections("U-001", ["M-001"]);
     Migration.setAccountSelections("U-001", {
-      accountBalances: {},
+      accountBalances: { "AC-1": 1000 },
       accountIds: ["AC-1"],
-      balanceReasons: {},
+      balanceReasons: { "AC-1": "Carry forward opening balance" },
+      confirmedAccountIds: ["AC-1"],
     });
     Migration.setEventSelections("U-001", ["EVT-1"]);
     const result = Migration.setCategorySelections("U-001", ["CAT-1"]);
@@ -306,9 +353,10 @@ describe("Annual Migration: 8-stage resumable flow", () => {
     Migration.startMigration("U-001");
     Migration.setMemberSelections("U-001", ["M-001"]);
     Migration.setAccountSelections("U-001", {
-      accountBalances: {},
+      accountBalances: { "AC-1": 1000 },
       accountIds: ["AC-1"],
-      balanceReasons: {},
+      balanceReasons: { "AC-1": "Carry forward opening balance" },
+      confirmedAccountIds: ["AC-1"],
     });
     Migration.setEventSelections("U-001", ["EVT-1"]);
     Migration.setCategorySelections("U-001", ["CAT-1"]);
@@ -324,9 +372,10 @@ describe("Annual Migration: 8-stage resumable flow", () => {
     Migration.startMigration("U-001");
     Migration.setMemberSelections("U-001", ["M-001", "M-002"]);
     Migration.setAccountSelections("U-001", {
-      accountBalances: {},
+      accountBalances: { "AC-1": 1000 },
       accountIds: ["AC-1"],
-      balanceReasons: {},
+      balanceReasons: { "AC-1": "Carry forward opening balance" },
+      confirmedAccountIds: ["AC-1"],
     });
     Migration.setEventSelections("U-001", ["EVT-1"]);
     Migration.setCategorySelections("U-001", ["CAT-1"]);
@@ -341,9 +390,10 @@ describe("Annual Migration: 8-stage resumable flow", () => {
     Migration.startMigration("U-001");
     Migration.setMemberSelections("U-001", ["M-001"]);
     Migration.setAccountSelections("U-001", {
-      accountBalances: {},
+      accountBalances: { "AC-1": 1000 },
       accountIds: ["AC-1"],
-      balanceReasons: {},
+      balanceReasons: { "AC-1": "Carry forward opening balance" },
+      confirmedAccountIds: ["AC-1"],
     });
     Migration.setEventSelections("U-001", ["EVT-1"]);
     Migration.setCategorySelections("U-001", ["CAT-1"]);
@@ -373,9 +423,10 @@ describe("Annual Migration: 8-stage resumable flow", () => {
     Migration.startMigration("U-001");
     Migration.setMemberSelections("U-001", ["M-001"]);
     Migration.setAccountSelections("U-001", {
-      accountBalances: {},
+      accountBalances: { "AC-1": 1000 },
       accountIds: ["AC-1"],
-      balanceReasons: {},
+      balanceReasons: { "AC-1": "Carry forward opening balance" },
+      confirmedAccountIds: ["AC-1"],
     });
     Migration.setEventSelections("U-001", ["EVT-1"]);
     Migration.setCategorySelections("U-001", ["CAT-1"]);
@@ -390,9 +441,10 @@ describe("Annual Migration: 8-stage resumable flow", () => {
     Migration.startMigration("U-001");
     Migration.setMemberSelections("U-001", ["M-001"]);
     Migration.setAccountSelections("U-001", {
-      accountBalances: {},
+      accountBalances: { "AC-1": 1000 },
       accountIds: ["AC-1"],
-      balanceReasons: {},
+      balanceReasons: { "AC-1": "Carry forward opening balance" },
+      confirmedAccountIds: ["AC-1"],
     });
     Migration.setEventSelections("U-001", ["EVT-1"]);
     Migration.setCategorySelections("U-001", ["CAT-1"]);
@@ -416,9 +468,10 @@ describe("Annual Migration: 8-stage resumable flow", () => {
     Migration.startMigration("U-001");
     Migration.setMemberSelections("U-001", ["M-001"]);
     Migration.setAccountSelections("U-001", {
-      accountBalances: {},
+      accountBalances: { "AC-1": 1000 },
       accountIds: ["AC-1"],
-      balanceReasons: {},
+      balanceReasons: { "AC-1": "Carry forward opening balance" },
+      confirmedAccountIds: ["AC-1"],
     });
     Migration.setMemberSelections("U-001", ["M-001", "M-002"]);
     const selections = JSON.parse(configStore["MIGRATION_SELECTIONS"]);

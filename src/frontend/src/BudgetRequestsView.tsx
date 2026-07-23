@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { askForConfirmation, showNotice } from "./components/AccessibleDialog";
 import { apiService } from "./services/api";
 import type {
   BudgetRequest,
@@ -106,12 +107,12 @@ export default function BudgetRequestsView({ role }: BudgetRequestsViewProps) {
 
   const handleSave = async () => {
     if (!reqTitle.trim()) {
-      alert("Title is required.");
+      showNotice("Title is required.");
       return;
     }
     const nonEmptyLines = reqLines.filter((l) => l.description.trim());
     if (nonEmptyLines.length === 0) {
-      alert("At least one line item is required.");
+      showNotice("At least one line item is required.");
       return;
     }
 
@@ -128,33 +129,33 @@ export default function BudgetRequestsView({ role }: BudgetRequestsViewProps) {
       setShowForm(false);
       loadMyRequests();
     } catch (err: any) {
-      alert(err.message || "Failed to save");
+      showNotice(err.message || "Failed to save");
     } finally {
       setSubmitLoading(false);
     }
   };
 
   const handleSubmit = async (r: BudgetRequest) => {
-    if (!confirm("Submit this budget request?")) {
+    if (!(await askForConfirmation("Submit this budget request?"))) {
       return;
     }
     try {
       await apiService.submitBudgetRequest(r.request_id);
       loadMyRequests();
     } catch (err: any) {
-      alert(err.message || "Failed to submit");
+      showNotice(err.message || "Failed to submit");
     }
   };
 
   const handleDiscard = async (r: BudgetRequest) => {
-    if (!confirm("Discard this DRAFT request?")) {
+    if (!(await askForConfirmation("Discard this DRAFT request?"))) {
       return;
     }
     try {
       await apiService.discardBudgetRequest(r.request_id);
       loadMyRequests();
     } catch (err: any) {
-      alert(err.message || "Failed to discard");
+      showNotice(err.message || "Failed to discard");
     }
   };
 
@@ -171,7 +172,7 @@ export default function BudgetRequestsView({ role }: BudgetRequestsViewProps) {
       setDecisionNote("");
       loadPending();
     } catch (err: any) {
-      alert(err.message || "Failed to process decision");
+      showNotice(err.message || "Failed to process decision");
     }
   };
 

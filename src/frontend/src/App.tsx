@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import "./App.css";
 import BudgetRequestsView from "./BudgetRequestsView";
 import ClaimsView from "./ClaimsView";
+import { AccessibleDialogHost } from "./components/AccessibleDialog";
 import DashboardView from "./DashboardView";
 import FinanceAccountsView from "./FinanceAccountsView";
 import MembersView from "./MembersView";
 import PayoutsView from "./PayoutsView";
+import ReconciliationView from "./ReconciliationView";
 import ReportsView from "./ReportsView";
 import ReviewDashboard from "./ReviewDashboard";
 import { apiService } from "./services/api";
@@ -95,6 +97,21 @@ function WorkspaceShell({ session }: { session: SessionInfo }) {
   const [members, setMembers] = useState<Member[]>([]);
   const [budgetLines, setBudgetLines] = useState<BudgetLine[]>([]);
   const [workspaceError, setWorkspaceError] = useState("");
+  const touchStartX = useRef<number | null>(null);
+
+  const selectView = (view: WorkspaceView) => {
+    setActiveView(view);
+    window.location.hash = view;
+  };
+
+  const moveView = (offset: -1 | 1) => {
+    const currentIndex = session.views.indexOf(activeView);
+    const nextIndex = currentIndex + offset;
+    const nextView = session.views[nextIndex];
+    if (nextView) {
+      selectView(nextView);
+    }
+  };
 
   useEffect(() => {
     apiService
@@ -138,14 +155,44 @@ function WorkspaceShell({ session }: { session: SessionInfo }) {
       case "payouts":
         return <PayoutsView role={session.role} />;
       case "reports":
-        return <ReportsView role={session.role} />;
+        return (
+          <>
+            <ReportsView role={session.role} />
+            {session.role === "TREASURER" && <ReconciliationView />}
+          </>
+        );
       default:
         return <PlaceholderView view={activeView} />;
     }
   };
 
   return (
-    <div className="workspace">
+    <div
+      className="workspace"
+      onKeyDown={(event) => {
+        if (event.altKey && event.key === "ArrowLeft") {
+          moveView(-1);
+        }
+        if (event.altKey && event.key === "ArrowRight") {
+          moveView(1);
+        }
+      }}
+      onTouchEnd={(event) => {
+        const startX = touchStartX.current;
+        touchStartX.current = null;
+        if (startX === null) {
+          return;
+        }
+        const distance = event.changedTouches[0].clientX - startX;
+        if (Math.abs(distance) < 50) {
+          return;
+        }
+        moveView(distance < 0 ? 1 : -1);
+      }}
+      onTouchStart={(event) => {
+        touchStartX.current = event.changedTouches[0].clientX;
+      }}
+    >
       <header className="workspace-header">
         <div className="workspace-header-left">
           <h1 className="workspace-title">Finance Workspace</h1>
@@ -166,12 +213,10 @@ function WorkspaceShell({ session }: { session: SessionInfo }) {
         <nav className="workspace-sidebar">
           {session.views.map((v) => (
             <button
+              aria-current={activeView === v ? "page" : undefined}
               className={`sidebar-item ${activeView === v ? "active" : ""}`}
               key={v}
-              onClick={() => {
-                setActiveView(v);
-                window.location.hash = v;
-              }}
+              onClick={() => selectView(v)}
             >
               <span className="sidebar-icon">{getViewIcon(v)}</span>
               <span className="sidebar-label">{VIEW_LABELS[v]}</span>
@@ -181,7 +226,9 @@ function WorkspaceShell({ session }: { session: SessionInfo }) {
 
         <main className="workspace-content">
           {workspaceError && (
-            <div className="alert error">Workspace error: {workspaceError}</div>
+            <div className="alert error" role="alert">
+              Workspace error: {workspaceError}
+            </div>
           )}
           {renderView()}
         </main>
@@ -190,9 +237,10 @@ function WorkspaceShell({ session }: { session: SessionInfo }) {
       <nav className="workspace-bottom-nav">
         {session.views.map((v) => (
           <button
+            aria-current={activeView === v ? "page" : undefined}
             className={`bottom-nav-item ${activeView === v ? "active" : ""}`}
             key={v}
-            onClick={() => setActiveView(v)}
+            onClick={() => selectView(v)}
           >
             <span className="bottom-nav-icon">{getViewIcon(v)}</span>
             <span className="bottom-nav-label">{VIEW_LABELS[v]}</span>
@@ -224,16 +272,45 @@ function getViewIcon(view: WorkspaceView): string {
 
 export default function App() {
   const [session, setSession] = useState<SessionResponse | null>(null);
+  const [sessionError, setSessionError] = useState("");
 
   useEffect(() => {
-    apiService.resolveSession().then(setSession);
+    apiService
+      .resolveSession()
+      .then(setSession)
+      .catch((error: Error) => setSessionError(error.message));
   }, []);
 
+  if (sessionError) {
+    return (
+      <>
+        <AccessibleDialogHost />
+        <div className="access-denied" role="alert">
+          Unable to verify access: {sessionError}
+        </div>
+      </>
+    );
+  }
   if (!session) {
-    return <SessionLoading />;
+    return (
+      <>
+        <AccessibleDialogHost />
+        <SessionLoading />
+      </>
+    );
   }
   if (!session.allowed) {
-    return <AccessDenied reason={session.reason} role={session.role} />;
+    return (
+      <>
+        <AccessibleDialogHost />
+        <AccessDenied reason={session.reason} role={session.role} />
+      </>
+    );
   }
-  return <WorkspaceShell session={session} />;
+  return (
+    <>
+      <AccessibleDialogHost />
+      <WorkspaceShell session={session} />
+    </>
+  );
 }

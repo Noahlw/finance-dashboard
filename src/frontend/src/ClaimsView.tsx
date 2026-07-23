@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from "react";
+import { AccessibleDialog } from "./components/AccessibleDialog";
 import { apiService } from "./services/api";
-import type { BudgetLine, Claim, Member, UploadingReceipt } from "./types";
+import type {
+  BudgetLine,
+  Claim,
+  ClaimFilePayload,
+  Member,
+  PayoutMethod,
+  UploadingReceipt,
+} from "./types";
 
 interface ClaimsViewProps {
   budgetLines?: BudgetLine[];
@@ -46,10 +54,15 @@ export default function ClaimsView({
   const [amount, setAmount] = useState("");
   const [notes, setNotes] = useState("");
   const [budgetLineId, setBudgetLineId] = useState("");
-  const [payoutMethod, setPayoutMethod] = useState<
-    "FPS" | "PAYME" | "BANK" | "CASH" | "OTHER"
-  >("FPS");
-  const [payoutHandle, setPayoutHandle] = useState("");
+  const [payoutMethod, setPayoutMethod] = useState<PayoutMethod>("FPS");
+  const [fpsPhone, setFpsPhone] = useState("");
+  const [fpsAccount, setFpsAccount] = useState("");
+  const [paymePhone, setPaymePhone] = useState("");
+  const [otherDetails, setOtherDetails] = useState("");
+  const [qrFile, setQrFile] = useState<ClaimFilePayload>();
+  const [draftId, setDraftId] = useState<string>();
+  const [idempotencyKey, setIdempotencyKey] = useState("");
+  const [correctionMessage, setCorrectionMessage] = useState("");
   const [skipReceipt, setSkipReceipt] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -74,7 +87,14 @@ export default function ClaimsView({
     setNotes("");
     setBudgetLineId(budgetLines[0]?.line_id || "");
     setPayoutMethod("FPS");
-    setPayoutHandle("");
+    setFpsPhone("");
+    setFpsAccount("");
+    setPaymePhone("");
+    setOtherDetails("");
+    setQrFile(undefined);
+    setDraftId(undefined);
+    setIdempotencyKey("");
+    setCorrectionMessage("");
     setSkipReceipt(false);
     setUploadedReceipts([]);
     setPendingVendor("");
@@ -100,6 +120,7 @@ export default function ClaimsView({
 
   const openNewClaim = () => {
     resetForm();
+    setIdempotencyKey(crypto.randomUUID());
     setShowForm(true);
   };
 
@@ -114,7 +135,13 @@ export default function ClaimsView({
       return true;
     }
     if (step === "payment") {
-      return true;
+      if (payoutMethod === "FPS") {
+        return Boolean(fpsPhone.trim() && fpsAccount.trim());
+      }
+      if (payoutMethod === "PAYME") {
+        return Boolean(paymePhone.trim()) !== Boolean(qrFile);
+      }
+      return Boolean(otherDetails.trim());
     }
     return true;
   };
@@ -152,23 +179,10 @@ export default function ClaimsView({
     reader.readAsDataURL(file);
   };
 
-  const handleUploadReceipt = async () => {
+  const handleUploadReceipt = () => {
     if (!(pendingFile && pendingFileBase64)) {
       return;
     }
-    if (
-      !(
-        pendingVendor.trim() ||
-        pendingReceiptDate.trim() ||
-        pendingReceiptTotal.trim()
-      )
-    ) {
-      setPendingFileError(
-        "Optional: fill in vendor, receipt date, or receipt total before uploading."
-      );
-      return;
-    }
-
     const receipt: UploadingReceipt = {
       base64Data: pendingFileBase64,
       fileName: pendingFile.name,
@@ -178,63 +192,21 @@ export default function ClaimsView({
       status: "pending",
       vendor: pendingVendor,
     };
-    setUploadedReceipts((prev) => [
-      ...prev,
-      { ...receipt, status: "uploading" },
-    ]);
-
-    try {
-      const result = await apiService.uploadReceipt(
-        pendingFile.name,
-        pendingFile.type,
-        pendingFileBase64,
-        pendingVendor,
-        pendingReceiptDate,
-        Number(pendingReceiptTotal) || 0
-      );
-      setUploadedReceipts((prev) =>
-        prev.map((r) =>
-          r.fileName === pendingFile.name && r.status === "uploading"
-            ? { ...r, receiptId: result.receiptId, status: "done" as const }
-            : r
-        )
-      );
-      setPendingFile(null);
-      setPendingFileBase64("");
-      setPendingVendor("");
-      setPendingReceiptDate("");
-      setPendingReceiptTotal("");
-      setPendingFileError("");
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-    } catch (err: any) {
-      setUploadedReceipts((prev) =>
-        prev.map((r) =>
-          r.fileName === pendingFile.name && r.status === "uploading"
-            ? { ...r, error: err.message, status: "error" as const }
-            : r
-        )
-      );
-      setPendingFileError(err.message || "Upload failed");
+    setUploadedReceipts((prev) => [...prev, { ...receipt, status: "done" }]);
+    setPendingFile(null);
+    setPendingFileBase64("");
+    setPendingVendor("");
+    setPendingReceiptDate("");
+    setPendingReceiptTotal("");
+    setPendingFileError("");
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
     }
   };
 
-  const removeUploadedReceipt = async (index: number) => {
-    const receipt = uploadedReceipts[index];
-    if (receipt.receiptId) {
-      try {
-        await apiService.deleteOrphanedReceipt(receipt.receiptId);
-      } catch {
-        // Cleanup best-effort
-      }
-    }
+  const removeUploadedReceipt = (index: number) => {
     setUploadedReceipts((prev) => prev.filter((_, i) => i !== index));
   };
-
-  const receiptIds = uploadedReceipts
-    .filter((r) => r.receiptId)
-    .map((r) => r.receiptId!);
   const receiptTotalSum = uploadedReceipts.reduce(
     (sum, r) => sum + (r.receiptTotal || 0),
     0
@@ -244,37 +216,74 @@ export default function ClaimsView({
 
   const handleSave = async (submit: boolean) => {
     if (!claimAmount) {
-      alert("Amount must be greater than 0.");
+      setCorrectionMessage("Amount must be greater than 0.");
+      return;
+    }
+    if (submit && !budgetLineId) {
+      setCorrectionMessage(
+        "Select one approved Budget Line before submitting."
+      );
       return;
     }
     setSubmitting(true);
     try {
-      const draft = await apiService.saveClaimDraft({
+      const payload = {
         amount: claimAmount,
         budgetLineId,
         claimantId,
+        claimId: draftId,
         eventId,
         expenseDate,
+        fpsAccount,
+        fpsPhone,
         notes,
-        payoutHandle,
+        otherDetails,
+        paymePhone,
         payoutMethod,
-        receiptId: skipReceipt ? undefined : receiptIds[0],
-        receiptIds: skipReceipt
-          ? undefined
-          : receiptIds.length > 0
-            ? receiptIds
-            : undefined,
         semester,
-        uuid: crypto.randomUUID(),
-      });
+        uuid: idempotencyKey,
+      };
       if (submit) {
-        await apiService.submitDraftClaim(draft.claim_id);
+        await apiService.atomicSubmitClaim({
+          ...payload,
+          budgetLineId,
+          expenseDate,
+          qrFile,
+          receipts: skipReceipt
+            ? []
+            : uploadedReceipts.map(
+                ({
+                  base64Data,
+                  fileName,
+                  mimeType,
+                  receiptDate,
+                  receiptTotal,
+                  vendor,
+                }) => ({
+                  base64Data,
+                  fileName,
+                  mimeType,
+                  receiptDate,
+                  receiptTotal,
+                  vendor,
+                })
+              ),
+        });
+      } else {
+        const draft = await apiService.saveClaimDraft(payload);
+        setDraftId(draft.claim_id);
+        setCorrectionMessage(
+          "Draft saved. You can continue editing this Claim."
+        );
+        return;
       }
       setShowForm(false);
       resetForm();
       loadClaims();
-    } catch (err: any) {
-      alert(err.message || "Failed to save claim");
+    } catch (err) {
+      setCorrectionMessage(
+        err instanceof Error ? err.message : "Failed to save Claim"
+      );
     } finally {
       setSubmitting(false);
     }
@@ -516,28 +525,112 @@ export default function ClaimsView({
         return (
           <>
             <div className="form-group">
-              <label>Payout Method</label>
+              <label htmlFor="claim-payout-method">Payout Method</label>
               <select
-                onChange={(e) => setPayoutMethod(e.target.value as any)}
+                id="claim-payout-method"
+                onChange={(e) =>
+                  setPayoutMethod(e.target.value as PayoutMethod)
+                }
                 value={payoutMethod}
               >
                 <option value="FPS">FPS</option>
                 <option value="PAYME">PayMe</option>
-                <option value="BANK">Bank Transfer</option>
-                <option value="CASH">Cash</option>
                 <option value="OTHER">Other</option>
               </select>
             </div>
-            <div className="form-group">
-              <label>Payout Handle / Reference</label>
-              <input
-                onChange={(e) => setPayoutHandle(e.target.value)}
-                placeholder={
-                  payoutMethod === "FPS" ? "Phone number" : "Account / handle"
-                }
-                value={payoutHandle}
-              />
-            </div>
+            {payoutMethod === "FPS" && (
+              <>
+                <div className="form-group">
+                  <label htmlFor="claim-fps-phone">FPS phone number</label>
+                  <input
+                    id="claim-fps-phone"
+                    onChange={(e) => setFpsPhone(e.target.value)}
+                    placeholder="8-digit mobile"
+                    value={fpsPhone}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="claim-fps-account">
+                    FPS destination account
+                  </label>
+                  <input
+                    id="claim-fps-account"
+                    onChange={(e) => setFpsAccount(e.target.value)}
+                    placeholder="FPS ID / account"
+                    value={fpsAccount}
+                  />
+                </div>
+              </>
+            )}
+            {payoutMethod === "PAYME" && (
+              <>
+                <div className="form-group">
+                  <label htmlFor="claim-payme-phone">PayMe phone number</label>
+                  <input
+                    disabled={Boolean(qrFile)}
+                    id="claim-payme-phone"
+                    onChange={(e) => setPaymePhone(e.target.value)}
+                    placeholder="Leave blank if uploading a QR"
+                    value={paymePhone}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="claim-payme-qr">
+                    Or Payment QR Code (PNG/JPEG, lossless)
+                  </label>
+                  <input
+                    accept="image/png,image/jpeg"
+                    disabled={Boolean(paymePhone.trim())}
+                    id="claim-payme-qr"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) {
+                        setQrFile(undefined);
+                        return;
+                      }
+                      const reader = new FileReader();
+                      reader.onload = () => {
+                        const result = String(reader.result || "");
+                        const base64Data = result.includes(",")
+                          ? result.split(",")[1]
+                          : result;
+                        setQrFile({
+                          base64Data,
+                          fileName: file.name,
+                          mimeType: file.type,
+                        });
+                        setPaymePhone("");
+                      };
+                      reader.readAsDataURL(file);
+                    }}
+                    type="file"
+                  />
+                  {qrFile ? (
+                    <p className="mono">
+                      QR selected: {qrFile.fileName}{" "}
+                      <button
+                        className="ghost-btn"
+                        onClick={() => setQrFile(undefined)}
+                        type="button"
+                      >
+                        Clear
+                      </button>
+                    </p>
+                  ) : null}
+                </div>
+              </>
+            )}
+            {payoutMethod === "OTHER" && (
+              <div className="form-group">
+                <label htmlFor="claim-other-details">Payment details</label>
+                <textarea
+                  id="claim-other-details"
+                  onChange={(e) => setOtherDetails(e.target.value)}
+                  placeholder="Describe how the member should be paid"
+                  value={otherDetails}
+                />
+              </div>
+            )}
           </>
         );
       case "review":
@@ -558,8 +651,19 @@ export default function ClaimsView({
               <strong>Note:</strong> {notes}
             </p>
             <p>
-              <strong>Payment:</strong> {payoutMethod}{" "}
-              {payoutHandle && `(${payoutHandle})`}
+              <strong>Payment:</strong> {payoutMethod}
+              {payoutMethod === "FPS" && fpsPhone
+                ? ` (${fpsPhone} → ${fpsAccount})`
+                : ""}
+              {payoutMethod === "PAYME" &&
+                (paymePhone
+                  ? ` (${paymePhone})`
+                  : qrFile
+                    ? ` (QR: ${qrFile.fileName})`
+                    : "")}
+              {payoutMethod === "OTHER" && otherDetails
+                ? ` (${otherDetails})`
+                : ""}
             </p>
             {skipReceipt && (
               <div className="alert warning">
@@ -603,6 +707,20 @@ export default function ClaimsView({
   return (
     <div className="view-container">
       {error && <div className="alert error">{error}</div>}
+      <AccessibleDialog
+        onClose={() => setCorrectionMessage("")}
+        open={Boolean(correctionMessage)}
+        title="Claim correction needed"
+      >
+        <p>{correctionMessage}</p>
+        <button
+          className="primary-btn"
+          onClick={() => setCorrectionMessage("")}
+          type="button"
+        >
+          Continue editing
+        </button>
+      </AccessibleDialog>
 
       <section className="glass-card">
         <div className="card-header">

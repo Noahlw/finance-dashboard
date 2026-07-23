@@ -164,6 +164,9 @@ var CoreDecisions = {
    * @return {{ok: boolean, reason: ?string}}
    */
   authorize(def, isSelf, actorRole, payload) {
+    if (def.action === "VERIFY" && isSelf && actorRole === ROLES_.COMMITTEE) {
+      return { ok: false, reason: "COMMITTEE_SELF_VERIFICATION" };
+    }
     if (def.allowedRoles === null) {
       if (!isSelf) {
         return { ok: false, reason: "NOT_OWNER" };
@@ -332,7 +335,8 @@ var CoreDecisions = {
 
   /**
    * The owning user's ID for an entity row: requester_id for BudgetRequest,
-   * claimant_id for ExpenseClaim. Returns null for unrecognized entity types.
+   * created_by for ExpenseClaim. Claims are operated by Committee/Treasurer
+   * accounts on behalf of a Claimant, so the operator is the review owner.
    * @param {string} entityType
    * @param {Array} values full row values array as loaded from the sheet
    * @return {?string}
@@ -342,7 +346,7 @@ var CoreDecisions = {
       return values[COLS_.BudgetRequests.requester_id - 1];
     }
     if (entityType === "ExpenseClaim") {
-      return values[COLS_.ExpenseClaims.claimant_id - 1];
+      return values[COLS_.ExpenseClaims.created_by - 1];
     }
     return null;
   },

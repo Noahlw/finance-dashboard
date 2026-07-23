@@ -46,14 +46,33 @@ var Discord = {
    * @private
    */
   _postToWebhook(configKey, text, entityType, entityId) {
+    text = Discord._sanitize(text);
+    var deliveryId = null;
+    try {
+      deliveryId = NotificationDeliveries.create(
+        configKey,
+        entityType,
+        entityId,
+        text
+      );
+    } catch (e) {
+      // Delivery recording must not make notifications finance-critical.
+    }
     var url = Config.getOptional(configKey);
     if (!url) {
+      if (deliveryId) {
+        NotificationDeliveries.mark(
+          deliveryId,
+          "FAILED",
+          "Webhook URL not set (" + configKey + ")"
+        );
+      }
       Discord._logFailure(
         entityType,
         entityId,
         "Webhook URL not set (" + configKey + "); notification skipped."
       );
-      return;
+      return deliveryId;
     }
     var options = {
       contentType: "application/json",
@@ -67,12 +86,30 @@ var Discord = {
       ok = Discord._attempt(url, options);
     }
     if (!ok) {
+      if (deliveryId) {
+        NotificationDeliveries.mark(
+          deliveryId,
+          "FAILED",
+          "Discord webhook POST failed twice for " + configKey
+        );
+      }
       Discord._logFailure(
         entityType,
         entityId,
         "Discord webhook POST failed twice for " + configKey
       );
+    } else if (deliveryId) {
+      NotificationDeliveries.mark(deliveryId, "SENT", "");
     }
+    return deliveryId;
+  },
+  _sanitize(text) {
+    return String(text || "")
+      .replace(/\s*\(ref:[^)]+\)/gi, "")
+      .replace(
+        /(transaction reference|txn reference|payout handle):?\s*\S+/gi,
+        "$1: [REDACTED]"
+      );
   },
 
   /**
@@ -135,4 +172,43 @@ var Discord = {
   postTreasury(text) {
     Discord._postToWebhook("TREASURY_WEBHOOK_URL", text, "Treasury", "CHANNEL");
   },
+
+  retry(deliveryId) {
+    var row = NotificationDeliveries.load(deliveryId);
+    if (!row) {
+      return { ok: false, reason: "NOT_FOUND" };
+    }
+    var c = COLS.NotificationDeliveries;
+    if (row.values[c.status - 1] !== "FAILED") {
+      return { ok: false, reason: "ONLY_FAILED_DELIVERIES_CAN_BE_RETRIED" };
+    }
+    var configKey = row.values[c.channel - 1];
+    var url = Config.getOptional(configKey);
+    if (!url) {
+      NotificationDeliveries.mark(
+        deliveryId,
+        "FAILED",
+        "Webhook URL not set (" + configKey + ")"
+      );
+      return { ok: false, reason: "WEBHOOK_NOT_CONFIGURED" };
+    }
+    var text = Discord._sanitize(row.values[c.message - 1]);
+    var options = {
+      contentType: "application/json",
+      method: "post",
+      muteHttpExceptions: true,
+      payload: JSON.stringify({ content: text.substring(0, 1900) }),
+    };
+    var ok = Discord._attempt(url, options);
+    NotificationDeliveries.mark(
+      deliveryId,
+      ok ? "SENT" : "FAILED",
+      ok ? "" : "Discord webhook retry failed"
+    );
+    return { ok, reason: ok ? null : "DELIVERY_FAILED" };
+  },
 };
+
+if (typeof module !== "undefined") {
+  module.exports = { Discord };
+}

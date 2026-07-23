@@ -26,31 +26,60 @@ function _ok(data) {
 }
 
 function _err(code, message, details) {
+  if (code === "UNAUTHORIZED" || code === "NOT_AUTHENTICATED") {
+    return {
+      error: { code: "AUTH_DENIED", details: {}, message: "Access denied" },
+      ok: false,
+    };
+  }
   return { error: { code, details: details || {}, message }, ok: false };
+}
+
+function _auditAuthDenied(reason, user) {
+  try {
+    Audit.append(
+      user && user.userId ? user.userId : "SYSTEM",
+      "Authorization",
+      "SESSION",
+      "AUTH_DENIED",
+      { reason: reason || "denied" }
+    );
+  } catch (e) {
+    // A denial must remain minimal even when audit persistence is unavailable.
+  }
+}
+
+function _denyAccess(reason, user) {
+  _auditAuthDenied(reason, user);
+  return _err("AUTH_DENIED", "Access denied");
 }
 
 function api_resolveSession() {
   var email = Session.getActiveUser().getEmail();
   if (!email) {
+    _auditAuthDenied("no_session");
     return { allowed: false, reason: "no_session" };
   }
 
   var user = _resolveUser(email);
   if (user.isUnknown) {
-    return { allowed: false, email, reason: "unknown_user" };
+    _auditAuthDenied("unknown_user");
+    return { allowed: false, reason: "unknown_user" };
   }
 
   if (user.role !== ROLES.COMMITTEE && user.role !== ROLES.TREASURER) {
-    return { allowed: false, reason: "unauthorized_role", role: user.role };
+    _auditAuthDenied("unauthorized_role", user);
+    return { allowed: false, reason: "unauthorized_role" };
   }
 
   if (!user.active) {
+    _auditAuthDenied("inactive_user", user);
     return { allowed: false, reason: "inactive_user" };
   }
 
   var views = ["review", "claims", "members", "budget-requests"];
   if (user.role === ROLES.TREASURER) {
-    views.push("income", "payouts", "reports");
+    views.push("income", "payouts", "reports", "reconciliation");
   }
 
   return {
@@ -63,20 +92,11 @@ function api_resolveSession() {
 }
 
 function api_getMyClaims() {
-  var email = Session.getActiveUser().getEmail();
-  if (!email) {
-    return _err(
-      "NOT_AUTHENTICATED",
-      "User not authenticated (no active session)"
-    );
-  }
-
-  var user = _resolveUser(email);
-  if (
-    user.isUnknown ||
-    (user.role !== ROLES.COMMITTEE && user.role !== ROLES.TREASURER)
-  ) {
-    return _ok({ budgetLines: [], claims: [], requests: [] });
+  var user;
+  try {
+    user = _requireOperator();
+  } catch (e) {
+    return e.authResponse || _err("AUTH_DENIED", "Access denied");
   }
 
   var claimsSheet = getSheet_(TABS.EXPENSE_CLAIMS);
@@ -186,7 +206,7 @@ function api_uploadReceipt(
         return _ok({ receiptId: receiptData[i][idCol] });
       }
       return _err(
-        "UNAUTHORIZED",
+        "DUPLICATE_RECEIPT",
         "Duplicate receipt detected (uploaded by another user)."
       );
     }
@@ -471,6 +491,7 @@ function _appendRow(sheet, values) {
     sheet.insertRowAfter(sheet.getMaxRows());
   }
   sheet.getRange(insertRow, 1, 1, values.length).setValues([values]);
+  return insertRow;
 }
 
 /**
@@ -860,16 +881,75 @@ function api_decisionBudgetRequest(entityId, action, payload) {
 function _requireOperator() {
   var email = Session.getActiveUser().getEmail();
   if (!email) {
-    throw new Error("Not authenticated");
+    var noSessionError = new Error("Access denied");
+    noSessionError.authResponse = _denyAccess("no_session");
+    throw noSessionError;
   }
   var user = _resolveUser(email);
   if (user.isUnknown) {
-    throw new Error("Unregistered user");
+    var unknownError = new Error("Access denied");
+    unknownError.authResponse = _denyAccess("unknown_user");
+    throw unknownError;
   }
   if (user.role !== ROLES.COMMITTEE && user.role !== ROLES.TREASURER) {
-    throw new Error("Unauthorized");
+    var roleError = new Error("Access denied");
+    roleError.authResponse = _denyAccess("unauthorized_role", user);
+    throw roleError;
+  }
+  if (!user.active) {
+    var inactiveError = new Error("Access denied");
+    inactiveError.authResponse = _denyAccess("inactive_user", user);
+    throw inactiveError;
   }
   return user;
+}
+
+function _getActiveClaimant(userId) {
+  var user = _findUserById(userId);
+  var vault = _findVaultByUserId(userId);
+  if (!(user && vault)) {
+    return null;
+  }
+  var role = user.values[COLS.Users.role - 1];
+  var active =
+    String(user.values[COLS.Users.active - 1])
+      .trim()
+      .toUpperCase() === "TRUE";
+  var sid = String(vault.values[COLS.Vault.student_id - 1]).trim();
+  if (role !== ROLES.MEMBER || !active || !/^\d{8}$/.test(sid)) {
+    return null;
+  }
+  return { sid, user, vault };
+}
+
+function _paymentDetails(payload) {
+  var method = String(payload.payoutMethod || "").trim();
+  var legacyHandle = String(payload.payoutHandle || "").trim();
+  if (method === PAYOUT_METHOD.FPS) {
+    return {
+      account: String(payload.fpsAccount || "").trim(),
+      method,
+      phone: String(payload.fpsPhone || legacyHandle).trim(),
+    };
+  }
+  if (method === PAYOUT_METHOD.PAYME) {
+    return {
+      method,
+      phone: String(payload.paymePhone || legacyHandle).trim(),
+    };
+  }
+  return {
+    details: String(payload.otherDetails || legacyHandle).trim(),
+    method,
+  };
+}
+
+function _paymentHandle(payload, qrDriveFileId) {
+  var details = _paymentDetails(payload);
+  if (qrDriveFileId) {
+    details.qrDriveFileId = qrDriveFileId;
+  }
+  return JSON.stringify(details);
 }
 
 function _findUserById(userId) {
@@ -947,14 +1027,12 @@ function api_addMember(payload) {
   } catch (e) {
     return _err("UNAUTHORIZED", e.message);
   }
-  if (!(payload.student_id && String(payload.student_id).trim())) {
-    return _err("INVALID_PARAMETER", "Student ID is required");
-  }
-  if (!(payload.display_name && String(payload.display_name).trim())) {
-    return _err("INVALID_PARAMETER", "Display name is required");
+  var studentId = String(payload.student_id || "").trim();
+  if (!/^\d{8}$/.test(studentId)) {
+    return _err("INVALID_PARAMETER", "Student ID must be exactly 8 digits");
   }
 
-  var existing = _findVaultByStudentId(payload.student_id);
+  var existing = _findVaultByStudentId(studentId);
   if (existing) {
     var user = _findUserById(existing.values[COLS.Vault.user_id - 1]);
     if (user && user.values[COLS.Users.active - 1] === true) {
@@ -971,7 +1049,9 @@ function api_addMember(payload) {
 
   var userId = Ids.nextId("User");
   var now = Audit._nowIso();
-  var displayName = String(payload.display_name).trim();
+  var displayName = String(
+    payload.display_name || payload.full_name || ""
+  ).trim();
   _appendRow(getSheet_(TABS.USERS), [
     userId,
     displayName,
@@ -984,7 +1064,7 @@ function api_addMember(payload) {
   var vaultRow = [
     userId,
     String(payload.full_name || displayName).trim(),
-    String(payload.student_id).trim(),
+    studentId,
     String(payload.payout_method || "FPS").trim(),
     String(payload.payout_handle || "").trim(),
     now,
@@ -1003,7 +1083,7 @@ function api_addMember(payload) {
     .setValue(vaultRow[4]);
 
   Audit.append(operator.userId, "User", userId, "MEMBER_CREATE", {
-    sid: String(payload.student_id).trim(),
+    sid: studentId,
   });
   return _ok({ active: true, display_name: displayName, user_id: userId });
 }
@@ -1053,10 +1133,10 @@ function api_saveClaimDraft(payload) {
   if (!payload.claimantId) {
     return _err("INVALID_PARAMETER", "Claimant is required");
   }
-  if (!_findVaultByUserId(payload.claimantId)) {
+  if (!_getActiveClaimant(payload.claimantId)) {
     return _err(
       "INVALID_PARAMETER",
-      "Claimant SID not found in member directory"
+      "Claimant must be an active member with an 8-digit SID"
     );
   }
   if (!payload.uuid) {
@@ -1104,7 +1184,7 @@ function api_saveClaimDraft(payload) {
       .setValue(payload.payoutMethod || "FPS");
     sheet
       .getRange(row.rowIndex, c.payout_handle)
-      .setValue(payload.payoutHandle || "");
+      .setValue(_paymentHandle(payload));
   } else {
     _appendRow(getSheet_(TABS.EXPENSE_CLAIMS), [
       claimId,
@@ -1127,17 +1207,15 @@ function api_saveClaimDraft(payload) {
       payload.semester || "",
       payload.eventId || "",
       payload.payoutMethod || "FPS",
-      payload.payoutHandle || "",
+      _paymentHandle(payload),
     ]);
   }
 
   // Upsert claim line item(s)
   var cliSheet = getSheet_(TABS.CLAIM_LINE_ITEMS);
-  var cliRows = Engine._findRowsByColumn(
-    cliSheet,
-    COLS.ClaimLineItems.claim_id,
-    claimId
-  );
+  var cliRows =
+    Engine._findRowsByColumn(cliSheet, COLS.ClaimLineItems.claim_id, claimId) ||
+    [];
 
   var receiptIds = payload.receiptIds || [];
   if (payload.receiptId && receiptIds.indexOf(payload.receiptId) === -1) {
@@ -1328,10 +1406,10 @@ function api_atomicSubmitClaim(payload) {
 
   if (!payload.claimantId) {
     errors.push({ field: "claimantId", message: "Claimant is required" });
-  } else if (!_findVaultByUserId(payload.claimantId)) {
+  } else if (!_getActiveClaimant(payload.claimantId)) {
     errors.push({
       field: "claimantId",
-      message: "Claimant SID not found in member directory",
+      message: "Claimant must be an active member with an 8-digit SID",
     });
   }
 
@@ -1359,23 +1437,59 @@ function api_atomicSubmitClaim(payload) {
     });
   }
 
-  var validMethods = ["FPS", "PAYME", "BANK", "CASH", "OTHER"];
-  if (
-    payload.payoutMethod &&
-    validMethods.indexOf(payload.payoutMethod) === -1
-  ) {
+  if (payload.budgetLineId) {
+    var budgetLine = Engine._loadRow("BudgetRequestLine", payload.budgetLineId);
+    if (
+      !budgetLine ||
+      budgetLine.values[COLS.BudgetRequestLines.line_status - 1] !==
+        STATUS.BudgetRequestLine.APPROVED
+    ) {
+      errors.push({
+        field: "budgetLineId",
+        message: "Selected Budget Line is not approved",
+      });
+    }
+  } else {
+    errors.push({
+      field: "budgetLineId",
+      message: "An approved Budget Line is required",
+    });
+  }
+
+  var validMethods = [
+    PAYOUT_METHOD.FPS,
+    PAYOUT_METHOD.PAYME,
+    PAYOUT_METHOD.OTHER,
+  ];
+  if (validMethods.indexOf(payload.payoutMethod) === -1) {
     errors.push({
       field: "payoutMethod",
       message: "Invalid payout method: " + payload.payoutMethod,
     });
   }
+  var fpsPhone = String(payload.fpsPhone || "").trim();
+  var fpsAccount = String(payload.fpsAccount || "").trim();
+  var paymePhone = String(payload.paymePhone || "").trim();
+  var otherDetails = String(payload.otherDetails || "").trim();
+  if (payload.payoutMethod === PAYOUT_METHOD.FPS && !(fpsPhone && fpsAccount)) {
+    errors.push({
+      field: "payment",
+      message: "FPS requires a phone number and destination account",
+    });
+  }
   if (
-    (payload.payoutMethod === "FPS" || payload.payoutMethod === "PAYME") &&
-    !payload.payoutHandle
+    payload.payoutMethod === PAYOUT_METHOD.PAYME &&
+    Boolean(paymePhone) === Boolean(payload.qrFile)
   ) {
     errors.push({
-      field: "payoutHandle",
-      message: "Payout handle is required for " + payload.payoutMethod,
+      field: "payment",
+      message: "PayMe requires exactly one phone number or Payment QR Code",
+    });
+  }
+  if (payload.payoutMethod === PAYOUT_METHOD.OTHER && !otherDetails) {
+    errors.push({
+      field: "otherDetails",
+      message: "OTHER payment method requires payment details",
     });
   }
 
@@ -1508,6 +1622,8 @@ function api_atomicSubmitClaim(payload) {
     var now = Audit._nowIso();
     var lateFlag = _isLate(payload.expenseDate);
     var c = COLS.ExpenseClaims;
+    var claimRowIndex;
+    var claimRowSheet;
 
     if (payload.claimId) {
       var existing = Engine._loadRow("ExpenseClaim", claimId);
@@ -1527,6 +1643,8 @@ function api_atomicSubmitClaim(payload) {
       }
       // Update existing draft
       var sheet = existing.sheet;
+      claimRowIndex = existing.rowIndex;
+      claimRowSheet = sheet;
       sheet
         .getRange(existing.rowIndex, c.claimant_id)
         .setValue(payload.claimantId);
@@ -1547,12 +1665,10 @@ function api_atomicSubmitClaim(payload) {
         .setValue(payload.payoutMethod || "FPS");
       sheet
         .getRange(existing.rowIndex, c.payout_handle)
-        .setValue(payload.payoutHandle || "");
-      sheet
-        .getRange(existing.rowIndex, c.processed_response_id)
-        .setValue(payload.uuid);
+        .setValue(_paymentHandle(payload));
     } else {
-      _appendRow(getSheet_(TABS.EXPENSE_CLAIMS), [
+      claimRowSheet = getSheet_(TABS.EXPENSE_CLAIMS);
+      claimRowIndex = _appendRow(claimRowSheet, [
         claimId,
         payload.claimantId,
         STATUS.ExpenseClaim.DRAFT,
@@ -1573,7 +1689,7 @@ function api_atomicSubmitClaim(payload) {
         payload.semester || "",
         payload.eventId || "",
         payload.payoutMethod || "FPS",
-        payload.payoutHandle || "",
+        _paymentHandle(payload),
       ]);
       createdIds.push({ entityId: claimId, type: "claim" });
     }
@@ -1647,49 +1763,29 @@ function api_atomicSubmitClaim(payload) {
     }
 
     // ── Upload QR file if present (separate record, NOT a purchase receipt) ─
+    var qrDriveFileId = "";
     if (qrFile) {
       var qrBytes = Utilities.base64Decode(qrFile.base64Data);
-      var qrSha256 = _sha256Hex(qrBytes);
       var qrBlob = Utilities.newBlob(qrBytes, qrFile.mimeType, qrFile.fileName);
-      var qrReceiptId = Ids.nextId("Receipt");
-      var qrNewName = qrReceiptId + "_QR_" + qrFile.fileName;
+      var qrNewName = claimId + "_PAYMENT_QR_" + qrFile.fileName;
       qrBlob.setName(qrNewName);
-      var qrDriveFile = receiptFolder.createFile(qrBlob);
-      var qrDriveFileId = qrDriveFile.getId();
+      var qrFolderId = PropertiesService.getScriptProperties().getProperty(
+        "PAYMENT_QR_CODES_FOLDER_ID"
+      );
+      var qrFolder = qrFolderId ? DriveApp.getFolderById(qrFolderId) : null;
+      if (!qrFolder) {
+        throw new Error("Payment QR Code folder is not configured");
+      }
+      var qrDriveFile = qrFolder.createFile(qrBlob);
+      qrDriveFileId = qrDriveFile.getId();
       createdIds.push({
         driveFileId: qrDriveFileId,
-        entityId: qrReceiptId,
+        entityId: claimId,
         type: "drivefile",
       });
-
-      var qrFileLink =
-        '=HYPERLINK("https://drive.google.com/open?id=' +
-        qrDriveFileId +
-        '", "View QR")';
-      _appendRow(getSheet_(TABS.RECEIPTS), [
-        qrReceiptId,
-        qrDriveFileId,
-        qrSha256,
-        operator.userId,
-        now,
-        "QR Code",
-        payload.expenseDate || "",
-        0,
-        qrFileLink,
-      ]);
-      createdIds.push({ entityId: qrReceiptId, type: "receipt" });
-
-      // Add QR as an extra claim line item with note "PayMe QR"
-      var qrCliId = Ids.childId(claimId, receiptIdList.length + 1, "CLAIMLINE");
-      _appendRow(getSheet_(TABS.CLAIM_LINE_ITEMS), [
-        qrCliId,
-        claimId,
-        payload.budgetLineId || "",
-        qrReceiptId,
-        0,
-        "PayMe QR Code",
-        false,
-      ]);
+      claimRowSheet
+        .getRange(claimRowIndex, c.payout_handle)
+        .setValue(_paymentHandle(payload, qrDriveFileId));
     }
 
     // ── Create ClaimLineItems ─────────────────────────────────────────
@@ -1732,6 +1828,11 @@ function api_atomicSubmitClaim(payload) {
     if (!transitionResult.ok) {
       _cleanup();
       return _err("ENGINE_ERROR", transitionResult.reason);
+    }
+    if (payload.claimId) {
+      existing.sheet
+        .getRange(existing.rowIndex, c.processed_response_id)
+        .setValue(payload.uuid);
     }
 
     // ── Success: discard cleanup list, return result ──────────────────
@@ -2852,6 +2953,9 @@ function _buildClaimsReport(filters) {
       notes: values[i][c.notes - 1] || "",
       paid_at: values[i][c.paid_at - 1] || "",
       payout_method: values[i][c.payout_method - 1] || "",
+      self_approval_flag:
+        values[i][c.self_approved - 1] === true ? "SELF_APPROVED" : "",
+      self_approved: values[i][c.self_approved - 1] === true,
       semester: values[i][c.semester - 1] || "",
       status,
       submitted_at: submittedAt,
@@ -3542,6 +3646,110 @@ function api_cancelMigration() {
   return _ok(result);
 }
 
+/** Treasurer-only ledger reconciliation summary. */
+function api_getReconciliation() {
+  var operator;
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
+  if (operator.role !== ROLES.TREASURER) {
+    return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
+  }
+  return _ok(Reconciliation.build());
+}
+
+/** Explicit audited correction for a reconciliation mismatch. */
+function api_correctReconciliation(payload) {
+  var operator;
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
+  if (operator.role !== ROLES.TREASURER) {
+    return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
+  }
+  if (!(payload.reason && String(payload.reason).trim())) {
+    return _err("INVALID_PARAMETER", "Correction reason is required");
+  }
+  var result = Reconciliation.correct(
+    payload.accountId,
+    Number(payload.amount),
+    payload.direction,
+    payload.reason,
+    operator.userId
+  );
+  if (!result.ok) {
+    return _err("ENGINE_ERROR", result.reason);
+  }
+  return _ok({
+    account_id: payload.accountId,
+    adjustment_id: result.adjustmentId,
+  });
+}
+
+/** Treasurer-only list of failed Discord delivery records. */
+function api_getFailedNotifications() {
+  var operator;
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
+  if (operator.role !== ROLES.TREASURER) {
+    return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
+  }
+  return _ok(NotificationDeliveries.listFailed());
+}
+
+/** Retry one failed Discord delivery without touching its finance source. */
+function api_retryNotification(deliveryId) {
+  var operator;
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
+  if (operator.role !== ROLES.TREASURER) {
+    return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
+  }
+  var result = Discord.retry(deliveryId);
+  Audit.append(
+    operator.userId,
+    "NotificationDelivery",
+    deliveryId,
+    "RETRY_REQUESTED",
+    { ok: result.ok, reason: result.reason || null }
+  );
+  if (!result.ok) {
+    return _err("DELIVERY_FAILED", result.reason);
+  }
+  return _ok({ delivery_id: deliveryId, status: "SENT" });
+}
+
+function api_resetAllData() {
+  var ledger = SpreadsheetApp.getActive();
+  var owner = ledger.getOwner();
+  var ownerEmail = owner ? owner.getEmail() : "";
+  var activeEmail = Session.getActiveUser().getEmail();
+  if (
+    !(ownerEmail && activeEmail) ||
+    ownerEmail.toLowerCase() !== activeEmail.toLowerCase()
+  ) {
+    return _denyAccess("owner_required");
+  }
+  try {
+    return _ok(resetAllData());
+  } catch (e) {
+    if (e && e.message === "AUTH_DENIED") {
+      return _denyAccess("owner_required");
+    }
+    return _err("RESET_FAILED", "Reset failed");
+  }
+}
+
 if (typeof module !== "undefined") {
   module.exports = {
     _err,
@@ -3558,6 +3766,7 @@ if (typeof module !== "undefined") {
     api_cancelMigration,
     api_closeSemester,
     api_confirmIncome,
+    api_correctReconciliation,
     api_correctSemester,
     api_deactivateAccount,
     api_decisionBudgetRequest,
@@ -3570,6 +3779,7 @@ if (typeof module !== "undefined") {
     api_getAdjustments,
     api_getClaimsQueue,
     api_getDashboardSummary,
+    api_getFailedNotifications,
     api_getMembers,
     api_getMigrationPreview,
     api_getMigrationSelections,
@@ -3579,6 +3789,7 @@ if (typeof module !== "undefined") {
     api_getPendingBudgetRequests,
     api_getPendingIncome,
     api_getQueuedPayouts,
+    api_getReconciliation,
     api_getReportsData,
     api_getSemesterStatus,
     api_getTransfers,
@@ -3593,16 +3804,18 @@ if (typeof module !== "undefined") {
     api_renameAccount,
     api_requestIncomeInfo,
     api_requestInfo,
+    api_resetAllData,
     api_resolveSession,
     api_resubmitClaim,
+    api_retryNotification,
     api_retryPayout,
     api_saveBudgetRequestDraft,
     api_saveClaimDraft,
-    api_setMigrationSelections,
-    api_setMemberSelections,
     api_setAccountSelections,
-    api_setEventSelections,
     api_setCategorySelections,
+    api_setEventSelections,
+    api_setMemberSelections,
+    api_setMigrationSelections,
     api_setUserSelections,
     api_startMigration,
     api_submitBudgetRequest,

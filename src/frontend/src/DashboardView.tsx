@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { askForConfirmation, showNotice } from "./components/AccessibleDialog";
 import { apiService } from "./services/api";
 import type { DashboardSummary, SessionRole } from "./types";
 
@@ -42,16 +43,16 @@ export default function DashboardView({ role }: { role: SessionRole }) {
 
   const handleCloseSemester = async () => {
     if (
-      !confirm(
+      !(await askForConfirmation(
         `Close semester ${semesterStatus?.current_semester}? This will delete all DRAFT claims and requests, roll forward account balances, and advance to the next semester. This cannot be undone.`
-      )
+      ))
     ) {
       return;
     }
     setClosing(true);
     try {
       const result = await apiService.closeSemester();
-      alert(
+      showNotice(
         `Semester ${result.closed} closed. ${result.next ? "Now active: " + result.next : "Ready for Annual Migration."}`
       );
       window.location.reload();

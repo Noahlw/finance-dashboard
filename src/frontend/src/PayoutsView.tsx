@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { showNotice } from "./components/AccessibleDialog";
 import { apiService } from "./services/api";
 import type { FinanceAccount, PayoutQueueItem, SessionRole } from "./types";
 
@@ -242,7 +243,7 @@ function PayoutCard({
                   await apiService.retryPayout(payout.payout_id);
                   onChanged();
                 } catch (err: any) {
-                  alert(err.message || "Retry failed");
+                  showNotice(err.message || "Retry failed");
                 }
               }}
               style={{ marginTop: "0.5rem" }}
@@ -295,7 +296,7 @@ function MarkSentModal({
 
   const handleSubmit = async () => {
     if (needsTxnRef && !txnReference.trim()) {
-      alert("Transaction reference is required for FPS/PAYME");
+      showNotice("Transaction reference is required for FPS/PAYME");
       return;
     }
     setSaving(true);
@@ -304,14 +305,14 @@ function MarkSentModal({
         amount: isPartial ? Number.parseFloat(amount) : undefined,
         txnReference: txnReference.trim(),
       });
-      alert(
+      showNotice(
         isPartial
           ? "Partial payout recorded. Remainder re-queued."
           : "Payout marked as sent"
       );
       onDone();
     } catch (err: any) {
-      alert(err.message || "Failed to mark sent");
+      showNotice(err.message || "Failed to mark sent");
     } finally {
       setSaving(false);
     }
@@ -400,16 +401,16 @@ function FailModal({
 
   const handleSubmit = async () => {
     if (!reason.trim()) {
-      alert("Failure reason is required");
+      showNotice("Failure reason is required");
       return;
     }
     setSaving(true);
     try {
       await apiService.recordPayoutFailed(payout.payout_id, reason.trim());
-      alert("Payout marked as failed");
+      showNotice("Payout marked as failed");
       onDone();
     } catch (err: any) {
-      alert(err.message || "Failed to record failure");
+      showNotice(err.message || "Failed to record failure");
     } finally {
       setSaving(false);
     }

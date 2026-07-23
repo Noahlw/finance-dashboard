@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { showNotice } from "./components/AccessibleDialog";
 import { apiService } from "./services/api";
 import type {
   ClaimQueueFilters,
@@ -81,7 +82,7 @@ export default function ReviewDashboard({
           break;
         case "reject":
           if (!decisionNote.trim()) {
-            alert("Rejection reason is required");
+            showNotice("Rejection reason is required");
             setActionLoading(false);
             return;
           }
@@ -89,7 +90,7 @@ export default function ReviewDashboard({
           break;
         case "request-info":
           if (!decisionNote.trim()) {
-            alert("Request note is required");
+            showNotice("Request note is required");
             setActionLoading(false);
             return;
           }
@@ -103,7 +104,7 @@ export default function ReviewDashboard({
       setDecisionNote("");
       loadQueue();
     } catch (err: any) {
-      alert(err.message || "Action failed");
+      showNotice(err.message || "Action failed");
     } finally {
       setActionLoading(false);
     }

@@ -23,8 +23,6 @@ function setupAll() {
     ledger.getId()
   );
 
-  Setup_clearAllData(ledger); // WARNING: Wipes all data (except Config) on every run
-
   var createdTabs = Setup_ensureAllTabsExist(ledger);
   Setup_installArrayFormulas(ledger);
   Setup_applyValidationsAndProtections(ledger);
@@ -115,6 +113,8 @@ function Setup_ensureAllTabsExist(ledger) {
     TABS.RECEIPTS,
     TABS.INCOME,
     TABS.PAYOUTS,
+    TABS.MOVEMENT_LEDGER,
+    TABS.NOTIFICATION_DELIVERIES,
     TABS.AUDIT_LOG,
     TABS.APPROVALS,
     TABS.CONFIG,
@@ -124,19 +124,6 @@ function Setup_ensureAllTabsExist(ledger) {
     TABS.ACCOUNT_ADJUSTMENTS,
   ];
   var created = [];
-
-  var allSheets = ledger.getSheets();
-  for (var j = 0; j < allSheets.length; j++) {
-    var sheetName = allSheets[j].getName();
-    if (
-      ledgerTabNames.indexOf(sheetName) === -1 &&
-      ledger.getSheets().length > 1
-    ) {
-      try {
-        ledger.deleteSheet(allSheets[j]);
-      } catch (e) {}
-    }
-  }
 
   for (var i = 0; i < ledgerTabNames.length; i++) {
     var name = ledgerTabNames[i];
@@ -535,6 +522,9 @@ function Setup_ensureDriveFolders() {
     props.setProperty(propKey, folder.getId());
     ids[names[i]] = folder.getId();
   }
+  var qrFolder = Setup_getOrCreateFolder(root, "Payment QR Codes");
+  props.setProperty("PAYMENT_QR_CODES_FOLDER_ID", qrFolder.getId());
+  ids.Payment_QR_Codes = qrFolder.getId();
   return ids;
 }
 
@@ -911,4 +901,29 @@ function Setup_clearAllData(ledger) {
       }
     } catch (e) {}
   }
+}
+
+/**
+ * Destructively clear annual finance data. This is intentionally separate
+ * from setupAll() and may only be run by the spreadsheet owner.
+ * @return {{reset: boolean}}
+ */
+function resetAllData() {
+  var ledger = SpreadsheetApp.getActive();
+  var owner = ledger.getOwner();
+  var ownerEmail = owner ? owner.getEmail() : "";
+  var activeEmail = Session.getActiveUser().getEmail();
+  if (
+    !(ownerEmail && activeEmail) ||
+    ownerEmail.toLowerCase() !== activeEmail.toLowerCase()
+  ) {
+    throw new Error("AUTH_DENIED");
+  }
+  Setup_clearAllData(ledger);
+  Audit.append("SYSTEM", "Setup", ledger.getId(), "RESET_ALL_DATA", {});
+  return { reset: true };
+}
+
+if (typeof module !== "undefined") {
+  module.exports = { resetAllData, setupAll };
 }

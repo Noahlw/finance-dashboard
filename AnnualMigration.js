@@ -36,8 +36,51 @@ var MIGRATION_STAGES = [
  * PREVIEW is the entry gate and VALIDATE/ACTIVATE are gates, not selectors.
  */
 var SELECTION_STAGES = ["MEMBERS", "ACCOUNTS", "EVENTS", "CATEGORIES", "USERS"];
+var MIGRATION_CONFIG_KEYS = [
+  "MIGRATION_STAGE",
+  "MIGRATION_YEAR_LABEL",
+  "MIGRATION_COMMITTEE_YEAR",
+  "MIGRATION_TARGET_SPREADSHEET_ID",
+  "MIGRATION_TARGET_FOLDER_ID",
+  "MIGRATION_SOURCE_SPREADSHEET_ID",
+  "MIGRATION_ACTOR_USER_ID",
+  "MIGRATION_SELECTIONS",
+];
+var ANNUAL_SEMESTERS = ["SEM A", "SEM B", "SUMMER"];
 
 var Migration = {
+  /**
+   * Advance the migration stage automatically when an earlier selection
+   * step has been completed. Forward-only: a Treasurer editing an earlier
+   * selection never silently regresses later stages (the wizard keeps the
+   * saved state and the user re-confirms via VALIDATE).
+   * @private
+   */
+  _advanceStageIfNeeded(targetStage) {
+    var current = Config.getOptional("MIGRATION_STAGE") || "";
+    var currentIdx = MIGRATION_STAGES.indexOf(current);
+    var targetIdx = MIGRATION_STAGES.indexOf(targetStage);
+    if (currentIdx >= 0 && targetIdx > currentIdx) {
+      Migration._setConfig("MIGRATION_STAGE", targetStage);
+    }
+  },
+
+  /**
+   * Move the migration stage backward (Back button on a selection step).
+   * Clears any selections made beyond the target stage so backtracking
+   * invalidates downstream derived data (per spec rule #2).
+   * @private
+   */
+  _backtrackStage(targetStage) {
+    var current = Config.getOptional("MIGRATION_STAGE") || "";
+    var currentIdx = MIGRATION_STAGES.indexOf(current);
+    var targetIdx = MIGRATION_STAGES.indexOf(targetStage);
+    if (currentIdx < 0 || targetIdx < 0 || targetIdx >= currentIdx) {
+      return { ok: false, reason: "Backtrack only moves to earlier stages" };
+    }
+    Migration._setConfig("MIGRATION_STAGE", targetStage);
+    return { ok: true };
+  },
   /**
    * Clear a Config key on the current spreadsheet's Config tab.
    * @private
@@ -68,11 +111,244 @@ var Migration = {
   },
 
   /**
+   * Read the current MIGRATION_SELECTIONS JSON, or return empty defaults.
+   * @private
+   */
+  _getSelections_() {
+    var json = Config.getOptional("MIGRATION_SELECTIONS") || "{}";
+    try {
+      var parsed = JSON.parse(json);
+      return {
+        account_balances: parsed.account_balances || {},
+        account_ids: parsed.account_ids || [],
+        balance_reasons: parsed.balance_reasons || {},
+        category_ids: parsed.category_ids || [],
+        confirmed_account_ids: parsed.confirmed_account_ids || [],
+        event_ids: parsed.event_ids || [],
+        member_ids: parsed.member_ids || [],
+        user_ids: parsed.user_ids || [],
+      };
+    } catch (e) {
+      return {
+        account_balances: {},
+        account_ids: [],
+        balance_reasons: {},
+        category_ids: [],
+        confirmed_account_ids: [],
+        event_ids: [],
+        member_ids: [],
+        user_ids: [],
+      };
+    }
+  },
+
+  /**
+   * Check that the activated target can serve the minimum annual schema.
+   * Kept separate so tests can simulate a post-switch runtime failure.
+   * @private
+   */
+  _healthCheckTarget(targetSpreadsheetId) {
+    var requiredTabs = [TABS.CONFIG, TABS.USERS, TABS.AUDIT_LOG];
+    try {
+      var ss = SpreadsheetApp.openById(targetSpreadsheetId);
+      var missing = requiredTabs.filter(
+        (tabName) => !ss.getSheetByName(tabName)
+      );
+      return missing.length
+        ? { ok: false, reason: "Missing required tabs: " + missing.join(", ") }
+        : { ok: true };
+    } catch (e) {
+      return { ok: false, reason: e.message };
+    }
+  },
+
+  /**
    * Set a Config key on the current spreadsheet's Config tab.
    * @private
    */
   _setConfig(key, value) {
     Setup_setConfigValue_(key, value);
+  },
+
+  /**
+   * Persist migration metadata in the newly active annual spreadsheet so
+   * activation remains observable and idempotent after the pointer switch.
+   * @private
+   */
+  _setTargetConfig(targetSpreadsheetId, key, value) {
+    var sheet = SpreadsheetApp.openById(targetSpreadsheetId).getSheetByName(
+      TABS.CONFIG
+    );
+    var rows = sheet.getDataRange().getValues();
+    for (var i = 1; i < rows.length; i++) {
+      if (rows[i][0] === key) {
+        sheet.getRange(i + 1, 2).setValue(String(value));
+        return;
+      }
+    }
+    sheet.appendRow([key, String(value)]);
+  },
+
+  /**
+   * Internal validator — shared by validateMigration and the activate
+   * gate. Never advances stage.
+   * @private
+   */
+  _validateAll() {
+    var errors = [];
+    var warnings = [];
+
+    var preview = Migration.getPreview();
+    var selections = Migration._getSelections_();
+    var targetId = Config.getOptional("MIGRATION_TARGET_SPREADSHEET_ID") || "";
+    var folderId = Config.getOptional("MIGRATION_TARGET_FOLDER_ID") || "";
+
+    // 1. Target spreadsheet + folder must exist and be accessible.
+    if (targetId) {
+      try {
+        SpreadsheetApp.openById(targetId);
+      } catch (e) {
+        errors.push("Target spreadsheet is not accessible: " + e.message);
+      }
+    } else {
+      errors.push("Missing migration target spreadsheet ID");
+    }
+    if (folderId) {
+      try {
+        DriveApp.getFolderById(folderId);
+      } catch (e) {
+        errors.push("Target folder is not accessible: " + e.message);
+      }
+    } else {
+      errors.push("Missing migration target folder ID");
+    }
+
+    // 2. Member selection: every active member_id must resolve. Inactive
+    //    member_ids are kept as historical references — allowed but flagged.
+    var activeMemberIds = preview.active_members.map((m) => m.user_id);
+    var inactiveMemberIds = preview.inactive_members.map((m) => m.user_id);
+    var memberIds = selections.member_ids || [];
+    var memberOk = [];
+    memberIds.forEach((mid) => {
+      if (activeMemberIds.indexOf(mid) >= 0) {
+        memberOk.push(mid);
+      } else if (inactiveMemberIds.indexOf(mid) >= 0) {
+        warnings.push(
+          "Inactive member " + mid + " carried as historical reference only"
+        );
+        memberOk.push(mid);
+      } else {
+        errors.push("Selected member not found in source: " + mid);
+      }
+    });
+
+    // 3. Account selection: every opening balance must be explicitly
+    //    Treasurer-confirmed and carry an audit reason.
+    var accountIds = selections.account_ids || [];
+    var balances = selections.account_balances || {};
+    var reasons = selections.balance_reasons || {};
+    var confirmedAccountIds = selections.confirmed_account_ids || [];
+    var knownAccounts = preview.accounts.map((a) => a.account_id);
+    accountIds.forEach((aid) => {
+      if (knownAccounts.indexOf(aid) < 0) {
+        errors.push("Selected account not found in source: " + aid);
+        return;
+      }
+      var previewAcct = preview.accounts.filter((a) => a.account_id === aid)[0];
+      var newBal = Number(balances[aid]);
+      if (!Number.isFinite(newBal)) {
+        errors.push("Account " + aid + " has an invalid opening balance");
+      }
+      var reason = (reasons[aid] || "").toString().trim();
+      if (!reason) {
+        errors.push("Account " + aid + " opening balance requires a reason");
+      }
+      if (confirmedAccountIds.indexOf(aid) < 0) {
+        errors.push(
+          "Account " + aid + " opening balance requires Treasurer confirmation"
+        );
+      }
+    });
+
+    // 4. Categories + events: every id must resolve.
+    var knownCats = preview.categories.map((c) => c.category_id);
+    (selections.category_ids || []).forEach((cid) => {
+      if (knownCats.indexOf(cid) < 0) {
+        errors.push("Selected category not found in source: " + cid);
+      }
+    });
+    var knownEvents = preview.events.map((e) => e.event_id);
+    (selections.event_ids || []).forEach((eid) => {
+      if (knownEvents.indexOf(eid) < 0) {
+        errors.push("Selected event not found in source: " + eid);
+      }
+    });
+
+    // 5. USERS: at least one active Treasurer; all selected users are
+    //    active allowlisted operators in the source.
+    var userIds = selections.user_ids || [];
+    if (userIds.length === 0) {
+      errors.push("No operators selected for the new annual file");
+    } else {
+      var hasActiveTreasurer = false;
+      userIds.forEach((uid) => {
+        var op = preview.operators.filter((o) => o.user_id === uid)[0];
+        if (!op) {
+          errors.push(
+            "Selected user " +
+              uid +
+              " is not an allowlisted operator in the source"
+          );
+          return;
+        }
+        if (!op.active) {
+          errors.push("Selected user " + uid + " is not active");
+          return;
+        }
+        if (op.role === ROLES.TREASURER) {
+          hasActiveTreasurer = true;
+        }
+      });
+      if (!hasActiveTreasurer) {
+        errors.push("At least one active Treasurer must be carried forward");
+      }
+      // Recommendation: surface citycf41 when present but not selected.
+      var citycf = preview.operators.filter(
+        (o) => (o.email || "").toLowerCase() === "citycf41@gmail.com"
+      )[0];
+      if (citycf && citycf.active && userIds.indexOf(citycf.user_id) < 0) {
+        warnings.push(
+          "citycf41@gmail.com is an active Treasurer in the source but not selected"
+        );
+      }
+    }
+
+    // 6. Cover SEM A, SEM B, SUMMER. The Config tab on the target is
+    //    seeded in executeMigration — flag if the operator plans to seed
+    //    only SEM A. We can only check after executeMigration has run.
+    try {
+      if (targetId) {
+        var ss = SpreadsheetApp.openById(targetId);
+        var cfg = ss.getSheetByName(TABS.CONFIG);
+        if (cfg && cfg.getDataRange().getValues().length > 1) {
+          var rows = cfg.getDataRange().getValues();
+          var seededSemesters = rows
+            .filter((r) => r[0] === "CURRENT_SEMESTER")
+            .map((r) => r[1]);
+          if (seededSemesters.length === 0 || seededSemesters[0] !== "SEM A") {
+            warnings.push(
+              "Target spreadsheet is missing the standard CURRENT_SEMESTER=SEM A seed"
+            );
+          }
+        }
+      }
+    } catch (e) {}
+
+    return {
+      errors,
+      ok: errors.length === 0,
+      warnings,
+    };
   },
 
   /**
@@ -110,8 +386,13 @@ var Migration = {
       };
     }
 
+    var scriptProperties = PropertiesService.getScriptProperties();
     var oldSpreadsheetId =
-      PropertiesService.getScriptProperties().getProperty("LEDGER_ID") || "";
+      Config.getOptional("MIGRATION_SOURCE_SPREADSHEET_ID") ||
+      scriptProperties.getProperty("LEDGER_ID") ||
+      "";
+    var sourceSelections = Migration._getSelections_();
+    var yearLabel = Config.getOptional("MIGRATION_YEAR_LABEL") || "";
 
     // Run validation gate one more time — refuse to activate if anything
     // has drifted since the Treasurer clicked VALIDATE.
@@ -123,25 +404,97 @@ var Migration = {
       };
     }
 
-    // Switch the active ledger.
-    PropertiesService.getScriptProperties().setProperty(
-      "LEDGER_ID",
-      targetSpreadsheetId
-    );
-
-    // Mark old spreadsheet as read-only archive.
+    // Snapshot the source before changing the active pointer. The snapshot and
+    // both annual files are retained even if the post-switch health check fails.
+    var targetFolderId = Config.getOptional("MIGRATION_TARGET_FOLDER_ID") || "";
+    var oldFile = null;
     if (oldSpreadsheetId && oldSpreadsheetId !== targetSpreadsheetId) {
       try {
-        var oldFile = DriveApp.getFileById(oldSpreadsheetId);
-        oldFile.setName(oldFile.getName() + " (ARCHIVED)");
+        oldFile = DriveApp.getFileById(oldSpreadsheetId);
+        if (targetFolderId && typeof oldFile.makeCopy === "function") {
+          oldFile.makeCopy(
+            oldFile.getName() + " (pre-migration snapshot)",
+            DriveApp.getFolderById(targetFolderId)
+          );
+        }
+      } catch (e) {
+        return { ok: false, reason: "Source snapshot failed: " + e.message };
+      }
+    }
+
+    // Persist completion on the source before switching; on failure this is
+    // restored to VALIDATE so the Treasurer can correct and retry.
+    Migration._setConfig("MIGRATION_STAGE", "ACTIVATE");
+    Config.invalidate();
+
+    scriptProperties.setProperty("LEDGER_ID", targetSpreadsheetId);
+    var health = Migration._healthCheckTarget(targetSpreadsheetId);
+    if (!health.ok) {
+      scriptProperties.setProperty("LEDGER_ID", oldSpreadsheetId);
+      Migration._setConfig("MIGRATION_STAGE", "VALIDATE");
+      Config.invalidate();
+      Audit.append(actorUserId, "Migration", targetSpreadsheetId, "ROLLBACK", {
+        reason: health.reason,
+        restored_spreadsheet_id: oldSpreadsheetId,
+      });
+      return {
+        ok: false,
+        reason:
+          "Target health check failed; previous ledger restored: " +
+          health.reason,
+        rolled_back: true,
+      };
+    }
+
+    [
+      ["MIGRATION_STAGE", "ACTIVATE"],
+      ["MIGRATION_YEAR_LABEL", yearLabel],
+      ["MIGRATION_TARGET_SPREADSHEET_ID", targetSpreadsheetId],
+      ["MIGRATION_TARGET_FOLDER_ID", targetFolderId],
+      ["MIGRATION_SOURCE_SPREADSHEET_ID", oldSpreadsheetId],
+      ["MIGRATION_ACTOR_USER_ID", actorUserId],
+      ["MIGRATION_SELECTIONS", JSON.stringify(sourceSelections)],
+    ].forEach((entry) => {
+      Migration._setTargetConfig(targetSpreadsheetId, entry[0], entry[1]);
+    });
+    Config.invalidate();
+
+    // Share the target with selected active operators.
+    try {
+      var targetFile = DriveApp.getFileById(targetSpreadsheetId);
+      var selectedIds = sourceSelections.user_ids;
+      var operators = Migration.getPreview().operators;
+      operators.forEach((operator) => {
+        if (
+          operator.active &&
+          operator.email &&
+          selectedIds.indexOf(operator.user_id) >= 0
+        ) {
+          targetFile.addEditor(operator.email);
+        }
+      });
+    } catch (e) {}
+
+    // Keep the prior annual file viewable while removing edit access where
+    // Drive permissions permit it.
+    if (oldFile) {
+      try {
+        if (oldFile.getName().indexOf(" (ARCHIVED)") < 0) {
+          oldFile.setName(oldFile.getName() + " (ARCHIVED)");
+        }
+        if (
+          typeof oldFile.getEditors === "function" &&
+          typeof oldFile.removeEditor === "function"
+        ) {
+          oldFile.getEditors().forEach((editor) => {
+            oldFile.addViewer(editor.getEmail());
+            oldFile.removeEditor(editor);
+          });
+        }
         oldFile.setViewersCanCopyContent(false);
       } catch (e) {}
     }
 
-    Migration._setConfig("MIGRATION_STAGE", "ACTIVATE");
-    Config.invalidate();
-
-    var yearLabel = Config.getOptional("MIGRATION_YEAR_LABEL") || "";
     Audit.append(actorUserId, "Migration", yearLabel, "ACTIVATE", {
       new_spreadsheet_id: targetSpreadsheetId,
       old_spreadsheet_id: oldSpreadsheetId,
@@ -190,15 +543,7 @@ var Migration = {
     }
 
     // Clear migration Config
-    var keysToClear = [
-      "MIGRATION_STAGE",
-      "MIGRATION_YEAR_LABEL",
-      "MIGRATION_COMMITTEE_YEAR",
-      "MIGRATION_TARGET_SPREADSHEET_ID",
-      "MIGRATION_TARGET_FOLDER_ID",
-      "MIGRATION_SELECTIONS",
-    ];
-    keysToClear.forEach((k) => {
+    MIGRATION_CONFIG_KEYS.forEach((k) => {
       Migration._clearConfig(k);
     });
 
@@ -243,7 +588,7 @@ var Migration = {
       };
     }
 
-    var selections = Migration.getSelections();
+    var selections = Migration._getSelections_();
     var preview = Migration.getPreview();
 
     try {
@@ -424,6 +769,32 @@ var Migration = {
           "adjusted_by",
           "adjusted_at",
         ]);
+        Migration._createTab(ss, TABS.MOVEMENT_LEDGER, [
+          "movement_id",
+          "idempotency_key",
+          "account_id",
+          "amount",
+          "movement_type",
+          "source_type",
+          "source_id",
+          "counterparty_account_id",
+          "posted_by",
+          "posted_at",
+          "reason",
+        ]);
+        Migration._createTab(ss, TABS.NOTIFICATION_DELIVERIES, [
+          "delivery_id",
+          "channel",
+          "entity_type",
+          "entity_id",
+          "message",
+          "status",
+          "attempts",
+          "last_error",
+          "created_at",
+          "sent_at",
+          "updated_at",
+        ]);
         Migration._createTab(ss, TABS.AUDIT_LOG, [
           "seq",
           "ts",
@@ -455,6 +826,10 @@ var Migration = {
         // Seed Config
         var configSheet = ss.getSheetByName(TABS.CONFIG);
         configSheet.appendRow(["CURRENT_SEMESTER", "SEM A"]);
+        configSheet.appendRow([
+          "ANNUAL_SEMESTERS",
+          JSON.stringify(ANNUAL_SEMESTERS),
+        ]);
         configSheet.appendRow([
           "COMMITTEE_YEAR",
           String(preview.next_committee_year || 27),
@@ -526,8 +901,10 @@ var Migration = {
       var balances = selections.account_balances || {};
       preview.accounts.forEach((acct) => {
         if (accountIds.indexOf(acct.account_id) >= 0) {
-          var openingBalance =
-            Number(balances[acct.account_id]) || acct.current_balance;
+          var configuredBalance = Number(balances[acct.account_id]);
+          var openingBalance = Number.isFinite(configuredBalance)
+            ? configuredBalance
+            : acct.current_balance;
           accountsSheet.appendRow([
             acct.account_id,
             acct.name,
@@ -588,6 +965,7 @@ var Migration = {
 
       Audit.append(actorUserId, "Migration", preview.year_label, "EXECUTED", {
         accounts: accountIds.length,
+        balance_reasons: balanceReasons,
         categories: catIds.length,
         events: eventCount,
         members: Object.keys(memberMap).length,
@@ -595,8 +973,8 @@ var Migration = {
 
       return {
         ok: true,
-        stage: "VALIDATE",
         seeded: !seeded,
+        stage: "VALIDATE",
         target_spreadsheet_id: targetSpreadsheetId,
       };
     } catch (e) {
@@ -718,14 +1096,19 @@ var Migration = {
    * Get the stored selections for review.
    */
   getSelections() {
-    var json = Config.getOptional("MIGRATION_SELECTIONS") || "{}";
-    try {
-      return JSON.parse(json);
-    } catch (e) {
-      return {};
-    }
+    var stored = Migration._getSelections_();
+    return {
+      accountBalances: stored.account_balances,
+      accountIds: stored.account_ids,
+      balanceReasons: stored.balance_reasons,
+      categoryIds: stored.category_ids,
+      confirmedAccountIds: stored.confirmed_account_ids,
+      eventIds: stored.event_ids,
+      memberIds: stored.member_ids,
+      userIds: stored.user_ids,
+    };
   },
-/**
+  /**
    * Get the current migration state.
    * Returns null if no migration in progress.
    */
@@ -740,15 +1123,181 @@ var Migration = {
     var targetFolderId = Config.getOptional("MIGRATION_TARGET_FOLDER_ID") || "";
     var yearLabel = Config.getOptional("MIGRATION_YEAR_LABEL") || "";
     var committeeYear = Config.getOptional("MIGRATION_COMMITTEE_YEAR") || "";
+    var actorUserId = Config.getOptional("MIGRATION_ACTOR_USER_ID") || "";
+    var sourceSpreadsheetId =
+      Config.getOptional("MIGRATION_SOURCE_SPREADSHEET_ID") || "";
 
     return {
       active: stage !== "ACTIVATE",
+      actor_user_id: actorUserId,
       committee_year: committeeYear,
+      source_spreadsheet_id: sourceSpreadsheetId,
       stage,
       target_folder_id: targetFolderId,
       target_spreadsheet_id: targetSpreadsheetId,
       year_label: yearLabel,
     };
+  },
+
+  /**
+   * Save account selections + opening balances + balance reasons.
+   * Stage: any selection stage.
+   *
+   * Spec rule #4: every changed or new balance must carry a non-empty
+   * reason. _validateAll rejects entries with a balance override but
+   * missing or blank reason.
+   */
+  setAccountSelections(actorUserId, payload) {
+    var stage = Config.getOptional("MIGRATION_STAGE") || "";
+    if (SELECTION_STAGES.indexOf(stage) < 0) {
+      return {
+        ok: false,
+        reason:
+          "Cannot set accounts from current stage: " +
+          (stage || "(none)") +
+          ". Start a migration first.",
+      };
+    }
+
+    payload = payload || {};
+    var selections = Migration._getSelections_();
+    selections.account_ids = Array.isArray(payload.accountIds)
+      ? payload.accountIds
+      : [];
+    selections.account_balances = payload.accountBalances || {};
+    selections.balance_reasons = payload.balanceReasons || {};
+    selections.confirmed_account_ids = Array.isArray(
+      payload.confirmedAccountIds
+    )
+      ? payload.confirmedAccountIds
+      : [];
+    Migration._setConfig("MIGRATION_SELECTIONS", JSON.stringify(selections));
+
+    Migration._advanceStageIfNeeded("ACCOUNTS");
+
+    Audit.append(
+      actorUserId,
+      "Migration",
+      Config.getOptional("MIGRATION_YEAR_LABEL") || "",
+      "ACCOUNTS_SET",
+      {
+        accounts: selections.account_ids.length,
+        balances: Object.keys(selections.account_balances).length,
+      }
+    );
+
+    return { ok: true, stage: "ACCOUNTS" };
+  },
+
+  /**
+   * Save category selections. CATEGORIES are fresh annual records only;
+   * no finance history is copied. Stage cap is reset to 0 so the new
+   * committee must re-establish budget caps.
+   * Stage: any selection stage.
+   */
+  setCategorySelections(actorUserId, categoryIds) {
+    var stage = Config.getOptional("MIGRATION_STAGE") || "";
+    if (SELECTION_STAGES.indexOf(stage) < 0) {
+      return {
+        ok: false,
+        reason:
+          "Cannot set categories from current stage: " +
+          (stage || "(none)") +
+          ". Start a migration first.",
+      };
+    }
+
+    var ids = Array.isArray(categoryIds) ? categoryIds : [];
+    var selections = Migration._getSelections_();
+    selections.category_ids = ids;
+    Migration._setConfig("MIGRATION_SELECTIONS", JSON.stringify(selections));
+
+    Migration._advanceStageIfNeeded("CATEGORIES");
+
+    Audit.append(
+      actorUserId,
+      "Migration",
+      Config.getOptional("MIGRATION_YEAR_LABEL") || "",
+      "CATEGORIES_SET",
+      { categories: ids.length }
+    );
+
+    return { ok: true, stage: "CATEGORIES" };
+  },
+
+  /**
+   * Save event selections. EVENTS are fresh annual records only — no
+   * Claims, Budget Requests, Payouts, or other finance history is copied.
+   * Event identity (event_id, name) is preserved so future Claims can link.
+   * Stage: any selection stage.
+   */
+  setEventSelections(actorUserId, eventIds) {
+    var stage = Config.getOptional("MIGRATION_STAGE") || "";
+    if (SELECTION_STAGES.indexOf(stage) < 0) {
+      return {
+        ok: false,
+        reason:
+          "Cannot set events from current stage: " +
+          (stage || "(none)") +
+          ". Start a migration first.",
+      };
+    }
+
+    var ids = Array.isArray(eventIds) ? eventIds : [];
+    var selections = Migration._getSelections_();
+    selections.event_ids = ids;
+    Migration._setConfig("MIGRATION_SELECTIONS", JSON.stringify(selections));
+
+    Migration._advanceStageIfNeeded("EVENTS");
+
+    Audit.append(
+      actorUserId,
+      "Migration",
+      Config.getOptional("MIGRATION_YEAR_LABEL") || "",
+      "EVENTS_SET",
+      { events: ids.length }
+    );
+
+    return { ok: true, stage: "EVENTS" };
+  },
+
+  /**
+   * Save member selections to MIGRATION_SELECTIONS.
+   * Stage: MEMBERS (and later selection stages as a no-op update).
+   *
+   * Spec rule #3: preselects active members; inactive members are
+   * preserved as historical references only. The validation in
+   * _validateAll rejects any inactive member_id that would otherwise
+   * receive a new Claim.
+   */
+  setMemberSelections(actorUserId, memberIds) {
+    var stage = Config.getOptional("MIGRATION_STAGE") || "";
+    if (SELECTION_STAGES.indexOf(stage) < 0) {
+      return {
+        ok: false,
+        reason:
+          "Cannot set members from current stage: " +
+          (stage || "(none)") +
+          ". Start a migration first.",
+      };
+    }
+
+    var ids = Array.isArray(memberIds) ? memberIds : [];
+    var selections = Migration._getSelections_();
+    selections.member_ids = ids;
+    Migration._setConfig("MIGRATION_SELECTIONS", JSON.stringify(selections));
+
+    Migration._advanceStageIfNeeded("MEMBERS");
+
+    Audit.append(
+      actorUserId,
+      "Migration",
+      Config.getOptional("MIGRATION_YEAR_LABEL") || "",
+      "MEMBERS_SET",
+      { members: ids.length }
+    );
+
+    return { ok: true, stage: "MEMBERS" };
   },
 
   /**
@@ -779,6 +1328,7 @@ var Migration = {
       account_ids: selections.accountIds || [],
       balance_reasons: selections.balanceReasons || {},
       category_ids: selections.categoryIds || [],
+      confirmed_account_ids: selections.confirmedAccountIds || [],
       event_ids: selections.eventIds || [],
       member_ids: selections.memberIds || [],
       user_ids: selections.userIds || [],
@@ -799,6 +1349,48 @@ var Migration = {
         members: (selections.memberIds || []).length,
         users: (selections.userIds || []).length,
       }
+    );
+
+    return { ok: true, stage: "USERS" };
+  },
+
+  /**
+   * Save allowlisted operator selections for the new annual file.
+   *
+   * Spec rule #6: preserve active allowlisted operator email, role, and
+   * active status. Requires at least one active Treasurer (validated in
+   * _validateAll). citycf41@gmail.com is recommended when present, but
+   * allowlist checks are never bypassed.
+   *
+   * MEMBER rows are excluded here — they were carried via
+   * setMemberSelections. Roles are not auto-promoted.
+   * Stage: any selection stage.
+   */
+  setUserSelections(actorUserId, userIds) {
+    var stage = Config.getOptional("MIGRATION_STAGE") || "";
+    if (SELECTION_STAGES.indexOf(stage) < 0) {
+      return {
+        ok: false,
+        reason:
+          "Cannot set users from current stage: " +
+          (stage || "(none)") +
+          ". Start a migration first.",
+      };
+    }
+
+    var ids = Array.isArray(userIds) ? userIds : [];
+    var selections = Migration._getSelections_();
+    selections.user_ids = ids;
+    Migration._setConfig("MIGRATION_SELECTIONS", JSON.stringify(selections));
+
+    Migration._advanceStageIfNeeded("USERS");
+
+    Audit.append(
+      actorUserId,
+      "Migration",
+      Config.getOptional("MIGRATION_YEAR_LABEL") || "",
+      "USERS_SET",
+      { users: ids.length }
     );
 
     return { ok: true, stage: "USERS" };
@@ -869,10 +1461,10 @@ var Migration = {
       };
     }
 
-    // Sub-folders for Receipts / QR Codes / Exports (used by the live app).
-    yearFolder.createFolder("Receipts");
-    yearFolder.createFolder("Payment QR Codes");
-    yearFolder.createFolder("Exports");
+    // Canonical annual storage folders used by the live app.
+    yearFolder.createFolder("Receipt");
+    yearFolder.createFolder("Payment QR Code");
+    yearFolder.createFolder("Export");
 
     // Staging spreadsheet — schema is seeded in executeMigration.
     var newSpreadsheet = SpreadsheetApp.create(
@@ -893,6 +1485,11 @@ var Migration = {
     );
     Migration._setConfig("MIGRATION_TARGET_SPREADSHEET_ID", spreadsheetId);
     Migration._setConfig("MIGRATION_TARGET_FOLDER_ID", yearFolder.getId());
+    Migration._setConfig(
+      "MIGRATION_SOURCE_SPREADSHEET_ID",
+      PropertiesService.getScriptProperties().getProperty("LEDGER_ID") || ""
+    );
+    Migration._setConfig("MIGRATION_ACTOR_USER_ID", actorUserId);
 
     Audit.append(actorUserId, "Migration", preview.year_label, "STARTED", {
       folder_id: yearFolder.getId(),
@@ -907,267 +1504,6 @@ var Migration = {
       stage: "MEMBERS",
       year_label: preview.year_label,
     };
-  },
-
-  /**
-   * Advance the migration stage automatically when an earlier selection
-   * step has been completed. Forward-only: a Treasurer editing an earlier
-   * selection never silently regresses later stages (the wizard keeps the
-   * saved state and the user re-confirms via VALIDATE).
-   * @private
-   */
-  _advanceStageIfNeeded(targetStage) {
-    var current = Config.getOptional("MIGRATION_STAGE") || "";
-    var currentIdx = MIGRATION_STAGES.indexOf(current);
-    var targetIdx = MIGRATION_STAGES.indexOf(targetStage);
-    if (currentIdx >= 0 && targetIdx > currentIdx) {
-      Migration._setConfig("MIGRATION_STAGE", targetStage);
-    }
-  },
-
-  /**
-   * Move the migration stage backward (Back button on a selection step).
-   * Clears any selections made beyond the target stage so backtracking
-   * invalidates downstream derived data (per spec rule #2).
-   * @private
-   */
-  _backtrackStage(targetStage) {
-    var current = Config.getOptional("MIGRATION_STAGE") || "";
-    var currentIdx = MIGRATION_STAGES.indexOf(current);
-    var targetIdx = MIGRATION_STAGES.indexOf(targetStage);
-    if (currentIdx < 0 || targetIdx < 0 || targetIdx >= currentIdx) {
-      return { ok: false, reason: "Backtrack only moves to earlier stages" };
-    }
-    Migration._setConfig("MIGRATION_STAGE", targetStage);
-    return { ok: true };
-  },
-
-  /**
-   * Read the current MIGRATION_SELECTIONS JSON, or return empty defaults.
-   * @private
-   */
-  _getSelections_() {
-    var json = Config.getOptional("MIGRATION_SELECTIONS") || "{}";
-    try {
-      var parsed = JSON.parse(json);
-      return {
-        account_balances: parsed.account_balances || {},
-        account_ids: parsed.account_ids || [],
-        balance_reasons: parsed.balance_reasons || {},
-        category_ids: parsed.category_ids || [],
-        event_ids: parsed.event_ids || [],
-        member_ids: parsed.member_ids || [],
-        user_ids: parsed.user_ids || [],
-      };
-    } catch (e) {
-      return {
-        account_balances: {},
-        account_ids: [],
-        balance_reasons: {},
-        category_ids: [],
-        event_ids: [],
-        member_ids: [],
-        user_ids: [],
-      };
-    }
-  },
-
-  /**
-   * Save member selections to MIGRATION_SELECTIONS.
-   * Stage: MEMBERS (and later selection stages as a no-op update).
-   *
-   * Spec rule #3: preselects active members; inactive members are
-   * preserved as historical references only. The validation in
-   * _validateAll rejects any inactive member_id that would otherwise
-   * receive a new Claim.
-   */
-  setMemberSelections(actorUserId, memberIds) {
-    var stage = Config.getOptional("MIGRATION_STAGE") || "";
-    if (SELECTION_STAGES.indexOf(stage) < 0) {
-      return {
-        ok: false,
-        reason:
-          "Cannot set members from current stage: " +
-          (stage || "(none)") +
-          ". Start a migration first.",
-      };
-    }
-
-    var ids = Array.isArray(memberIds) ? memberIds : [];
-    var selections = Migration._getSelections_();
-    selections.member_ids = ids;
-    Migration._setConfig("MIGRATION_SELECTIONS", JSON.stringify(selections));
-
-    Migration._advanceStageIfNeeded("MEMBERS");
-
-    Audit.append(
-      actorUserId,
-      "Migration",
-      Config.getOptional("MIGRATION_YEAR_LABEL") || "",
-      "MEMBERS_SET",
-      { members: ids.length }
-    );
-
-    return { ok: true, stage: "MEMBERS" };
-  },
-
-  /**
-   * Save account selections + opening balances + balance reasons.
-   * Stage: any selection stage.
-   *
-   * Spec rule #4: every changed or new balance must carry a non-empty
-   * reason. _validateAll rejects entries with a balance override but
-   * missing or blank reason.
-   */
-  setAccountSelections(actorUserId, payload) {
-    var stage = Config.getOptional("MIGRATION_STAGE") || "";
-    if (SELECTION_STAGES.indexOf(stage) < 0) {
-      return {
-        ok: false,
-        reason:
-          "Cannot set accounts from current stage: " +
-          (stage || "(none)") +
-          ". Start a migration first.",
-      };
-    }
-
-    payload = payload || {};
-    var selections = Migration._getSelections_();
-    selections.account_ids = Array.isArray(payload.accountIds)
-      ? payload.accountIds
-      : [];
-    selections.account_balances = payload.accountBalances || {};
-    selections.balance_reasons = payload.balanceReasons || {};
-    Migration._setConfig("MIGRATION_SELECTIONS", JSON.stringify(selections));
-
-    Migration._advanceStageIfNeeded("ACCOUNTS");
-
-    Audit.append(
-      actorUserId,
-      "Migration",
-      Config.getOptional("MIGRATION_YEAR_LABEL") || "",
-      "ACCOUNTS_SET",
-      {
-        accounts: selections.account_ids.length,
-        balances: Object.keys(selections.account_balances).length,
-      }
-    );
-
-    return { ok: true, stage: "ACCOUNTS" };
-  },
-
-  /**
-   * Save event selections. EVENTS are fresh annual records only — no
-   * Claims, Budget Requests, Payouts, or other finance history is copied.
-   * Event identity (event_id, name) is preserved so future Claims can link.
-   * Stage: any selection stage.
-   */
-  setEventSelections(actorUserId, eventIds) {
-    var stage = Config.getOptional("MIGRATION_STAGE") || "";
-    if (SELECTION_STAGES.indexOf(stage) < 0) {
-      return {
-        ok: false,
-        reason:
-          "Cannot set events from current stage: " +
-          (stage || "(none)") +
-          ". Start a migration first.",
-      };
-    }
-
-    var ids = Array.isArray(eventIds) ? eventIds : [];
-    var selections = Migration._getSelections_();
-    selections.event_ids = ids;
-    Migration._setConfig("MIGRATION_SELECTIONS", JSON.stringify(selections));
-
-    Migration._advanceStageIfNeeded("EVENTS");
-
-    Audit.append(
-      actorUserId,
-      "Migration",
-      Config.getOptional("MIGRATION_YEAR_LABEL") || "",
-      "EVENTS_SET",
-      { events: ids.length }
-    );
-
-    return { ok: true, stage: "EVENTS" };
-  },
-
-  /**
-   * Save category selections. CATEGORIES are fresh annual records only;
-   * no finance history is copied. Stage cap is reset to 0 so the new
-   * committee must re-establish budget caps.
-   * Stage: any selection stage.
-   */
-  setCategorySelections(actorUserId, categoryIds) {
-    var stage = Config.getOptional("MIGRATION_STAGE") || "";
-    if (SELECTION_STAGES.indexOf(stage) < 0) {
-      return {
-        ok: false,
-        reason:
-          "Cannot set categories from current stage: " +
-          (stage || "(none)") +
-          ". Start a migration first.",
-      };
-    }
-
-    var ids = Array.isArray(categoryIds) ? categoryIds : [];
-    var selections = Migration._getSelections_();
-    selections.category_ids = ids;
-    Migration._setConfig("MIGRATION_SELECTIONS", JSON.stringify(selections));
-
-    Migration._advanceStageIfNeeded("CATEGORIES");
-
-    Audit.append(
-      actorUserId,
-      "Migration",
-      Config.getOptional("MIGRATION_YEAR_LABEL") || "",
-      "CATEGORIES_SET",
-      { categories: ids.length }
-    );
-
-    return { ok: true, stage: "CATEGORIES" };
-  },
-
-  /**
-   * Save allowlisted operator selections for the new annual file.
-   *
-   * Spec rule #6: preserve active allowlisted operator email, role, and
-   * active status. Requires at least one active Treasurer (validated in
-   * _validateAll). citycf41@gmail.com is recommended when present, but
-   * allowlist checks are never bypassed.
-   *
-   * MEMBER rows are excluded here — they were carried via
-   * setMemberSelections. Roles are not auto-promoted.
-   * Stage: any selection stage.
-   */
-  setUserSelections(actorUserId, userIds) {
-    var stage = Config.getOptional("MIGRATION_STAGE") || "";
-    if (SELECTION_STAGES.indexOf(stage) < 0) {
-      return {
-        ok: false,
-        reason:
-          "Cannot set users from current stage: " +
-          (stage || "(none)") +
-          ". Start a migration first.",
-      };
-    }
-
-    var ids = Array.isArray(userIds) ? userIds : [];
-    var selections = Migration._getSelections_();
-    selections.user_ids = ids;
-    Migration._setConfig("MIGRATION_SELECTIONS", JSON.stringify(selections));
-
-    Migration._advanceStageIfNeeded("USERS");
-
-    Audit.append(
-      actorUserId,
-      "Migration",
-      Config.getOptional("MIGRATION_YEAR_LABEL") || "",
-      "USERS_SET",
-      { users: ids.length }
-    );
-
-    return { ok: true, stage: "USERS" };
   },
 
   /**
@@ -1219,177 +1555,6 @@ var Migration = {
       ok: true,
       stage: "VALIDATE",
       warnings: result.warnings || [],
-    };
-  },
-
-  /**
-   * Internal validator — shared by validateMigration and the activate
-   * gate. Never advances stage.
-   * @private
-   */
-  _validateAll() {
-    var errors = [];
-    var warnings = [];
-
-    var preview = Migration.getPreview();
-    var selections = Migration._getSelections_();
-    var targetId = Config.getOptional("MIGRATION_TARGET_SPREADSHEET_ID") || "";
-    var folderId = Config.getOptional("MIGRATION_TARGET_FOLDER_ID") || "";
-
-    // 1. Target spreadsheet + folder must exist and be accessible.
-    if (!targetId) {
-      errors.push("Missing migration target spreadsheet ID");
-    } else {
-      try {
-        SpreadsheetApp.openById(targetId);
-      } catch (e) {
-        errors.push("Target spreadsheet is not accessible: " + e.message);
-      }
-    }
-    if (!folderId) {
-      errors.push("Missing migration target folder ID");
-    } else {
-      try {
-        DriveApp.getFolderById(folderId);
-      } catch (e) {
-        errors.push("Target folder is not accessible: " + e.message);
-      }
-    }
-
-    // 2. Member selection: every active member_id must resolve. Inactive
-    //    member_ids are kept as historical references — allowed but flagged.
-    var activeMemberIds = preview.active_members.map((m) => m.user_id);
-    var inactiveMemberIds = preview.inactive_members.map((m) => m.user_id);
-    var memberIds = selections.member_ids || [];
-    var memberOk = [];
-    memberIds.forEach((mid) => {
-      if (activeMemberIds.indexOf(mid) >= 0) {
-        memberOk.push(mid);
-      } else if (inactiveMemberIds.indexOf(mid) >= 0) {
-        warnings.push(
-          "Inactive member " + mid + " carried as historical reference only"
-        );
-        memberOk.push(mid);
-      } else {
-        errors.push("Selected member not found in source: " + mid);
-      }
-    });
-
-    // 3. Account selection: every balance override must carry a reason.
-    var accountIds = selections.account_ids || [];
-    var balances = selections.account_balances || {};
-    var reasons = selections.balance_reasons || {};
-    var knownAccounts = preview.accounts.map((a) => a.account_id);
-    accountIds.forEach((aid) => {
-      if (knownAccounts.indexOf(aid) < 0) {
-        errors.push("Selected account not found in source: " + aid);
-        return;
-      }
-      var previewAcct = preview.accounts.filter((a) => a.account_id === aid)[0];
-      var newBal = Number(balances[aid]);
-      var currentBal = previewAcct ? previewAcct.current_balance : 0;
-      var hasOverride = !isNaN(newBal) && newBal !== currentBal;
-      if (hasOverride) {
-        var reason = (reasons[aid] || "").toString().trim();
-        if (!reason) {
-          errors.push(
-            "Account " + aid + " has a changed balance without a reason"
-          );
-        }
-      }
-    });
-
-    // 4. Categories + events: every id must resolve.
-    var knownCats = preview.categories.map((c) => c.category_id);
-    (selections.category_ids || []).forEach((cid) => {
-      if (knownCats.indexOf(cid) < 0) {
-        errors.push("Selected category not found in source: " + cid);
-      }
-    });
-    var knownEvents = preview.events.map((e) => e.event_id);
-    (selections.event_ids || []).forEach((eid) => {
-      if (knownEvents.indexOf(eid) < 0) {
-        errors.push("Selected event not found in source: " + eid);
-      }
-    });
-
-    // 5. USERS: at least one active Treasurer; all selected users are
-    //    active allowlisted operators in the source.
-    var userIds = selections.user_ids || [];
-    if (userIds.length === 0) {
-      errors.push("No operators selected for the new annual file");
-    } else {
-      var hasActiveTreasurer = false;
-      userIds.forEach((uid) => {
-        var op = preview.operators.filter((o) => o.user_id === uid)[0];
-        if (!op) {
-          errors.push(
-            "Selected user " +
-              uid +
-              " is not an allowlisted operator in the source"
-          );
-          return;
-        }
-        if (!op.active) {
-          errors.push("Selected user " + uid + " is not active");
-          return;
-        }
-        if (op.role === ROLES.TREASURER) {
-          hasActiveTreasurer = true;
-        }
-      });
-      if (!hasActiveTreasurer) {
-        errors.push(
-          "At least one active Treasurer must be carried forward"
-        );
-      }
-      // Recommendation: surface citycf41 when present but not selected.
-      var citycf = preview.operators.filter(
-        (o) => (o.email || "").toLowerCase() === "citycf41@gmail.com"
-      )[0];
-      if (
-        citycf &&
-        citycf.active &&
-        userIds.indexOf(citycf.user_id) < 0
-      ) {
-        warnings.push(
-          "citycf41@gmail.com is an active Treasurer in the source but not selected"
-        );
-      }
-    }
-
-    // 6. Cover SEM A, SEM B, SUMMER. The Config tab on the target is
-    //    seeded in executeMigration — flag if the operator plans to seed
-    //    only SEM A. We can only check after executeMigration has run.
-    try {
-      if (targetId) {
-        var ss = SpreadsheetApp.openById(targetId);
-        var cfg = ss.getSheetByName(TABS.CONFIG);
-        if (cfg && cfg.getDataRange().getValues().length > 1) {
-          var rows = cfg.getDataRange().getValues();
-          var seededSemesters = rows
-            .filter(function (r) {
-              return r[0] === "CURRENT_SEMESTER";
-            })
-            .map(function (r) {
-              return r[1];
-            });
-          if (
-            seededSemesters.length === 0 ||
-            seededSemesters[0] !== "SEM A"
-          ) {
-            warnings.push(
-              "Target spreadsheet is missing the standard CURRENT_SEMESTER=SEM A seed"
-            );
-          }
-        }
-      }
-    } catch (e) {}
-
-    return {
-      errors,
-      ok: errors.length === 0,
-      warnings,
     };
   },
 };

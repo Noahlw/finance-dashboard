@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { askForConfirmation, showNotice } from "./components/AccessibleDialog";
 import { apiService } from "./services/api";
 import type { AddMemberPayload, Member } from "./types";
 
@@ -32,7 +33,7 @@ export default function MembersView() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!(studentId.trim() && displayName.trim())) {
-      alert("Student ID and display name are required.");
+      showNotice("Student ID and display name are required.");
       return;
     }
     setSubmitting(true);
@@ -52,21 +53,21 @@ export default function MembersView() {
       setPayoutHandle("");
       loadMembers();
     } catch (err: any) {
-      alert(err.message || "Failed to add member");
+      showNotice(err.message || "Failed to add member");
     } finally {
       setSubmitting(false);
     }
   };
 
   const handleReactivate = async (m: Member) => {
-    if (!confirm("Reactivate " + m.display_name + "?")) {
+    if (!(await askForConfirmation("Reactivate " + m.display_name + "?"))) {
       return;
     }
     try {
       await apiService.reactivateMember(m.user_id);
       loadMembers();
     } catch (err: any) {
-      alert(err.message || "Failed to reactivate");
+      showNotice(err.message || "Failed to reactivate");
     }
   };
 
@@ -122,8 +123,7 @@ export default function MembersView() {
                   >
                     <option value="FPS">FPS</option>
                     <option value="PAYME">PayMe</option>
-                    <option value="BANK">Bank Transfer</option>
-                    <option value="CASH">Cash</option>
+                    <option value="OTHER">Other</option>
                   </select>
                 </div>
                 <div className="form-group">

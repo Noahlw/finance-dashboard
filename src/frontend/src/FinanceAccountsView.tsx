@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { askForConfirmation, showNotice } from "./components/AccessibleDialog";
 import { apiService } from "./services/api";
 import type {
   AccountAdjustment,
@@ -155,7 +156,7 @@ function AccountCard({
       setRenaming(false);
       onUpdated();
     } catch (err: any) {
-      alert(err.message || "Rename failed");
+      showNotice(err.message || "Rename failed");
     } finally {
       setSaving(false);
     }
@@ -163,7 +164,9 @@ function AccountCard({
 
   const handleDeactivate = async () => {
     if (
-      !confirm(`Deactivate account "${account.name}"? This cannot be undone.`)
+      !(await askForConfirmation(
+        `Deactivate account "${account.name}"? This cannot be undone.`
+      ))
     ) {
       return;
     }
@@ -171,7 +174,7 @@ function AccountCard({
       await apiService.deactivateAccount(account.account_id);
       onUpdated();
     } catch (err: any) {
-      alert(err.message || "Deactivate failed");
+      showNotice(err.message || "Deactivate failed");
     }
   };
 
@@ -313,7 +316,7 @@ function AddAccountModal({ onAdded }: { onAdded: () => void }) {
 
   const handleSubmit = async () => {
     if (!name.trim()) {
-      alert("Account name is required");
+      showNotice("Account name is required");
       return;
     }
     setSaving(true);
@@ -329,7 +332,7 @@ function AddAccountModal({ onAdded }: { onAdded: () => void }) {
       setOpen(false);
       onAdded();
     } catch (err: any) {
-      alert(err.message || "Failed to add account");
+      showNotice(err.message || "Failed to add account");
     } finally {
       setSaving(false);
     }
@@ -464,7 +467,7 @@ function RecordIncomeForm({
 
   const handleSubmit = async () => {
     if (!(categoryId.trim() && amount) || Number.parseFloat(amount) <= 0) {
-      alert("Category and positive amount are required");
+      showNotice("Category and positive amount are required");
       return;
     }
     setSaving(true);
@@ -482,10 +485,10 @@ function RecordIncomeForm({
       setSourceRef("");
       setEventId("");
       setNotes("");
-      alert("Income recorded successfully");
+      showNotice("Income recorded successfully");
       onRecorded();
     } catch (err: any) {
-      alert(err.message || "Failed to record income");
+      showNotice(err.message || "Failed to record income");
     } finally {
       setSaving(false);
     }
@@ -606,7 +609,7 @@ function PendingIncomeSection({
       return;
     }
     if (!confirmAccountId && accounts.length > 0) {
-      alert("Select an account to post to");
+      showNotice("Select an account to post to");
       return;
     }
     setActionLoading(true);
@@ -620,7 +623,7 @@ function PendingIncomeSection({
       load();
       onChanged();
     } catch (err: any) {
-      alert(err.message || "Confirm failed");
+      showNotice(err.message || "Confirm failed");
     } finally {
       setActionLoading(false);
     }
@@ -641,7 +644,7 @@ function PendingIncomeSection({
       load();
       onChanged();
     } catch (err: any) {
-      alert(err.message || "Reject failed");
+      showNotice(err.message || "Reject failed");
     } finally {
       setActionLoading(false);
     }
@@ -870,7 +873,7 @@ function AdjustmentForm({
       Number.parseFloat(amount) <= 0 ||
       !reason.trim()
     ) {
-      alert("All fields required");
+      showNotice("All fields required");
       return;
     }
     setSaving(true);
@@ -883,10 +886,10 @@ function AdjustmentForm({
       });
       setAmount("");
       setReason("");
-      alert("Adjustment recorded");
+      showNotice("Adjustment recorded");
       onDone();
     } catch (err: any) {
-      alert(err.message || "Adjustment failed");
+      showNotice(err.message || "Adjustment failed");
     } finally {
       setSaving(false);
     }
@@ -964,11 +967,11 @@ function TransferForm({
 
   const handleSubmit = async () => {
     if (!(fromAccountId && toAccountId) || fromAccountId === toAccountId) {
-      alert("Select two different accounts");
+      showNotice("Select two different accounts");
       return;
     }
     if (!amount || Number.parseFloat(amount) <= 0 || !reason.trim()) {
-      alert("Amount and reason required");
+      showNotice("Amount and reason required");
       return;
     }
     setSaving(true);
@@ -981,10 +984,10 @@ function TransferForm({
       });
       setAmount("");
       setReason("");
-      alert("Transfer recorded");
+      showNotice("Transfer recorded");
       onDone();
     } catch (err: any) {
-      alert(err.message || "Transfer failed");
+      showNotice(err.message || "Transfer failed");
     } finally {
       setSaving(false);
     }

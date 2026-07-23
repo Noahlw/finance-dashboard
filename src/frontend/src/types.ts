@@ -11,6 +11,7 @@ export type SessionRole =
   | "TREASURER"
   | "MEMBER"
   | "ADVISOR_AUDITOR";
+export type PayoutMethod = "FPS" | "PAYME" | "OTHER";
 
 export interface SessionInfo {
   allowed: true;
@@ -28,6 +29,29 @@ export interface SessionDenied {
 }
 
 export type SessionResponse = SessionInfo | SessionDenied;
+
+export interface ReconciliationAccount {
+  account_id: string;
+  actual_balance: number;
+  difference: number;
+  expected_balance: number;
+  ledger_total: number;
+  name: string;
+  opening_balance: number;
+}
+
+export interface ReconciliationData {
+  accounts: ReconciliationAccount[];
+  incomplete_payouts: {
+    amount: number;
+    claim_id: string;
+    failure_reason: string;
+    payout_id: string;
+    status: string;
+  }[];
+  mismatches: ReconciliationAccount[];
+  movement_count: number;
+}
 
 export interface Claim {
   claim_id: string;
@@ -65,7 +89,7 @@ export interface ClaimPayload {
   expenseDate: string;
   notes: string;
   payoutHandle?: string;
-  payoutMethod: "FPS" | "PAYME" | "BANK" | "CASH" | "OTHER";
+  payoutMethod: PayoutMethod;
   receiptId?: string;
   receiptIds?: string[];
   semester?: string;
@@ -80,7 +104,7 @@ export interface EditClaimPayload {
   expenseDate?: string;
   notes: string;
   payoutHandle?: string;
-  payoutMethod?: "FPS" | "PAYME" | "BANK" | "CASH" | "OTHER";
+  payoutMethod?: PayoutMethod;
   receiptId?: string;
 }
 
@@ -154,7 +178,7 @@ export interface AddMemberPayload {
   display_name: string;
   full_name?: string;
   payout_handle?: string;
-  payout_method?: "FPS" | "PAYME" | "BANK" | "CASH" | "OTHER";
+  payout_method?: PayoutMethod;
   student_id: string;
 }
 
@@ -171,6 +195,15 @@ export interface UploadingReceipt {
   vendor: string;
 }
 
+export interface ClaimFilePayload {
+  base64Data: string;
+  fileName: string;
+  mimeType: string;
+  receiptDate?: string;
+  receiptTotal?: number;
+  vendor?: string;
+}
+
 export interface UploadReceiptResponse {
   receiptId: string;
 }
@@ -182,13 +215,25 @@ export interface ClaimDraftPayload {
   claimId?: string;
   eventId?: string;
   expenseDate?: string;
+  fpsAccount?: string;
+  fpsPhone?: string;
   notes: string;
+  otherDetails?: string;
+  paymePhone?: string;
   payoutHandle?: string;
-  payoutMethod?: "FPS" | "PAYME" | "BANK" | "CASH" | "OTHER";
+  payoutMethod?: PayoutMethod;
   receiptId?: string;
   receiptIds?: string[];
   semester?: string;
   uuid: string;
+}
+
+export interface AtomicClaimPayload extends ClaimDraftPayload {
+  budgetLineId: string;
+  expenseDate: string;
+  payoutMethod: PayoutMethod;
+  qrFile?: ClaimFilePayload;
+  receipts?: ClaimFilePayload[];
 }
 
 export interface Claim {
@@ -499,6 +544,7 @@ export interface MigrationSelections {
   accountIds: string[];
   balanceReasons: Record<string, string>;
   categoryIds: string[];
+  confirmedAccountIds: string[];
   eventIds: string[];
   memberIds: string[];
   userIds: string[];

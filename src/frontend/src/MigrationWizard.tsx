@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { askForConfirmation, showNotice } from "./components/AccessibleDialog";
 import { apiService } from "./services/api";
 import type {
   MigrationPreview,
@@ -14,6 +15,7 @@ export default function MigrationWizard() {
     accountIds: [],
     balanceReasons: {},
     categoryIds: [],
+    confirmedAccountIds: [],
     eventIds: [],
     memberIds: [],
     userIds: [],
@@ -75,11 +77,31 @@ export default function MigrationWizard() {
   const handleSaveAccounts = async () => {
     setActionLoading("accounts");
     try {
+      const accountBalances = { ...selections.accountBalances };
+      for (const id of selections.accountIds) {
+        if (accountBalances[id] === undefined) {
+          const acct = preview?.accounts.find((a) => a.account_id === id);
+          accountBalances[id] = acct?.current_balance ?? 0;
+        }
+      }
+      const balanceReasons = { ...selections.balanceReasons };
+      for (const id of selections.accountIds) {
+        if (!(balanceReasons[id] || "").trim()) {
+          balanceReasons[id] = "Carry forward opening balance";
+        }
+      }
       await apiService.setAccountSelections({
-        accountBalances: selections.accountBalances,
+        accountBalances,
         accountIds: selections.accountIds,
-        balanceReasons: selections.balanceReasons,
+        balanceReasons,
+        confirmedAccountIds: selections.accountIds,
       });
+      setSelections((s) => ({
+        ...s,
+        accountBalances,
+        balanceReasons,
+        confirmedAccountIds: selections.accountIds,
+      }));
       loadAll();
     } catch (e) {
       setError("Save accounts failed: " + (e as Error).message);
@@ -116,9 +138,28 @@ export default function MigrationWizard() {
     setActionLoading("users");
     try {
       await apiService.setUserSelections(selections.userIds);
-      loadAll();
+      const result = await apiService.validateMigration();
+      setValidationErrors(result.errors || []);
+      setValidationWarnings(result.warnings || []);
+      if (!result.ok) {
+        setError("Validation failed: review the errors below.");
+        return;
+      }
+      await apiService.executeMigration();
+      await loadAll();
     } catch (e) {
-      setError("Save users failed: " + (e as Error).message);
+      const validation = e as {
+        details?: { errors?: string[]; warnings?: string[] };
+        message?: string;
+      };
+      const errors = validation.details?.errors || [];
+      setValidationErrors(errors);
+      setValidationWarnings(validation.details?.warnings || []);
+      if (errors.length === 0) {
+        setError(
+          "Save users failed: " + (validation.message || "Unknown error")
+        );
+      }
     } finally {
       setActionLoading("");
     }
@@ -130,17 +171,24 @@ export default function MigrationWizard() {
       const result = await apiService.validateMigration();
       setValidationErrors(result.errors || []);
       setValidationWarnings(result.warnings || []);
-      if (!result.ok) {
-        setError("Validation failed: review the errors below.");
-      } else {
+      if (result.ok) {
         await apiService.executeMigration();
-        loadAll();
+        await loadAll();
+      } else {
+        setError("Validation failed: review the errors below.");
       }
     } catch (e) {
-      const err = e as { errors?: string[]; warnings?: string[] };
-      setValidationErrors(err.errors || []);
-      setValidationWarnings(err.warnings || []);
-      setError("Validation failed: review the errors below.");
+      const err = e as {
+        details?: { errors?: string[]; warnings?: string[] };
+        errors?: string[];
+        warnings?: string[];
+      };
+      const errors = err.details?.errors || err.errors || [];
+      setValidationErrors(errors);
+      setValidationWarnings(err.details?.warnings || err.warnings || []);
+      if (errors.length === 0) {
+        setError("Validation failed. Retry or contact a Treasurer.");
+      }
     } finally {
       setActionLoading("");
     }
@@ -160,16 +208,16 @@ export default function MigrationWizard() {
 
   const handleActivate = async () => {
     if (
-      !confirm(
+      !(await askForConfirmation(
         "Activate migration? This will switch production to the new spreadsheet. The old one will be archived."
-      )
+      ))
     ) {
       return;
     }
     setActionLoading("activating");
     try {
       await apiService.activateMigration();
-      alert(
+      showNotice(
         "Migration activated! The new spreadsheet is now the active ledger. Refresh to see changes."
       );
       window.location.reload();
@@ -182,16 +230,16 @@ export default function MigrationWizard() {
 
   const handleCancel = async () => {
     if (
-      !confirm(
+      !(await askForConfirmation(
         "Cancel migration? This will delete the created folder and spreadsheet."
-      )
+      ))
     ) {
       return;
     }
     setActionLoading("cancelling");
     try {
       await apiService.cancelMigration();
-      alert("Migration cancelled.");
+      showNotice("Migration cancelled.");
       loadAll();
     } catch (e) {
       setError("Cancel failed: " + (e as Error).message);
@@ -279,8 +327,9 @@ export default function MigrationWizard() {
         <section className="glass-card">
           <h2>Select Members — {state.year_label}</h2>
           <p className="muted-text">
-            Step 2 of 8: Choose which members to carry forward. Operators
-            (Committee, Treasurer) are seeded automatically.
+            Step 2 of 8: Choose MEMBER rows to carry forward. Committee
+            Operators are selected separately in the Users stage and roles are
+            never promoted.
           </p>
           <p>
             Target spreadsheet: <code>{state.target_spreadsheet_id}</code>
@@ -301,17 +350,6 @@ export default function MigrationWizard() {
                 </tr>
               </thead>
               <tbody>
-                {preview.operators.map((o) => (
-                  <tr key={o.user_id}>
-                    <td>
-                      <input checked disabled type="checkbox" />
-                    </td>
-                    <td className="mono">{o.user_id}</td>
-                    <td>{o.display_name}</td>
-                    <td>{o.role}</td>
-                    <td>{o.active ? "✓" : ""}</td>
-                  </tr>
-                ))}
                 {preview.active_members.map((m) => (
                   <tr key={m.user_id}>
                     <td>
@@ -383,10 +421,7 @@ export default function MigrationWizard() {
               onClick={() => {
                 setSelections((s) => ({
                   ...s,
-                  memberIds: [
-                    ...preview.operators.map((o) => o.user_id),
-                    ...preview.active_members.map((m) => m.user_id),
-                  ],
+                  memberIds: preview.active_members.map((m) => m.user_id),
                 }));
               }}
             >
@@ -419,9 +454,7 @@ export default function MigrationWizard() {
         </section>
 
         <section className="glass-card">
-          <h3>
-            Finance Accounts ({selections.accountIds.length} selected)
-          </h3>
+          <h3>Finance Accounts ({selections.accountIds.length} selected)</h3>
           <div className="table-scroll">
             <table className="data-table">
               <thead>
@@ -444,9 +477,7 @@ export default function MigrationWizard() {
                     <tr key={a.account_id}>
                       <td>
                         <input
-                          checked={selections.accountIds.includes(
-                            a.account_id
-                          )}
+                          checked={selections.accountIds.includes(a.account_id)}
                           onChange={() =>
                             toggleSelection(
                               selections.accountIds,
@@ -649,9 +680,7 @@ export default function MigrationWizard() {
                   <tr key={c.category_id}>
                     <td>
                       <input
-                        checked={selections.categoryIds.includes(
-                          c.category_id
-                        )}
+                        checked={selections.categoryIds.includes(c.category_id)}
                         onChange={() =>
                           toggleSelection(
                             selections.categoryIds,
@@ -718,13 +747,12 @@ export default function MigrationWizard() {
             Treasurer) carry forward to the new annual file. MEMBER rows are
             excluded here. At least one active Treasurer is required.
           </p>
-          {citycf &&
-            !selections.userIds.includes(citycf.user_id) && (
-              <p className="alert warning">
-                Recommendation: citycf41@gmail.com is an active Treasurer and
-                should be carried forward.
-              </p>
-            )}
+          {citycf && !selections.userIds.includes(citycf.user_id) && (
+            <p className="alert warning">
+              Recommendation: citycf41@gmail.com is an active Treasurer and
+              should be carried forward.
+            </p>
+          )}
           {!hasTreasurer && (
             <p className="alert error">
               At least one active Treasurer must be selected.
@@ -776,6 +804,19 @@ export default function MigrationWizard() {
             </table>
           </div>
         </section>
+
+        {validationErrors.length > 0 && (
+          <section className="glass-card">
+            <div className="alert error" role="alert">
+              <strong>Validation errors:</strong>
+              <ul>
+                {validationErrors.map((validationError) => (
+                  <li key={validationError}>{validationError}</li>
+                ))}
+              </ul>
+            </div>
+          </section>
+        )}
 
         <section className="glass-card">
           <div style={{ display: "flex", gap: "0.5rem" }}>
@@ -889,8 +930,8 @@ export default function MigrationWizard() {
         <section className="glass-card">
           <h2>Activate Migration — {state.year_label}</h2>
           <p className="muted-text">
-            Step 8 of 8: Activation switches the production ledger and
-            archives the previous file as read-only.
+            Step 8 of 8: Activation switches the production ledger and archives
+            the previous file as read-only.
           </p>
           <p>
             Target spreadsheet: <code>{state.target_spreadsheet_id}</code>

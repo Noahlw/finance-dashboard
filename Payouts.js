@@ -6,6 +6,10 @@
  * V2 additions: account_id on payout creation, balance deduction on SENT,
  * partial payment, failure logging, retry.
  */
+var MovementLedgerForPayouts_ =
+  typeof MovementLedger === "undefined"
+    ? require("./MovementLedger").MovementLedger
+    : MovementLedger;
 
 var Payouts = {
   /**
@@ -169,6 +173,18 @@ var Payouts = {
       }
 
       var queuedAmount = Number(row.values[pc.amount - 1]) || 0;
+      sentAmount = Number(sentAmount);
+      if (
+        !isFinite(sentAmount) ||
+        sentAmount <= 0 ||
+        sentAmount > queuedAmount
+      ) {
+        return {
+          ok: false,
+          reason:
+            "Sent amount must be positive and not exceed the queued amount.",
+        };
+      }
       var isPartial = sentAmount < queuedAmount;
       var actualSent = isPartial ? sentAmount : queuedAmount;
 
@@ -220,9 +236,7 @@ var Payouts = {
             Number(actualSent).toFixed(2) +
             " via " +
             method +
-            " (ref: " +
-            (txnReference || "") +
-            "). Remaining: HK$" +
+            ". Remaining: HK$" +
             Number(remaining).toFixed(2)
         );
       } else {
@@ -249,17 +263,25 @@ var Payouts = {
             Number(actualSent).toFixed(2) +
             " via " +
             method +
-            " (ref: " +
-            (txnReference || "") +
-            ") by " +
+            " by " +
             actorUserId +
             "."
         );
       }
 
-      // Deduct from account balance
+      // Deduct from account balance exactly once.
       if (accountId) {
-        Engine._postToAccountBalance(accountId, actualSent, "payout");
+        MovementLedgerForPayouts_.post({
+          accountId,
+          accountRow: Engine._loadRow("FinanceAccount", accountId),
+          actorUserId,
+          amount: -actualSent,
+          idempotencyKey: "payout:" + payoutId + ":sent",
+          movementType: "PAYOUT",
+          reason: "",
+          sourceId: payoutId,
+          sourceType: "Payout",
+        });
       }
 
       return { ok: true, reason: null };
@@ -368,9 +390,20 @@ var Payouts = {
         .setValue(failureReason || "Unknown error");
       sheet.getRange(row.rowIndex, pc.paid_at).setValue(now);
 
-      // Reverse balance deduction if payout was already sent
+      // A SENT record represents money that left the account. If it is later
+      // identified as failed/reversed, preserve both facts in the ledger.
       if (wasSent && accountId) {
-        Engine._postToAccountBalance(accountId, amount, "adjustment_credit");
+        MovementLedgerForPayouts_.post({
+          accountId,
+          accountRow: Engine._loadRow("FinanceAccount", accountId),
+          actorUserId,
+          amount,
+          idempotencyKey: "payout:" + payoutId + ":reversal",
+          movementType: "PAYOUT_REVERSAL",
+          reason: failureReason || "Payment reversed",
+          sourceId: payoutId,
+          sourceType: "Payout",
+        });
       }
 
       Audit.append(actorUserId, "Payout", payoutId, "FAILED", {

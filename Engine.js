@@ -19,6 +19,10 @@
  * there is automatically illegal (see the five illegal cases in
  * BUILD-PLAN.md §4.1, cases 1 and 4 are denied purely by table lookup).
  */
+var MovementLedger_ =
+  typeof MovementLedger === "undefined"
+    ? require("./MovementLedger").MovementLedger
+    : MovementLedger;
 
 var Engine = {
   /**
@@ -550,6 +554,48 @@ var Engine = {
     return CoreDecisions.ownerId(entityType, values);
   },
 
+  /** Post an idempotent signed movement while the caller holds the lock. */
+  _postMoneyMovement(
+    accountId,
+    amount,
+    movementType,
+    sourceType,
+    sourceId,
+    actorUserId,
+    idempotencyKey,
+    reason,
+    counterpartyAccountId
+  ) {
+    if (!(COLS.MovementLedger && TABS.MOVEMENT_LEDGER)) {
+      var legacyDirection =
+        movementType === "INCOME"
+          ? "income"
+          : movementType === "PAYOUT"
+            ? "payout"
+            : amount >= 0
+              ? "adjustment_credit"
+              : "adjustment_debit";
+      Engine._postToAccountBalance(
+        accountId,
+        Math.abs(amount),
+        legacyDirection
+      );
+      return { duplicate: false, ok: true };
+    }
+    return MovementLedger_.post({
+      accountId,
+      accountRow: Engine._loadRow("FinanceAccount", accountId),
+      actorUserId,
+      amount,
+      counterpartyAccountId: counterpartyAccountId || "",
+      idempotencyKey,
+      movementType,
+      reason: reason || "",
+      sourceId,
+      sourceType,
+    });
+  },
+
   /**
    * Post a monetary change to an account's balance columns and return the new balance.
    * direction: 'income' (adds to current_balance), 'payout' (subtracts from current_balance),
@@ -894,6 +940,15 @@ var Engine = {
       if (!actor || actor.role !== ROLES.TREASURER) {
         return { ok: false, reason: "Only a Treasurer can adjust accounts." };
       }
+      if (direction !== "CREDIT" && direction !== "DEBIT") {
+        return { ok: false, reason: "Direction must be CREDIT or DEBIT." };
+      }
+      if (!(reason && String(reason).trim())) {
+        return { ok: false, reason: "Adjustment reason is required." };
+      }
+      if (!(Number(amount) > 0)) {
+        return { ok: false, reason: "Adjustment amount must be positive." };
+      }
       var acctRow = Engine._loadRow("FinanceAccount", accountId);
       if (!acctRow) {
         return { ok: false, reason: "Account not found." };
@@ -907,8 +962,7 @@ var Engine = {
 
       var adjId = Ids.nextId("AccountAdjustment");
       var now = Audit._nowIso();
-      var adjDir =
-        direction === "CREDIT" ? "adjustment_credit" : "adjustment_debit";
+      var signedAmount = direction === "CREDIT" ? amount : -amount;
 
       _appendRow(getSheet_(TABS.ACCOUNT_ADJUSTMENTS), [
         adjId,
@@ -920,7 +974,16 @@ var Engine = {
         now,
       ]);
 
-      Engine._postToAccountBalance(accountId, amount, adjDir);
+      Engine._postMoneyMovement(
+        accountId,
+        signedAmount,
+        "ADJUSTMENT",
+        "AccountAdjustment",
+        adjId,
+        actorUserId,
+        "adjustment:" + adjId,
+        reason
+      );
 
       Audit.append(actorUserId, "AccountAdjustment", adjId, "CREATE", {
         accountId,
@@ -1171,7 +1234,16 @@ var Engine = {
       sheet.getRange(row.rowIndex, c.decided_by).setValue(actorUserId);
       sheet.getRange(row.rowIndex, c.decided_at).setValue(now);
 
-      Engine._postToAccountBalance(accountId, amount, "income");
+      Engine._postMoneyMovement(
+        accountId,
+        amount,
+        "INCOME",
+        "Income",
+        incomeId,
+        actorUserId,
+        "income:" + incomeId,
+        ""
+      );
 
       Audit.append(actorUserId, "Income", incomeId, "CONFIRM", {
         accountId,
@@ -1451,8 +1523,28 @@ var Engine = {
         now,
       ]);
 
-      Engine._postToAccountBalance(fromAccountId, amount, "adjustment_debit");
-      Engine._postToAccountBalance(toAccountId, amount, "adjustment_credit");
+      Engine._postMoneyMovement(
+        fromAccountId,
+        -amount,
+        "TRANSFER_OUT",
+        "AccountTransfer",
+        xferId,
+        actorUserId,
+        "transfer:" + xferId + ":out",
+        reason,
+        toAccountId
+      );
+      Engine._postMoneyMovement(
+        toAccountId,
+        amount,
+        "TRANSFER_IN",
+        "AccountTransfer",
+        xferId,
+        actorUserId,
+        "transfer:" + xferId + ":in",
+        reason,
+        fromAccountId
+      );
 
       Audit.append(actorUserId, "AccountTransfer", xferId, "CREATE", {
         amount,
