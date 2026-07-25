@@ -1,6 +1,9 @@
-var STATUS_ = typeof module !== 'undefined' ? require('./Constants').STATUS : STATUS;
-var ROLES_ = typeof module !== 'undefined' ? require('./Constants').ROLES : ROLES;
-var COLS_ = typeof module !== 'undefined' ? require('./Constants').COLS : COLS;
+"use strict";
+var STATUS_ =
+  typeof module === "undefined" ? STATUS : require("./Constants").STATUS;
+var ROLES_ =
+  typeof module === "undefined" ? ROLES : require("./Constants").ROLES;
+var COLS_ = typeof module === "undefined" ? COLS : require("./Constants").COLS;
 
 /**
  * Declarative transition tables. Each entry:
@@ -22,88 +25,120 @@ var COLS_ = typeof module !== 'undefined' ? require('./Constants').COLS : COLS;
  */
 var TRANSITIONS = {
   BudgetRequest: [
-    { from: STATUS_.BudgetRequest.DRAFT, action: 'SUBMIT', to: STATUS_.BudgetRequest.PENDING, allowedRoles: null },
-    { from: STATUS_.BudgetRequest.DRAFT, action: 'WITHDRAW', to: STATUS_.BudgetRequest.WITHDRAWN, allowedRoles: null },
-    { from: STATUS_.BudgetRequest.PENDING, action: 'WITHDRAW', to: STATUS_.BudgetRequest.WITHDRAWN, allowedRoles: null },
-    { from: STATUS_.BudgetRequest.PENDING, action: 'REQUEST_INFO', to: STATUS_.BudgetRequest.NEEDS_INFO, allowedRoles: [ROLES_.TREASURER], requiresNote: true },
-    { from: STATUS_.BudgetRequest.NEEDS_INFO, action: 'RESUBMIT', to: STATUS_.BudgetRequest.PENDING, allowedRoles: null },
-    { from: STATUS_.BudgetRequest.PENDING, action: 'APPROVE', to: 'DERIVED', allowedRoles: [ROLES_.TREASURER] },
-    { from: STATUS_.BudgetRequest.PENDING, action: 'REDUCE', to: 'DERIVED', allowedRoles: [ROLES_.TREASURER], requiresNote: true, requiresAmount: true },
-    { from: STATUS_.BudgetRequest.PENDING, action: 'REJECT', to: 'DERIVED', allowedRoles: [ROLES_.TREASURER], requiresNote: true },
-    { from: STATUS_.BudgetRequest.APPROVED, action: 'CLOSE', to: STATUS_.BudgetRequest.CLOSED, allowedRoles: [ROLES_.TREASURER] },
-    { from: STATUS_.BudgetRequest.PARTIALLY_APPROVED, action: 'CLOSE', to: STATUS_.BudgetRequest.CLOSED, allowedRoles: [ROLES_.TREASURER] }
+    {
+      action: "SUBMIT",
+      allowedRoles: null,
+      from: STATUS_.BudgetRequest.DRAFT,
+      to: STATUS_.BudgetRequest.PENDING,
+    },
+    {
+      action: "WITHDRAW",
+      allowedRoles: null,
+      from: STATUS_.BudgetRequest.DRAFT,
+      to: STATUS_.BudgetRequest.WITHDRAWN,
+    },
+    {
+      action: "WITHDRAW",
+      allowedRoles: null,
+      from: STATUS_.BudgetRequest.PENDING,
+      to: STATUS_.BudgetRequest.WITHDRAWN,
+    },
+    {
+      action: "REQUEST_INFO",
+      allowedRoles: [ROLES_.TREASURER],
+      from: STATUS_.BudgetRequest.PENDING,
+      requiresNote: true,
+      to: STATUS_.BudgetRequest.NEEDS_INFO,
+    },
+    {
+      action: "RESUBMIT",
+      allowedRoles: null,
+      from: STATUS_.BudgetRequest.NEEDS_INFO,
+      to: STATUS_.BudgetRequest.PENDING,
+    },
+    {
+      action: "APPROVE",
+      allowedRoles: [ROLES_.TREASURER],
+      from: STATUS_.BudgetRequest.PENDING,
+      to: "DERIVED",
+    },
+    {
+      action: "REDUCE",
+      allowedRoles: [ROLES_.TREASURER],
+      from: STATUS_.BudgetRequest.PENDING,
+      requiresAmount: true,
+      requiresNote: true,
+      to: "DERIVED",
+    },
+    {
+      action: "REJECT",
+      allowedRoles: [ROLES_.TREASURER],
+      from: STATUS_.BudgetRequest.PENDING,
+      requiresNote: true,
+      to: "DERIVED",
+    },
+    {
+      action: "CLOSE",
+      allowedRoles: [ROLES_.TREASURER],
+      from: STATUS_.BudgetRequest.APPROVED,
+      to: STATUS_.BudgetRequest.CLOSED,
+    },
+    {
+      action: "CLOSE",
+      allowedRoles: [ROLES_.TREASURER],
+      from: STATUS_.BudgetRequest.PARTIALLY_APPROVED,
+      to: STATUS_.BudgetRequest.CLOSED,
+    },
   ],
   ExpenseClaim: [
-    { from: STATUS_.ExpenseClaim.SUBMITTED, action: 'REQUEST_INFO', to: STATUS_.ExpenseClaim.NEEDS_INFO, allowedRoles: [ROLES_.COMMITTEE, ROLES_.TREASURER], requiresNote: true },
-    { from: STATUS_.ExpenseClaim.NEEDS_INFO, action: 'RESUBMIT', to: STATUS_.ExpenseClaim.SUBMITTED, allowedRoles: null },
-    { from: STATUS_.ExpenseClaim.SUBMITTED, action: 'VERIFY', to: STATUS_.ExpenseClaim.VERIFIED, allowedRoles: [ROLES_.COMMITTEE, ROLES_.TREASURER] },
-    { from: STATUS_.ExpenseClaim.VERIFIED, action: 'REJECT', to: STATUS_.ExpenseClaim.REJECTED, allowedRoles: [ROLES_.COMMITTEE, ROLES_.TREASURER], requiresNote: true },
-    { from: STATUS_.ExpenseClaim.VERIFIED, action: 'APPROVE_PAYOUT', to: STATUS_.ExpenseClaim.APPROVED_FOR_PAYOUT, allowedRoles: [ROLES_.TREASURER] },
-    { from: STATUS_.ExpenseClaim.PAID, action: 'LOCK', to: STATUS_.ExpenseClaim.LOCKED, allowedRoles: [ROLES_.TREASURER] }
+    {
+      action: "REQUEST_INFO",
+      allowedRoles: [ROLES_.COMMITTEE, ROLES_.TREASURER],
+      from: STATUS_.ExpenseClaim.SUBMITTED,
+      requiresNote: true,
+      to: STATUS_.ExpenseClaim.NEEDS_INFO,
+    },
+    {
+      action: "RESUBMIT",
+      allowedRoles: null,
+      from: STATUS_.ExpenseClaim.NEEDS_INFO,
+      to: STATUS_.ExpenseClaim.SUBMITTED,
+    },
+    {
+      action: "VERIFY",
+      allowedRoles: [ROLES_.COMMITTEE, ROLES_.TREASURER],
+      from: STATUS_.ExpenseClaim.SUBMITTED,
+      to: STATUS_.ExpenseClaim.VERIFIED,
+    },
+    {
+      action: "REJECT",
+      allowedRoles: [ROLES_.COMMITTEE, ROLES_.TREASURER],
+      from: STATUS_.ExpenseClaim.VERIFIED,
+      requiresNote: true,
+      to: STATUS_.ExpenseClaim.REJECTED,
+    },
+    {
+      action: "APPROVE_PAYOUT",
+      allowedRoles: [ROLES_.TREASURER],
+      from: STATUS_.ExpenseClaim.VERIFIED,
+      to: STATUS_.ExpenseClaim.APPROVED_FOR_PAYOUT,
+    },
+    {
+      action: "LOCK",
+      allowedRoles: [ROLES_.TREASURER],
+      from: STATUS_.ExpenseClaim.PAID,
+      to: STATUS_.ExpenseClaim.LOCKED,
+    },
     // APPROVED_FOR_PAYOUT -> PAID happens automatically in Payouts.gs when
     // every Payout row for the claim reaches CONFIRMED (not a human action).
     // PAID -> LOCKED happens automatically in Jobs.dailyJob (Phase 2).
-  ]
+  ],
 };
 
 /** Actions where the actor being the entity's own requester/claimant triggers D5 self-approval flagging. */
-var SELF_APPROVAL_ACTIONS = ['APPROVE', 'REDUCE', 'VERIFY', 'APPROVE_PAYOUT'];
+var SELF_APPROVAL_ACTIONS = ["APPROVE", "REDUCE", "VERIFY", "APPROVE_PAYOUT"];
 
 var CoreDecisions = {
-  TRANSITIONS: TRANSITIONS,
-  SELF_APPROVAL_ACTIONS: SELF_APPROVAL_ACTIONS,
-
-  /**
-   * Look up the transition rule for (entityType, fromStatus, action), or
-   * null if no such rule exists (i.e. the transition is illegal).
-   */
-  findTransition: function (entityType, fromStatus, action) {
-    var table = TRANSITIONS[entityType] || [];
-    for (var i = 0; i < table.length; i++) {
-      if (table[i].from === fromStatus && table[i].action === action) return table[i];
-    }
-    return null;
-  },
-
-  /**
-   * Derive a BudgetRequest's status from its lines' statuses: all APPROVED
-   * -> APPROVED, all REJECTED -> REJECTED, anything mixed -> PARTIALLY_APPROVED.
-   * A request with zero lines is still PENDING (nothing to derive from yet).
-   * @param {Array<string>} lineStatuses
-   * @return {string}
-   */
-  deriveRequestStatusFromLineStatuses: function (lineStatuses) {
-    if (lineStatuses.length === 0) return STATUS_.BudgetRequest.PENDING;
-    if (lineStatuses.every(function (s) { return s === STATUS_.BudgetRequestLine.APPROVED; })) return STATUS_.BudgetRequest.APPROVED;
-    if (lineStatuses.every(function (s) { return s === STATUS_.BudgetRequestLine.REJECTED; })) return STATUS_.BudgetRequest.REJECTED;
-    return STATUS_.BudgetRequest.PARTIALLY_APPROVED;
-  },
-
-  /**
-   * The owning user's ID for an entity row: requester_id for BudgetRequest,
-   * claimant_id for ExpenseClaim. Returns null for unrecognized entity types.
-   * @param {string} entityType
-   * @param {Array} values full row values array as loaded from the sheet
-   * @return {?string}
-   */
-  ownerId: function (entityType, values) {
-    if (entityType === 'BudgetRequest') return values[COLS_.BudgetRequests.requester_id - 1];
-    if (entityType === 'ExpenseClaim') return values[COLS_.ExpenseClaims.claimant_id - 1];
-    return null;
-  },
-
-  /**
-   * D5: does a successful transition get flagged as self-approved?
-   * (Distinct from allowedRoles===null "self-only" permission — this flags
-   * role-gated actions, e.g. TREASURER approving their own request.)
-   * @param {boolean} isSelf actorUserId === owner of the entity
-   * @param {string} action
-   * @return {boolean}
-   */
-  isSelfApproval: function (isSelf, action) {
-    return isSelf && SELF_APPROVAL_ACTIONS.indexOf(action) !== -1;
-  },
-
   /**
    * The four-eyes / ownership authorization gate plus payload validation for
    * a transition, in the exact precedence order used by Engine.transition:
@@ -115,21 +150,24 @@ var CoreDecisions = {
    * @param {Object} payload {decision_note, amount_override}
    * @return {{ok: boolean, reason: ?string}}
    */
-  authorize: function (def, isSelf, actorRole, payload) {
+  authorize(def, isSelf, actorRole, payload) {
     if (def.allowedRoles === null) {
-      if (!isSelf) return { ok: false, reason: 'NOT_OWNER' };
-    } else {
-      if (def.allowedRoles.indexOf(actorRole) === -1) {
-        return { ok: false, reason: 'ROLE_NOT_ALLOWED' };
+      if (!isSelf) {
+        return { ok: false, reason: "NOT_OWNER" };
       }
+    } else if (def.allowedRoles.indexOf(actorRole) === -1) {
+      return { ok: false, reason: "ROLE_NOT_ALLOWED" };
     }
-    if (def.requiresNote && !(payload.decision_note && String(payload.decision_note).trim())) {
-      return { ok: false, reason: 'NOTE_REQUIRED' };
+    if (
+      def.requiresNote &&
+      !(payload.decision_note && String(payload.decision_note).trim())
+    ) {
+      return { ok: false, reason: "NOTE_REQUIRED" };
     }
     if (def.requiresAmount) {
       var amt = Number(payload.amount_override);
       if (isNaN(amt) || amt < 0) {
-        return { ok: false, reason: 'INVALID_AMOUNT_OVERRIDE' };
+        return { ok: false, reason: "INVALID_AMOUNT_OVERRIDE" };
       }
     }
     return { ok: true, reason: null };
@@ -143,58 +181,32 @@ var CoreDecisions = {
    * @param {number} claimed sum already claimed against the line
    * @return {{ok: boolean, remaining: number}}
    */
-  checkClaimLineAmount: function (amount, approved, claimed) {
+  checkClaimLineAmount(amount, approved, claimed) {
     var remaining = approved - claimed;
-    return { ok: Number(amount) <= remaining, remaining: remaining };
+    return { ok: Number(amount) <= remaining, remaining };
   },
 
   /**
-   * Parse budget request lines from the raw answers object.
-   * Only includes line n (1..3) when category, description, and amount are all truthy.
-   * @param {Object<string,string>} answers
-   * @return {Array<{n: number, category: string, description: string, amount: number}>}
+   * Nightly integrity sweep invariant: a PAID claim's payouts must sum to
+   * exactly its total_amount (within float-rounding tolerance).
+   * @param {number} payoutsSum
+   * @param {number} claimTotal
+   * @return {{ok: boolean}}
    */
-  parseRequestLines: function (answers) {
-    var result = [];
-    for (var n = 1; n <= 3; n++) {
-      var category = answers['Line ' + n + ' — Category'];
-      var desc = answers['Line ' + n + ' — Description'];
-      var amount = Number(answers['Line ' + n + ' — Amount (HKD)']);
-      if (category && desc && amount) {
-        result.push({
-          n: n,
-          category: category,
-          description: desc,
-          amount: amount
-        });
-      }
-    }
-    return result;
+  checkPayoutSum(payoutsSum, claimTotal) {
+    return { ok: Math.abs(payoutsSum - claimTotal) < 0.005 };
   },
 
   /**
-   * Parse expense claim lines from the raw answers object.
-   * Only includes line n (1..3) when budget line choice and amount are both truthy.
-   * @param {Object<string,string>} answers
-   * @return {Array<{n: number, budgetLineChoice: string, amount: number}>}
+   * Nightly integrity sweep invariant: a receipt's linked ClaimLineItems
+   * must never total more than the receipt's own printed total.
+   * @param {number} lineItemsSum
+   * @param {number} receiptTotal
+   * @return {{ok: boolean}}
    */
-  parseClaimLines: function (answers) {
-    var result = [];
-    for (var n = 1; n <= 3; n++) {
-      var budgetLineChoice = answers['Line ' + n + ' — Budget line'];
-      var amount = Number(answers['Line ' + n + ' — Amount (HKD)']);
-      if (budgetLineChoice && amount) {
-        result.push({
-          n: n,
-          budgetLineChoice: budgetLineChoice,
-          amount: amount
-        });
-      }
-    }
-    return result;
+  checkReceiptTotal(lineItemsSum, receiptTotal) {
+    return { ok: lineItemsSum <= receiptTotal + 0.005 };
   },
-
-
 
   /**
    * The REDUCE proportional split: given every line's requested_amount and
@@ -210,62 +222,162 @@ var CoreDecisions = {
    * @param {number} override payload.amount_override
    * @return {Array<{approved_amount: number, line_status: string}>}
    */
-  computeReduceSplit: function (requestedAmounts, override) {
-    var totalRequested = requestedAmounts.reduce(function (sum, r) { return sum + (Number(r) || 0); }, 0);
+  computeReduceSplit(requestedAmounts, override) {
+    var totalRequested = requestedAmounts.reduce(
+      (sum, r) => sum + (Number(r) || 0),
+      0
+    );
     if (totalRequested <= 0) {
-      return requestedAmounts.map(function () {
-        return { approved_amount: 0, line_status: STATUS_.BudgetRequestLine.REJECTED };
-      });
+      return requestedAmounts.map(() => ({
+        approved_amount: 0,
+        line_status: STATUS_.BudgetRequestLine.REJECTED,
+      }));
     }
 
-    var targetAmount = Math.min(Math.max(Number(override) || 0, 0), totalRequested);
+    var targetAmount = Math.min(
+      Math.max(Number(override) || 0, 0),
+      totalRequested
+    );
     var targetCents = Math.round(targetAmount * 100);
 
-    var shares = requestedAmounts.map(function (r) {
+    var shares = requestedAmounts.map((r) => {
       var requested = Number(r) || 0;
-      var exactCents = requested / totalRequested * targetCents;
+      var exactCents = (requested / totalRequested) * targetCents;
       var flooredCents = Math.floor(exactCents);
-      return { requested: requested, flooredCents: flooredCents, remainder: exactCents - flooredCents };
+      return { flooredCents, remainder: exactCents - flooredCents, requested };
     });
 
-    var sumFlooredCents = shares.reduce(function (sum, s) { return sum + s.flooredCents; }, 0);
+    var sumFlooredCents = shares.reduce((sum, s) => sum + s.flooredCents, 0);
     var centsToDistribute = targetCents - sumFlooredCents;
 
     // Give the leftover cents to the lines with the largest fractional
     // remainder first (stable sort: ties keep original line order).
-    var byRemainderDesc = shares.slice().sort(function (a, b) { return b.remainder - a.remainder; });
+    var byRemainderDesc = shares
+      .slice()
+      .sort((a, b) => b.remainder - a.remainder);
     for (var i = 0; i < centsToDistribute; i++) {
       byRemainderDesc[i].flooredCents += 1;
     }
 
-    return shares.map(function (s) {
+    return shares.map((s) => {
       var approved = s.flooredCents / 100;
-      var line_status = approved <= 0 ? STATUS_.BudgetRequestLine.REJECTED :
-        (approved >= s.requested ? STATUS_.BudgetRequestLine.APPROVED : STATUS_.BudgetRequestLine.REDUCED);
-      return { approved_amount: approved, line_status: line_status };
+      var line_status =
+        approved <= 0
+          ? STATUS_.BudgetRequestLine.REJECTED
+          : approved >= s.requested
+            ? STATUS_.BudgetRequestLine.APPROVED
+            : STATUS_.BudgetRequestLine.REDUCED;
+      return { approved_amount: approved, line_status };
     });
   },
 
   /**
-   * Nightly integrity sweep invariant: a receipt's linked ClaimLineItems
-   * must never total more than the receipt's own printed total.
-   * @param {number} lineItemsSum
-   * @param {number} receiptTotal
-   * @return {{ok: boolean}}
+   * Derive a BudgetRequest's status from its lines' statuses: all APPROVED
+   * -> APPROVED, all REJECTED -> REJECTED, anything mixed -> PARTIALLY_APPROVED.
+   * A request with zero lines is still PENDING (nothing to derive from yet).
+   * @param {Array<string>} lineStatuses
+   * @return {string}
    */
-  checkReceiptTotal: function (lineItemsSum, receiptTotal) {
-    return { ok: lineItemsSum <= receiptTotal + 0.005 };
+  deriveRequestStatusFromLineStatuses(lineStatuses) {
+    if (lineStatuses.length === 0) {
+      return STATUS_.BudgetRequest.PENDING;
+    }
+    if (lineStatuses.every((s) => s === STATUS_.BudgetRequestLine.APPROVED)) {
+      return STATUS_.BudgetRequest.APPROVED;
+    }
+    if (lineStatuses.every((s) => s === STATUS_.BudgetRequestLine.REJECTED)) {
+      return STATUS_.BudgetRequest.REJECTED;
+    }
+    return STATUS_.BudgetRequest.PARTIALLY_APPROVED;
   },
 
   /**
-   * Nightly integrity sweep invariant: a PAID claim's payouts must sum to
-   * exactly its total_amount (within float-rounding tolerance).
-   * @param {number} payoutsSum
-   * @param {number} claimTotal
-   * @return {{ok: boolean}}
+   * Look up the transition rule for (entityType, fromStatus, action), or
+   * null if no such rule exists (i.e. the transition is illegal).
    */
-  checkPayoutSum: function (payoutsSum, claimTotal) {
-    return { ok: Math.abs(payoutsSum - claimTotal) < 0.005 };
+  findTransition(entityType, fromStatus, action) {
+    var table = TRANSITIONS[entityType] || [];
+    for (var i = 0; i < table.length; i++) {
+      if (table[i].from === fromStatus && table[i].action === action) {
+        return table[i];
+      }
+    }
+    return null;
+  },
+
+  /**
+   * D5: does a successful transition get flagged as self-approved?
+   * (Distinct from allowedRoles===null "self-only" permission — this flags
+   * role-gated actions, e.g. TREASURER approving their own request.)
+   * @param {boolean} isSelf actorUserId === owner of the entity
+   * @param {string} action
+   * @return {boolean}
+   */
+  isSelfApproval(isSelf, action) {
+    return isSelf && SELF_APPROVAL_ACTIONS.indexOf(action) !== -1;
+  },
+
+  /**
+   * The owning user's ID for an entity row: requester_id for BudgetRequest,
+   * claimant_id for ExpenseClaim. Returns null for unrecognized entity types.
+   * @param {string} entityType
+   * @param {Array} values full row values array as loaded from the sheet
+   * @return {?string}
+   */
+  ownerId(entityType, values) {
+    if (entityType === "BudgetRequest") {
+      return values[COLS_.BudgetRequests.requester_id - 1];
+    }
+    if (entityType === "ExpenseClaim") {
+      return values[COLS_.ExpenseClaims.claimant_id - 1];
+    }
+    return null;
+  },
+
+  /**
+   * Parse expense claim lines from the raw answers object.
+   * Only includes line n (1..3) when budget line choice and amount are both truthy.
+   * @param {Object<string,string>} answers
+   * @return {Array<{n: number, budgetLineChoice: string, amount: number}>}
+   */
+  parseClaimLines(answers) {
+    var result = [];
+    for (var n = 1; n <= 3; n++) {
+      var budgetLineChoice = answers["Line " + n + " — Budget line"];
+      var amount = Number(answers["Line " + n + " — Amount (HKD)"]);
+      if (budgetLineChoice && amount) {
+        result.push({
+          amount,
+          budgetLineChoice,
+          n,
+        });
+      }
+    }
+    return result;
+  },
+
+  /**
+   * Parse budget request lines from the raw answers object.
+   * Only includes line n (1..3) when category, description, and amount are all truthy.
+   * @param {Object<string,string>} answers
+   * @return {Array<{n: number, category: string, description: string, amount: number}>}
+   */
+  parseRequestLines(answers) {
+    var result = [];
+    for (var n = 1; n <= 3; n++) {
+      var category = answers["Line " + n + " — Category"];
+      var desc = answers["Line " + n + " — Description"];
+      var amount = Number(answers["Line " + n + " — Amount (HKD)"]);
+      if (category && desc && amount) {
+        result.push({
+          amount,
+          category,
+          description: desc,
+          n,
+        });
+      }
+    }
+    return result;
   },
 
   /**
@@ -278,17 +390,19 @@ var CoreDecisions = {
    * @param {string[]} treasurerUserIds every Users.user_id with role TREASURER
    * @return {{action: 'ok'|'correct'|'unresolvable', correctedId: ?string}}
    */
-  resolveTreasurerIdDrift: function (configuredId, treasurerUserIds) {
+  resolveTreasurerIdDrift(configuredId, treasurerUserIds) {
     if (configuredId && treasurerUserIds.indexOf(configuredId) !== -1) {
-      return { action: 'ok', correctedId: null };
+      return { action: "ok", correctedId: null };
     }
     if (treasurerUserIds.length === 1) {
-      return { action: 'correct', correctedId: treasurerUserIds[0] };
+      return { action: "correct", correctedId: treasurerUserIds[0] };
     }
-    return { action: 'unresolvable', correctedId: null };
-  }
+    return { action: "unresolvable", correctedId: null };
+  },
+  SELF_APPROVAL_ACTIONS,
+  TRANSITIONS,
 };
 
-if (typeof module !== 'undefined') {
-  module.exports = { CoreDecisions: CoreDecisions };
+if (typeof module !== "undefined") {
+  module.exports = { CoreDecisions };
 }

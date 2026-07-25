@@ -1,4 +1,6 @@
-# AppSheet Build Spec — CF Money (committee app)
+# AppSheet Build Spec — CF Money (committee app)  [SUPERSEDED]
+
+> **This document is superseded.** AppSheet has been abandoned in favor of the code-managed React/Vite web app served by Apps Script HTML Service. See [Committee Finance Web App Specification](../../docs/specs/committee-finance-web-app.md) for the current architecture. This document is retained for historical reference only.
 
 Deterministic, click-by-click instructions for building the Tier-2 committee AppSheet app on top
 of CF-Ledger (BUILD-PLAN.md P3-1/P3-4). Written so someone who has never opened AppSheet can follow

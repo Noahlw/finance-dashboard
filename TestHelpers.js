@@ -1,3 +1,4 @@
+"use strict";
 /**
  * TestHelpers.js — reusable data factory functions for GAS integration tests.
  * Every seeded row uses a TEST- prefixed ID so TestFramework_teardown()
@@ -15,7 +16,7 @@
  */
 function TestHelpers_seedUser(id, role, email) {
   var now = Audit._nowIso();
-  getSheet_(TABS.USERS).appendRow([id, 'Test ' + role, role, email, true, now]);
+  getSheet_(TABS.USERS).appendRow([id, "Test " + role, role, email, true, now]);
   return id;
 }
 
@@ -28,7 +29,13 @@ function TestHelpers_seedUser(id, role, email) {
  * @return {string} category_id
  */
 function TestHelpers_seedCategory(id, name, kind, semesterCap) {
-  getSheet_(TABS.CATEGORIES).appendRow([id, name, kind, semesterCap || 0, true]);
+  getSheet_(TABS.CATEGORIES).appendRow([
+    id,
+    name,
+    kind,
+    semesterCap || 0,
+    true,
+  ]);
   return id;
 }
 
@@ -47,31 +54,32 @@ function TestHelpers_seedBudgetRequest(id, userId, status, lines) {
   var row = [];
   row[c.request_id - 1] = id;
   row[c.requester_id - 1] = userId;
-  row[c.event_id - 1] = '';
-  row[c.title - 1] = 'Test Request ' + id;
-  row[c.justification - 1] = 'Auto-seeded for testing';
-  row[c.needed_by - 1] = '2026-08-01';
+  row[c.event_id - 1] = "";
+  row[c.title - 1] = "Test Request " + id;
+  row[c.justification - 1] = "Auto-seeded for testing";
+  row[c.needed_by - 1] = "2026-08-01";
   row[c.status - 1] = status;
-  row[c.submitted_at - 1] = (status !== STATUS.BudgetRequest.DRAFT) ? now : '';
-  row[c.decided_at - 1] = '';
-  row[c.decided_by - 1] = '';
-  row[c.decision_note - 1] = '';
+  row[c.submitted_at - 1] = status === STATUS.BudgetRequest.DRAFT ? "" : now;
+  row[c.decided_at - 1] = "";
+  row[c.decided_by - 1] = "";
+  row[c.decision_note - 1] = "";
   row[c.self_approved - 1] = false;
-  row[c.processed_response_id - 1] = 'TEST-RES-' + id;
+  row[c.processed_response_id - 1] = "TEST-RES-" + id;
   getSheet_(TABS.BUDGET_REQUESTS).appendRow(row);
 
   if (lines && lines.length > 0) {
     var lc = COLS.BudgetRequestLines;
     for (var i = 0; i < lines.length; i++) {
-      var lineId = 'TEST-BUDGETLINE-' + id + '-' + (i + 1);
+      var lineId = "TEST-BUDGETLINE-" + id + "-" + (i + 1);
       var lineRow = [];
       lineRow[lc.line_id - 1] = lineId;
       lineRow[lc.request_id - 1] = id;
-      lineRow[lc.category_id - 1] = lines[i].categoryId || 'CAT-ACT';
-      lineRow[lc.description - 1] = lines[i].description || 'Line ' + (i + 1);
+      lineRow[lc.category_id - 1] = lines[i].categoryId || "CAT-ACT";
+      lineRow[lc.description - 1] = lines[i].description || "Line " + (i + 1);
       lineRow[lc.requested_amount - 1] = lines[i].amount || 100;
       lineRow[lc.approved_amount - 1] = lines[i].approvedAmount || 0;
-      lineRow[lc.line_status - 1] = lines[i].lineStatus || STATUS.BudgetRequestLine.PENDING;
+      lineRow[lc.line_status - 1] =
+        lines[i].lineStatus || STATUS.BudgetRequestLine.PENDING;
       lineRow[lc.claimed_amount - 1] = 0;
       lineRow[lc.remaining - 1] = lines[i].amount || 100;
       getSheet_(TABS.BUDGET_REQUEST_LINES).appendRow(lineRow);
@@ -95,38 +103,53 @@ function TestHelpers_seedExpenseClaim(id, userId, status, lines) {
   row[c.claim_id - 1] = id;
   row[c.claimant_id - 1] = userId;
   row[c.status - 1] = status;
-  row[c.submitted_at - 1] = (status !== STATUS.ExpenseClaim.SUBMITTED && status !== '') ? now : now;
-  row[c.verified_at - 1] = (status === STATUS.ExpenseClaim.VERIFIED || status === STATUS.ExpenseClaim.APPROVED_FOR_PAYOUT || status === STATUS.ExpenseClaim.PAID || status === STATUS.ExpenseClaim.LOCKED) ? now : '';
-  row[c.approved_at - 1] = (status === STATUS.ExpenseClaim.APPROVED_FOR_PAYOUT || status === STATUS.ExpenseClaim.PAID || status === STATUS.ExpenseClaim.LOCKED) ? now : '';
-  row[c.paid_at - 1] = (status === STATUS.ExpenseClaim.PAID || status === STATUS.ExpenseClaim.LOCKED) ? now : '';
-  row[c.locked_at - 1] = (status === STATUS.ExpenseClaim.LOCKED) ? now : '';
-  row[c.verified_by - 1] = '';
-  row[c.approved_by - 1] = '';
+  row[c.submitted_at - 1] =
+    status !== STATUS.ExpenseClaim.SUBMITTED && status !== "" ? now : now;
+  row[c.verified_at - 1] =
+    status === STATUS.ExpenseClaim.VERIFIED ||
+    status === STATUS.ExpenseClaim.APPROVED_FOR_PAYOUT ||
+    status === STATUS.ExpenseClaim.PAID ||
+    status === STATUS.ExpenseClaim.LOCKED
+      ? now
+      : "";
+  row[c.approved_at - 1] =
+    status === STATUS.ExpenseClaim.APPROVED_FOR_PAYOUT ||
+    status === STATUS.ExpenseClaim.PAID ||
+    status === STATUS.ExpenseClaim.LOCKED
+      ? now
+      : "";
+  row[c.paid_at - 1] =
+    status === STATUS.ExpenseClaim.PAID || status === STATUS.ExpenseClaim.LOCKED
+      ? now
+      : "";
+  row[c.locked_at - 1] = status === STATUS.ExpenseClaim.LOCKED ? now : "";
+  row[c.verified_by - 1] = "";
+  row[c.approved_by - 1] = "";
   var totalAmount = 0;
   if (lines) {
     for (var i = 0; i < lines.length; i++) {
-      totalAmount += (lines[i].amount || 0);
+      totalAmount += lines[i].amount || 0;
     }
   }
   row[c.total_amount - 1] = totalAmount;
   row[c.late_flag - 1] = false;
   row[c.self_approved - 1] = false;
-  row[c.notes - 1] = 'Test Claim ' + id;
-  row[c.processed_response_id - 1] = 'TEST-RES-' + id;
+  row[c.notes - 1] = "Test Claim " + id;
+  row[c.processed_response_id - 1] = "TEST-RES-" + id;
   getSheet_(TABS.EXPENSE_CLAIMS).appendRow(row);
 
   if (lines && lines.length > 0) {
     var clic = COLS.ClaimLineItems;
     for (var j = 0; j < lines.length; j++) {
-      var cliId = 'TEST-CLAIMLINE-' + id + '-' + (j + 1);
+      var cliId = "TEST-CLAIMLINE-" + id + "-" + (j + 1);
       var cliRow = [];
       cliRow[clic.claim_line_id - 1] = cliId;
       cliRow[clic.claim_id - 1] = id;
-      cliRow[clic.budget_line_id - 1] = lines[j].budgetLineId || '';
-      cliRow[clic.receipt_id - 1] = lines[j].receiptId || '';
+      cliRow[clic.budget_line_id - 1] = lines[j].budgetLineId || "";
+      cliRow[clic.receipt_id - 1] = lines[j].receiptId || "";
       cliRow[clic.amount - 1] = lines[j].amount || 0;
-      cliRow[clic.description - 1] = lines[j].description || 'Line ' + (j + 1);
-      cliRow[clic.missing_receipt_flag - 1] = lines[j].missingReceipt || false;
+      cliRow[clic.description - 1] = lines[j].description || "Line " + (j + 1);
+      cliRow[clic.missing_receipt_flag - 1] = lines[j].missingReceipt;
       getSheet_(TABS.CLAIM_LINE_ITEMS).appendRow(cliRow);
     }
   }
@@ -143,19 +166,26 @@ function TestHelpers_seedExpenseClaim(id, userId, status, lines) {
  * @param {string} receiptDate
  * @return {string} receipt_id
  */
-function TestHelpers_seedReceipt(id, userId, sha256, total, vendor, receiptDate) {
+function TestHelpers_seedReceipt(
+  id,
+  userId,
+  sha256,
+  total,
+  vendor,
+  receiptDate
+) {
   var now = Audit._nowIso();
   var c = COLS.Receipts;
   var row = [];
   row[c.receipt_id - 1] = id;
-  row[c.drive_file_id - 1] = 'TEST-DRIVE-' + id;
-  row[c.sha256 - 1] = sha256 || ('testhash-' + id);
+  row[c.drive_file_id - 1] = "TEST-DRIVE-" + id;
+  row[c.sha256 - 1] = sha256 || "testhash-" + id;
   row[c.uploaded_by - 1] = userId;
   row[c.uploaded_at - 1] = now;
-  row[c.vendor - 1] = vendor || 'Test Vendor';
-  row[c.receipt_date - 1] = receiptDate || '2026-07-01';
+  row[c.vendor - 1] = vendor || "Test Vendor";
+  row[c.receipt_date - 1] = receiptDate || "2026-07-01";
   row[c.receipt_total - 1] = total || 100;
-  row[c.file_link - 1] = '';
+  row[c.file_link - 1] = "";
   getSheet_(TABS.RECEIPTS).appendRow(row);
   return id;
 }
@@ -171,7 +201,15 @@ function TestHelpers_seedReceipt(id, userId, sha256, total, vendor, receiptDate)
  * @param {string} paidAtIso - ISO timestamp for paid_at (for auto-confirm testing)
  * @return {string} payout_id
  */
-function TestHelpers_seedPayout(id, claimId, userId, amount, status, method, paidAtIso) {
+function TestHelpers_seedPayout(
+  id,
+  claimId,
+  userId,
+  amount,
+  status,
+  method,
+  paidAtIso
+) {
   var now = Audit._nowIso();
   var c = COLS.Payouts;
   var row = [];
@@ -179,12 +217,19 @@ function TestHelpers_seedPayout(id, claimId, userId, amount, status, method, pai
   row[c.claim_id - 1] = claimId;
   row[c.payee_user_id - 1] = userId;
   row[c.amount - 1] = amount || 100;
-  row[c.method - 1] = method || '';
-  row[c.txn_reference - 1] = method ? 'TEST-TXN-' + id : '';
-  row[c.paid_by - 1] = status === STATUS.Payout.SENT || status === STATUS.Payout.CONFIRMED ? 'TEST-USER-TREASURER' : '';
+  row[c.method - 1] = method || "";
+  row[c.txn_reference - 1] = method ? "TEST-TXN-" + id : "";
+  row[c.paid_by - 1] =
+    status === STATUS.Payout.SENT || status === STATUS.Payout.CONFIRMED
+      ? "TEST-USER-TREASURER"
+      : "";
   row[c.status - 1] = status;
-  row[c.paid_at - 1] = paidAtIso || (status === STATUS.Payout.SENT || status === STATUS.Payout.CONFIRMED ? now : '');
-  row[c.confirmed_at - 1] = status === STATUS.Payout.CONFIRMED ? now : '';
+  row[c.paid_at - 1] =
+    paidAtIso ||
+    (status === STATUS.Payout.SENT || status === STATUS.Payout.CONFIRMED
+      ? now
+      : "");
+  row[c.confirmed_at - 1] = status === STATUS.Payout.CONFIRMED ? now : "";
   getSheet_(TABS.PAYOUTS).appendRow(row);
   return id;
 }
@@ -198,15 +243,21 @@ function TestHelpers_seedPayout(id, claimId, userId, amount, status, method, pai
  * @param {string} payoutHandle
  * @return {string} user_id
  */
-function TestHelpers_seedVaultRow(userId, fullName, studentId, payoutMethod, payoutHandle) {
+function TestHelpers_seedVaultRow(
+  userId,
+  fullName,
+  studentId,
+  payoutMethod,
+  payoutHandle
+) {
   var now = Audit._nowIso();
   var c = COLS.Vault;
   var row = [];
   row[c.user_id - 1] = userId;
-  row[c.full_name - 1] = fullName || 'Test User';
-  row[c.student_id - 1] = studentId || '12345678';
-  row[c.payout_method - 1] = payoutMethod || 'FPS';
-  row[c.payout_handle - 1] = payoutHandle || '12345678';
+  row[c.full_name - 1] = fullName || "Test User";
+  row[c.student_id - 1] = studentId || "12345678";
+  row[c.payout_method - 1] = payoutMethod || "FPS";
+  row[c.payout_handle - 1] = payoutHandle || "12345678";
   row[c.consent_ts - 1] = now;
   getVaultSheet_().appendRow(row);
   return userId;
@@ -221,14 +272,14 @@ function TestHelpers_seedVaultRow(userId, fullName, studentId, payoutMethod, pay
 function TestHelpers_mockFormEvent(email, fieldValues) {
   var namedValues = {};
   if (email) {
-    namedValues['Email address'] = [email];
+    namedValues["Email address"] = [email];
   }
   for (var key in fieldValues) {
-    if (fieldValues.hasOwnProperty(key)) {
+    if (Object.hasOwn(fieldValues, key)) {
       namedValues[key] = [String(fieldValues[key])];
     }
   }
-  return { namedValues: namedValues };
+  return { namedValues };
 }
 
 /**
@@ -245,16 +296,16 @@ function TestHelpers_seedApprovalRow(entityType, entityId, action, opts) {
   var row = [];
   row[c.entity_id - 1] = entityId;
   row[c.entity_type - 1] = entityType;
-  row[c.title - 1] = opts.title || 'Test Entity';
-  row[c.requester_or_claimant - 1] = opts.requester || 'TEST-USER-MEMBER';
+  row[c.title - 1] = opts.title || "Test Entity";
+  row[c.requester_or_claimant - 1] = opts.requester || "TEST-USER-MEMBER";
   row[c.amount - 1] = opts.amount || 100;
   row[c.status - 1] = opts.status || STATUS.BudgetRequest.PENDING;
   row[c.action - 1] = action;
-  row[c.amount_override - 1] = opts.amountOverride || '';
-  row[c.note - 1] = opts.note || '';
+  row[c.amount_override - 1] = opts.amountOverride || "";
+  row[c.note - 1] = opts.note || "";
   row[c.confirm - 1] = false;
-  row[c.intent_actor_email - 1] = '';
-  row[c.receipt_link - 1] = '';
+  row[c.intent_actor_email - 1] = "";
+  row[c.receipt_link - 1] = "";
   getSheet_(TABS.APPROVALS).appendRow(row);
   return getSheet_(TABS.APPROVALS).getLastRow();
 }
@@ -271,8 +322,20 @@ function TestHelpers_seedApprovalRow(entityType, entityId, action, opts) {
  * @param {Object} payload - {decision_note, amount_override}
  * @return {{ok: boolean, reason: ?string}}
  */
-function TestHelpers_performApproval(entityType, entityId, action, actorUserId, payload) {
-  return Engine.transition(entityType, entityId, action, actorUserId, payload || {});
+function TestHelpers_performApproval(
+  entityType,
+  entityId,
+  action,
+  actorUserId,
+  payload
+) {
+  return Engine.transition(
+    entityType,
+    entityId,
+    action,
+    actorUserId,
+    payload || {}
+  );
 }
 
 /**
@@ -319,8 +382,10 @@ function TestHelpers_countAuditEntries(entityId) {
  */
 function TestHelpers_getEntityStatus(entityType, entityId) {
   var row = Engine._loadRow(entityType, entityId);
-  if (!row) return null;
-  var cols = COLS[entityType + 's'];
+  if (!row) {
+    return null;
+  }
+  var cols = COLS[entityType + "s"];
   return row.values[cols.status - 1];
 }
 
@@ -337,8 +402,10 @@ function TestHelpers_countDiscordFailures(entityId) {
   var c = COLS.AuditLog;
   var count = 0;
   for (var i = 1; i < values.length; i++) {
-    if (values[i][c.entity_id - 1] === entityId &&
-        values[i][c.action - 1] === 'NOTIFY_FAIL') {
+    if (
+      values[i][c.entity_id - 1] === entityId &&
+      values[i][c.action - 1] === "NOTIFY_FAIL"
+    ) {
       count++;
     }
   }
