@@ -726,6 +726,7 @@ export const apiService = {
             reject(new Error(result.error.message));
           }
         })
+        .withFailureHandler(reject)
         .api_listEvents();
     }),
 
@@ -1078,6 +1079,7 @@ export const apiService = {
           if (result.ok) resolve(result.data);
           else reject(new Error(result.error.message));
         })
+        .withFailureHandler(reject)
         .api_correctReconciliation(payload);
     }),
 

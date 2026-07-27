@@ -518,7 +518,7 @@ export default function ReviewDashboard({
               <div style={{ display: "flex", gap: "0.5rem" }}>
                 {selectedClaim.status === "SUBMITTED" && (
                   <>
-                    {!isSelfReview && (
+                    {!!currentUserId && !isSelfReview && (
                       <button
                         className="primary-btn"
                         disabled={actionLoading}

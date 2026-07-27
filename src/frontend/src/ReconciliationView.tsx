@@ -26,7 +26,7 @@ export default function ReconciliationView() {
     return <div className="alert error">Reconciliation error: {error}</div>;
   if (!data) return <p>Loading reconciliation…</p>;
 
-  const selected = data.mismatches.find(
+  const selected = data.accounts.find(
     (account) => account.account_id === selectedAccountId
   );
   const movements = selectedAccountId
@@ -101,8 +101,7 @@ export default function ReconciliationView() {
         </table>
       </div>
       {selected && (
-        <div aria-label={`Movement Ledger for ${selected.name}`}>
-          <h3>Movement Ledger</h3>
+        <div aria-label={`Movement Ledger for ${selected.name}`} role="region">
           {movements.length === 0 ? (
             <p>No movements for this account.</p>
           ) : (

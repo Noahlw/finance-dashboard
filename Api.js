@@ -980,7 +980,12 @@ function api_getPendingBudgetRequests() {
   var out = [];
 
   for (var i = 1; i < values.length; i++) {
-    if (values[i][c.status - 1] !== STATUS.BudgetRequest.PENDING) {
+    var rowStatus = values[i][c.status - 1];
+    if (
+      rowStatus !== STATUS.BudgetRequest.PENDING &&
+      rowStatus !== "APPROVED" &&
+      rowStatus !== "PARTIALLY_APPROVED"
+    ) {
       continue;
     }
     var id = values[i][c.request_id - 1];
@@ -990,6 +995,7 @@ function api_getPendingBudgetRequests() {
       needed_by: values[i][c.needed_by - 1],
       request_id: id,
       requester_id: values[i][c.requester_id - 1],
+      status: rowStatus,
       submitted_at: values[i][c.submitted_at - 1],
       title: values[i][c.title - 1],
       total_requested: amount,

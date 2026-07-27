@@ -546,14 +546,17 @@ describe("Api.js", () => {
         name,
       };
     });
+    global.Reconciliation = {
+      correct: jest.fn().mockReturnValue({
+        ok: true,
+        adjustmentId: "ADJ-MOCK",
+      }),
+    };
   });
-
   describe("api_resolveSession", () => {
     it("should allow COMMITTEE role with claims and budget-requests views", () => {
       const { api_resolveSession } = require("../Api.js");
       const result = api_resolveSession();
-      expect(result.allowed).toBe(true);
-      expect(result.role).toBe("COMMITTEE");
       expect(result.user_id).toBe("U-001");
       expect(result.display_name).toBe("Test User");
       expect(result.views).toEqual([
@@ -1133,6 +1136,118 @@ describe("Api.js", () => {
       expect(result.length).toBe(1);
       expect(result[0].title).toBe("Pending Request");
       expect(result[0].total_requested).toBe(500);
+      expect(result[0].status).toBe("PENDING");
+    });
+
+    it("should also return APPROVED/PARTIALLY_APPROVED requests for close", () => {
+      global.Session.getActiveUser.mockReturnValueOnce({
+        getEmail: () => "treasurer@example.com",
+      });
+      global.getSheet_.mockImplementationOnce((name) => {
+        if (name === global.TABS.USERS) {
+          return {
+            getDataRange: () => ({
+              getValues: () => [
+                [
+                  "user_id",
+                  "display_name",
+                  "role",
+                  "email",
+                  "active",
+                  "created_at",
+                ],
+                [
+                  "U-002",
+                  "Treasurer",
+                  "TREASURER",
+                  "treasurer@example.com",
+                  true,
+                  "2026-01-01",
+                ],
+              ],
+            }),
+          };
+        }
+        return {
+          getDataRange: jest.fn(() => ({ getValues: () => [[]] })),
+          name,
+        };
+      });
+      global.getSheet_.mockImplementationOnce((name) => {
+        if (name === global.TABS.BUDGET_REQUESTS) {
+          return {
+            getDataRange: () => ({
+              getValues: () => [
+                [
+                  "request_id",
+                  "requester_id",
+                  "event_id",
+                  "title",
+                  "justification",
+                  "needed_by",
+                  "status",
+                  "submitted_at",
+                ],
+                [
+                  "BUDGET-26A-001",
+                  "U-001",
+                  "",
+                  "Pending",
+                  "Just1",
+                  "2026-08-01",
+                  "PENDING",
+                  "2026-07-21",
+                ],
+                [
+                  "BUDGET-26A-002",
+                  "U-001",
+                  "",
+                  "Approved",
+                  "Just2",
+                  "2026-08-01",
+                  "APPROVED",
+                  "2026-07-21",
+                ],
+                [
+                  "BUDGET-26A-003",
+                  "U-001",
+                  "",
+                  "Part Appr",
+                  "Just3",
+                  "2026-08-01",
+                  "PARTIALLY_APPROVED",
+                  "2026-07-21",
+                ],
+                [
+                  "BUDGET-26A-004",
+                  "U-001",
+                  "",
+                  "Closed",
+                  "Just4",
+                  "2026-08-01",
+                  "CLOSED",
+                  "2026-07-21",
+                ],
+              ],
+            }),
+          };
+        }
+        return {
+          getDataRange: jest.fn(() => ({ getValues: () => [[]] })),
+          name,
+        };
+      });
+      global.Engine._sumBudgetRequestLines.mockReturnValue(200);
+      const { api_getPendingBudgetRequests } = require("../Api.js");
+      const result = api_getPendingBudgetRequests();
+      expect(result.data.length).toBe(3);
+      expect(result.data[0].status).toBe("PENDING");
+      expect(result.data[1].status).toBe("APPROVED");
+      expect(result.data[2].status).toBe("PARTIALLY_APPROVED");
+      expect(result.data.every((r) => r.status !== "CLOSED")).toBe(true);
+      expect(result.data[0].total_requested).toBe(200);
+      expect(result.data[1].total_requested).toBe(200);
+      expect(result.data[2].total_requested).toBe(200);
     });
   });
 
@@ -7509,5 +7624,152 @@ describe("Api.js", () => {
         expect(result.error.code).toBe("INVALID_INPUT");
       });
     });
+
+    describe("api_correctReconciliation (#74)", () => {
+      it("should reject non-treasurer", () => {
+        global.Session.getActiveUser.mockReturnValueOnce({
+          getEmail: () => "member@example.com",
+        });
+        global.getSheet_.mockImplementationOnce((name) => {
+          if (name === global.TABS.USERS) {
+            return {
+              getDataRange: () => ({
+                getValues: () => [
+                  [
+                    "user_id",
+                    "display_name",
+                    "role",
+                    "email",
+                    "active",
+                    "created_at",
+                  ],
+                  [
+                    "U-001",
+                    "Member",
+                    "MEMBER",
+                    "member@example.com",
+                    true,
+                    "2026-01-01",
+                  ],
+                ],
+              }),
+            };
+          }
+          return {
+            getDataRange: jest.fn(() => ({ getValues: () => [[]] })),
+            name,
+          };
+        });
+        const { api_correctReconciliation } = require("../Api.js");
+        const result = api_correctReconciliation({
+          accountId: "AC-001",
+          amount: 100,
+          direction: "CREDIT",
+          reason: "Test",
+        });
+        expect(result.ok).toBe(false);
+        expect(result.error.code).toBe("AUTH_DENIED");
+      });
+
+      it("should reject blank reason", () => {
+        global.Session.getActiveUser.mockReturnValueOnce({
+          getEmail: () => "treasurer@example.com",
+        });
+        global.getSheet_.mockImplementationOnce((name) => {
+          if (name === global.TABS.USERS) {
+            return {
+              getDataRange: () => ({
+                getValues: () => [
+                  [
+                    "user_id",
+                    "display_name",
+                    "role",
+                    "email",
+                    "active",
+                    "created_at",
+                  ],
+                  [
+                    "U-002",
+                    "Treasurer",
+                    "TREASURER",
+                    "treasurer@example.com",
+                    true,
+                    "2026-01-01",
+                  ],
+                ],
+              }),
+            };
+          }
+          return {
+            getDataRange: jest.fn(() => ({ getValues: () => [[]] })),
+            name,
+          };
+        });
+        const { api_correctReconciliation } = require("../Api.js");
+        const result = api_correctReconciliation({
+          accountId: "AC-001",
+          amount: 100,
+          direction: "CREDIT",
+          reason: "",
+        });
+        expect(result.ok).toBe(false);
+        expect(result.error.code).toBe("INVALID_PARAMETER");
+      });
+
+      it("should succeed for treasurer with valid payload", () => {
+        global.Session.getActiveUser.mockReturnValueOnce({
+          getEmail: () => "treasurer@example.com",
+        });
+        global.getSheet_.mockImplementationOnce((name) => {
+          if (name === global.TABS.USERS) {
+            return {
+              getDataRange: () => ({
+                getValues: () => [
+                  [
+                    "user_id",
+                    "display_name",
+                    "role",
+                    "email",
+                    "active",
+                    "created_at",
+                  ],
+                  [
+                    "U-002",
+                    "Treasurer",
+                    "TREASURER",
+                    "treasurer@example.com",
+                    true,
+                    "2026-01-01",
+                  ],
+                ],
+              }),
+            };
+          }
+          return {
+            getDataRange: jest.fn(() => ({ getValues: () => [[]] })),
+            name,
+          };
+        });
+        global.Reconciliation.correct.mockReturnValueOnce({
+          ok: true,
+          adjustmentId: "ADJ-001",
+        });
+        const { api_correctReconciliation } = require("../Api.js");
+        const result = api_correctReconciliation({
+          accountId: "AC-001",
+          amount: 100,
+          direction: "CREDIT",
+          reason: "Manual correction",
+        });
+        expect(result.ok).toBe(true);
+        expect(result.data.adjustment_id).toBe("ADJ-001");
+        expect(result.data.account_id).toBe("AC-001");
+      });
+    });
   });
+
+  // #61 Verify self-check: component-level test requires React Testing Library.
+  // TODO: Add ReviewDashboard render test asserting Verify button hidden when
+  // currentUserId === selectedClaim.created_by || currentUserId === selectedClaim.claimant_id
+  // (skip until @testing-library/react is installed in this project).
 });

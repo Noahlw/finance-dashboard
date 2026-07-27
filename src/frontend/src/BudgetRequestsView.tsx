@@ -386,9 +386,7 @@ export default function BudgetRequestsView({ role }: BudgetRequestsViewProps) {
                       <td>
                         <button
                           className="primary-btn"
-                          onClick={() =>
-                            setPendingDetail({ ...p, status: "PENDING" })
-                          }
+                          onClick={() => setPendingDetail(p)}
                         >
                           Review
                         </button>
@@ -551,8 +549,9 @@ export default function BudgetRequestsView({ role }: BudgetRequestsViewProps) {
             </div>
             {pendingDetail.status === "PENDING" && reduceFormOpen && (
               <div className="form-group reduce-form">
-                <label>Reduced Total Amount</label>
+                <label htmlFor="reduce-amount">Reduced Total Amount</label>
                 <input
+                  id="reduce-amount"
                   min="0.01"
                   onChange={(e) => {
                     setReduceAmount(e.target.value);
