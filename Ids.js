@@ -68,18 +68,24 @@ var Ids = {
   },
   /**
    * Allocate the next sequential ID for an entity type.
+   * If `lock` is provided, the caller has already acquired a
+   * LockService.getScriptLock() and we re-use it without nesting.
    * @param {string} entityType a key of ENTITY_PREFIX (e.g. 'BudgetRequest', 'User', 'Receipt')
+   * @param {Object=} lock optional pre-acquired script lock to avoid nesting
    * @return {string} formatted ID, e.g. 'BUDGET-26A-001', 'USER-0001', 'RECEIPT-0001'
    */
-  nextId(entityType) {
-    var lock = LockService.getScriptLock();
-    try {
-      lock.waitLock(30_000);
-    } catch (e) {
-      Discord.postTreasury(
-        "🚨 CRITICAL: Script lock timeout in Ids.nextId (" + entityType + ")"
-      );
-      throw e;
+  nextId(entityType, lock) {
+    var ownsLock = !lock;
+    if (ownsLock) {
+      lock = LockService.getScriptLock();
+      try {
+        lock.waitLock(30_000);
+      } catch (e) {
+        Discord.postTreasury(
+          "🚨 CRITICAL: Script lock timeout in Ids.nextId (" + entityType + ")"
+        );
+        throw e;
+      }
     }
     try {
       var sheet = getSheet_(TABS.COUNTERS);
@@ -102,7 +108,9 @@ var Ids = {
       }
       return Ids._formatId(entityType, next);
     } finally {
-      lock.releaseLock();
+      if (ownsLock) {
+        lock.releaseLock();
+      }
     }
   },
 };

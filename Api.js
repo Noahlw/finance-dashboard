@@ -123,7 +123,10 @@ function api_getMyClaims() {
 
   for (var i = 1; i < allLines.length; i++) {
     var rId = allLines[i][c_brl.request_id - 1];
-    if (requestIds[rId] && allLines[i][c_brl.line_status - 1] === "APPROVED") {
+    if (
+      requestIds[rId] &&
+      allLines[i][c_brl.line_status - 1] === STATUS.BudgetRequestLine.APPROVED
+    ) {
       var remaining = allLines[i][c_brl.remaining - 1];
       budgetLines.push({
         description: allLines[i][c_brl.description - 1],
@@ -167,13 +170,11 @@ function api_uploadReceipt(
   receiptDate,
   receiptTotal
 ) {
-  var email = Session.getActiveUser().getEmail();
-  if (!email) {
-    return _err("NOT_AUTHENTICATED", "Not authenticated");
-  }
-  var user = _resolveUser(email);
-  if (user.isUnknown) {
-    return _err("NOT_AUTHENTICATED", "Unregistered user");
+  var user;
+  try {
+    user = _requireOperator();
+  } catch (e) {
+    return e.authResponse || _err("AUTH_DENIED", "Access denied");
   }
 
   var bytes = Utilities.base64Decode(base64Data);
@@ -191,6 +192,46 @@ function api_uploadReceipt(
 
   var sha256 = _sha256Hex(bytes);
 
+  // Issue #77: critical section wraps duplicate-hash scan, ID
+  // allocation, Drive file creation, and _appendRow so two concurrent
+  // uploads of the same bytes cannot both create Drive files.
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30_000);
+  } catch (e) {
+    return _err(
+      "SYSTEM_BUSY",
+      "Receipt upload could not acquire script lock. Please retry."
+    );
+  }
+  try {
+    return _api_uploadReceiptLocked(
+      user,
+      sha256,
+      bytes,
+      fileName,
+      mimeType,
+      vendor,
+      receiptDate,
+      receiptTotal,
+      lock
+    );
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function _api_uploadReceiptLocked(
+  user,
+  sha256,
+  bytes,
+  fileName,
+  mimeType,
+  vendor,
+  receiptDate,
+  receiptTotal,
+  lock
+) {
   var receiptSheet = getSheet_(TABS.RECEIPTS);
   var receiptData = receiptSheet.getDataRange().getValues();
   var hashCol = COLS.Receipts.sha256 - 1;
@@ -233,7 +274,7 @@ function api_uploadReceipt(
   var folder = DriveApp.getFolderById(folderId);
   var blob = Utilities.newBlob(bytes, mimeType, fileName);
 
-  var receiptId = Ids.nextId("Receipt");
+  var receiptId = Ids.nextId("Receipt", lock);
   var newName = receiptId + "_" + fileName;
   blob.setName(newName);
   var file = folder.createFile(blob);
@@ -265,13 +306,11 @@ function api_uploadReceipt(
  * Only the original uploader may delete.
  */
 function api_deleteOrphanedReceipt(receiptId) {
-  var email = Session.getActiveUser().getEmail();
-  if (!email) {
-    return _err("NOT_AUTHENTICATED", "Not authenticated");
-  }
-  var user = _resolveUser(email);
-  if (user.isUnknown) {
-    return _err("NOT_AUTHENTICATED", "Unregistered user");
+  var user;
+  try {
+    user = _requireOperator();
+  } catch (e) {
+    return e.authResponse || _err("AUTH_DENIED", "Access denied");
   }
 
   var receiptRow = Engine._loadRow("Receipt", receiptId);
@@ -521,13 +560,11 @@ function _appendRow(sheet, values) {
  * Edit an existing Expense Claim. Only SUBMITTED claims can be edited.
  */
 function api_editClaim(payload) {
-  var email = Session.getActiveUser().getEmail();
-  if (!email) {
-    return _err("NOT_AUTHENTICATED", "Not authenticated");
-  }
-  var user = _resolveUser(email);
-  if (user.isUnknown) {
-    return _err("NOT_AUTHENTICATED", "Unregistered user");
+  var user;
+  try {
+    user = _requireOperator();
+  } catch (e) {
+    return e.authResponse || _err("AUTH_DENIED", "Access denied");
   }
 
   var sheet = getSheet_(TABS.EXPENSE_CLAIMS);
@@ -644,13 +681,11 @@ function api_getMyBudgetRequests() {
  * Save a Budget Request as DRAFT (new) or update an existing DRAFT/NEEDS_INFO.
  */
 function api_saveBudgetRequestDraft(payload) {
-  var email = Session.getActiveUser().getEmail();
-  if (!email) {
-    return _err("NOT_AUTHENTICATED", "Not authenticated");
-  }
-  var user = _resolveUser(email);
-  if (user.isUnknown) {
-    return _err("NOT_AUTHENTICATED", "Unregistered user");
+  var user;
+  try {
+    user = _requireOperator();
+  } catch (e) {
+    return e.authResponse || _err("AUTH_DENIED", "Access denied");
   }
 
   var now = Audit._nowIso();
@@ -665,6 +700,9 @@ function api_saveBudgetRequestDraft(payload) {
   if (payload.request_id) {
     existingRow = Engine._loadRow("BudgetRequest", payload.request_id);
     if (existingRow) {
+      if (existingRow.values[c.requester_id - 1] !== user.userId) {
+        return _err("UNAUTHORIZED", "Unauthorized");
+      }
       var curStatus = existingRow.values[c.status - 1];
       if (
         curStatus !== STATUS.BudgetRequest.DRAFT &&
@@ -760,13 +798,11 @@ function api_saveBudgetRequestDraft(payload) {
  * Submit a DRAFT or resubmit a NEEDS_INFO budget request via Engine.
  */
 function api_submitBudgetRequest(requestId) {
-  var email = Session.getActiveUser().getEmail();
-  if (!email) {
-    return _err("NOT_AUTHENTICATED", "Not authenticated");
-  }
-  var user = _resolveUser(email);
-  if (user.isUnknown) {
-    return _err("NOT_AUTHENTICATED", "Unregistered user");
+  var user;
+  try {
+    user = _requireOperator();
+  } catch (e) {
+    return e.authResponse || _err("AUTH_DENIED", "Access denied");
   }
 
   var row = Engine._loadRow("BudgetRequest", requestId);
@@ -775,6 +811,9 @@ function api_submitBudgetRequest(requestId) {
   }
 
   var c = COLS.BudgetRequests;
+  if (row.values[c.requester_id - 1] !== user.userId) {
+    return _err("UNAUTHORIZED", "Unauthorized");
+  }
   var curStatus = row.values[c.status - 1];
   var action;
   if (curStatus === STATUS.BudgetRequest.DRAFT) {
@@ -810,13 +849,19 @@ function api_submitBudgetRequest(requestId) {
  * Discard/withdraw a DRAFT budget request.
  */
 function api_discardBudgetRequest(requestId) {
-  var email = Session.getActiveUser().getEmail();
-  if (!email) {
-    return _err("NOT_AUTHENTICATED", "Not authenticated");
+  var user;
+  try {
+    user = _requireOperator();
+  } catch (e) {
+    return e.authResponse || _err("AUTH_DENIED", "Access denied");
   }
-  var user = _resolveUser(email);
-  if (user.isUnknown) {
-    return _err("NOT_AUTHENTICATED", "Unregistered user");
+
+  var row = Engine._loadRow("BudgetRequest", requestId);
+  if (!row) {
+    return _err("NOT_FOUND", "Budget request not found");
+  }
+  if (row.values[COLS.BudgetRequests.requester_id - 1] !== user.userId) {
+    return _err("UNAUTHORIZED", "Unauthorized");
   }
 
   var result = Engine.transition(
@@ -836,12 +881,13 @@ function api_discardBudgetRequest(requestId) {
  * Get all PENDING budget requests (Treasurer approvals view).
  */
 function api_getPendingBudgetRequests() {
-  var email = Session.getActiveUser().getEmail();
-  if (!email) {
-    return _err("NOT_AUTHENTICATED", "Not authenticated");
+  var user;
+  try {
+    user = _requireOperator();
+  } catch (e) {
+    return e.authResponse || _err("AUTH_DENIED", "Access denied");
   }
-  var user = _resolveUser(email);
-  if (user.isUnknown || user.role !== ROLES.TREASURER) {
+  if (user.role !== ROLES.TREASURER) {
     return _err("UNAUTHORIZED", "Unauthorized");
   }
 
@@ -875,12 +921,13 @@ function api_getPendingBudgetRequests() {
  * payload: { decision_note?, amount_override? }
  */
 function api_decisionBudgetRequest(entityId, action, payload) {
-  var email = Session.getActiveUser().getEmail();
-  if (!email) {
-    return _err("NOT_AUTHENTICATED", "Not authenticated");
+  var user;
+  try {
+    user = _requireOperator();
+  } catch (e) {
+    return e.authResponse || _err("AUTH_DENIED", "Access denied");
   }
-  var user = _resolveUser(email);
-  if (user.isUnknown || user.role !== ROLES.TREASURER) {
+  if (user.role !== ROLES.TREASURER) {
     return _err("UNAUTHORIZED", "Unauthorized");
   }
 

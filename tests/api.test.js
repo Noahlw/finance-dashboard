@@ -1,4 +1,5 @@
 "use strict";
+const { jest, describe, beforeEach, it, expect } = globalThis;
 global.Session = {
   getActiveUser: jest.fn(() => ({
     getEmail: jest.fn(() => "test@example.com"),
@@ -248,6 +249,16 @@ global.PropertiesService = {
     getProperty: jest.fn(() => "RECEIPTS-FOLDER-123"),
   })),
 };
+global.LockService = {
+  getScriptLock: jest.fn(() => {
+    const lock = {
+      releaseLock: jest.fn(),
+      tryLock: jest.fn(() => true),
+      waitLock: jest.fn(),
+    };
+    return lock;
+  }),
+};
 global.Engine._loadRow = jest.fn();
 global.Engine._loadActor = jest.fn(() => ({
   displayName: "Test User",
@@ -272,7 +283,7 @@ global.Engine.transferBetweenAccounts = jest.fn(() => ({
   transferId: "TRF-001",
 }));
 global.Engine.transition = jest.fn(
-  (entityType, entityId, action, actorUserId, payload) => ({
+  (_entityType, _entityId, _action, _actorUserId, _payload) => ({
     from: "DRAFT",
     ok: true,
     selfApproved: false,
@@ -604,7 +615,7 @@ describe("Api.js", () => {
     it("should return requests with lines for current user", () => {
       const findCalls = [];
       global.Engine._findRowsByColumn.mockImplementation(
-        (sheet, colIndex, matchValue) => {
+        (_sheet, colIndex, matchValue) => {
           findCalls.push({ colIndex, matchValue });
           if (findCalls.length === 1) {
             return [
@@ -738,10 +749,31 @@ describe("Api.js", () => {
         "Cannot edit a APPROVED budget request"
       );
     });
+
+    it("should deny updating another requester's draft", () => {
+      global.Engine._loadRow.mockReturnValueOnce({
+        rowIndex: 3,
+        values: ["BUDGET-26A-001", "U-OTHER", "", "Test", "", "", "DRAFT"],
+      });
+      const { api_saveBudgetRequestDraft } = require("../Api.js");
+
+      const result = api_saveBudgetRequestDraft({
+        request_id: "BUDGET-26A-001",
+        title: "Unauthorized edit",
+      });
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          error: expect.objectContaining({ code: "AUTH_DENIED" }),
+          ok: false,
+        })
+      );
+    });
   });
 
   describe("api_submitBudgetRequest", () => {
     it("should submit a DRAFT request to PENDING", () => {
+      global.Engine._loadRow.mockReset();
       global.Engine._loadRow.mockReturnValueOnce({
         rowIndex: 2,
         values: [
@@ -807,10 +839,34 @@ describe("Api.js", () => {
         {}
       );
     });
+
+    it("should deny submitting another requester's request", () => {
+      global.Engine._loadRow.mockReset();
+      global.Engine._loadRow.mockReturnValueOnce({
+        rowIndex: 2,
+        values: ["BUDGET-26A-001", "U-OTHER", "", "Test", "", "", "DRAFT"],
+      });
+      const { api_submitBudgetRequest } = require("../Api.js");
+
+      const result = api_submitBudgetRequest("BUDGET-26A-001");
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          error: expect.objectContaining({ code: "AUTH_DENIED" }),
+          ok: false,
+        })
+      );
+      expect(global.Engine.transition).not.toHaveBeenCalled();
+    });
   });
 
   describe("api_discardBudgetRequest", () => {
     it("should withdraw a DRAFT request", () => {
+      global.Engine._loadRow.mockReset();
+      global.Engine._loadRow.mockReturnValueOnce({
+        rowIndex: 2,
+        values: ["BUDGET-26A-001", "U-001", "", "Test", "", "", "DRAFT"],
+      });
       global.Engine.transition.mockReturnValueOnce({
         from: "DRAFT",
         ok: true,
@@ -819,6 +875,25 @@ describe("Api.js", () => {
       const { api_discardBudgetRequest } = require("../Api.js");
       const { data: result } = api_discardBudgetRequest("BUDGET-26A-001");
       expect(result.status).toBe("WITHDRAWN");
+    });
+
+    it("should deny discarding another requester's request", () => {
+      global.Engine._loadRow.mockReset();
+      global.Engine._loadRow.mockReturnValueOnce({
+        rowIndex: 2,
+        values: ["BUDGET-26A-001", "U-OTHER", "", "Test", "", "", "DRAFT"],
+      });
+      const { api_discardBudgetRequest } = require("../Api.js");
+
+      const result = api_discardBudgetRequest("BUDGET-26A-001");
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          error: expect.objectContaining({ code: "AUTH_DENIED" }),
+          ok: false,
+        })
+      );
+      expect(global.Engine.transition).not.toHaveBeenCalled();
     });
   });
 
@@ -966,6 +1041,34 @@ describe("Api.js", () => {
     });
   });
 
+  describe("authorization hardening", () => {
+    it.each([
+      ["api_uploadReceipt", ["receipt.png", "image/png", "data", "", "", 0]],
+      ["api_deleteOrphanedReceipt", ["RECEIPT-001"]],
+      ["api_editClaim", [{ claimId: "CLAIM-001" }]],
+      ["api_saveBudgetRequestDraft", [{ title: "Draft" }]],
+      ["api_submitBudgetRequest", ["BUDGET-001"]],
+      ["api_discardBudgetRequest", ["BUDGET-001"]],
+      ["api_getPendingBudgetRequests", []],
+      ["api_decisionBudgetRequest", ["BUDGET-001", "APPROVE", {}]],
+    ])("should deny %s without an operator session", (functionName, args) => {
+      global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => "" });
+      const api = require("../Api.js");
+
+      const result = api[functionName](...args);
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          error: expect.objectContaining({
+            code: "AUTH_DENIED",
+            message: "Access denied",
+          }),
+          ok: false,
+        })
+      );
+    });
+  });
+
   describe("api_getMyClaims", () => {
     it("should return one minimal audited denial if no email is found", () => {
       global.Session.getActiveUser.mockReturnValueOnce({ getEmail: () => "" });
@@ -1029,7 +1132,7 @@ describe("Api.js", () => {
     it("should map claims and requests properly", () => {
       // Mock rows returned by Engine._findRowsByColumn
       global.Engine._findRowsByColumn.mockImplementation(
-        (sheet, colIndex, userId) => {
+        (sheet, _colIndex, _userId) => {
           if (sheet.name === global.TABS.EXPENSE_CLAIMS) {
             return [
               {
@@ -1077,6 +1180,175 @@ describe("Api.js", () => {
       const { data: result } = api_getMyClaims();
       expect(result.claims[0].claim_id).toBe("C-123");
       expect(result.requests[0].request_id).toBe("R-123");
+    });
+
+    // Issue #68: api_getMyClaims must surface only budget lines whose
+    // line_status equals STATUS.BudgetRequestLine.APPROVED, not the
+    // legacy bare "APPROVED" string.
+    it("should return approved budget lines using STATUS.BudgetRequestLine.APPROVED", () => {
+      global.Engine._findRowsByColumn.mockImplementation(
+        (sheet, _colIndex, _userId) => {
+          if (sheet.name === global.TABS.BUDGET_REQUESTS) {
+            return [
+              {
+                rowIndex: 2,
+                values: [
+                  "R-100",
+                  "U-001",
+                  "E-001",
+                  "Event",
+                  "Just",
+                  "2026-08-01",
+                  "APPROVED",
+                  "2026-07-01",
+                ],
+              },
+            ];
+          }
+          return [];
+        }
+      );
+      // BudgetRequestLines rows:
+      //   row 0 = header
+      //   row 1 = PENDING (should be excluded)
+      //   row 2 = APPROVED (should be included)
+      //   row 3 = REJECTED (should be excluded)
+      //   row 4 = APPROVED but for a different request (should be excluded)
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === global.TABS.USERS) {
+          return {
+            getDataRange: () => ({
+              getValues: () => [
+                [
+                  "user_id",
+                  "display_name",
+                  "role",
+                  "email",
+                  "active",
+                  "created_at",
+                ],
+                [
+                  "U-001",
+                  "Test User",
+                  "COMMITTEE",
+                  "test@example.com",
+                  true,
+                  "2026-01-01",
+                ],
+              ],
+            }),
+            name: tab,
+          };
+        }
+        if (tab === global.TABS.BUDGET_REQUEST_LINES) {
+          return {
+            getDataRange: () => ({
+              getValues: () => [
+                [
+                  "line_id",
+                  "request_id",
+                  "category_id",
+                  "description",
+                  "requested_amount",
+                  "approved_amount",
+                  "line_status",
+                  "claimed_amount",
+                  "remaining",
+                ],
+                [
+                  "BRL-1",
+                  "R-100",
+                  "C-1",
+                  "Pending line",
+                  100,
+                  0,
+                  "PENDING",
+                  0,
+                  100,
+                ],
+                [
+                  "BRL-2",
+                  "R-100",
+                  "C-2",
+                  "Approved line",
+                  200,
+                  200,
+                  "APPROVED",
+                  0,
+                  50,
+                ],
+                [
+                  "BRL-3",
+                  "R-100",
+                  "C-3",
+                  "Rejected line",
+                  300,
+                  0,
+                  "REJECTED",
+                  0,
+                  300,
+                ],
+                [
+                  "BRL-4",
+                  "R-OTHER",
+                  "C-4",
+                  "Other request",
+                  400,
+                  400,
+                  "APPROVED",
+                  0,
+                  400,
+                ],
+              ],
+            }),
+            name: tab,
+          };
+        }
+        if (tab === global.TABS.EXPENSE_CLAIMS) {
+          return {
+            getDataRange: () => ({
+              getValues: () => [
+                ["claim_id", "claimant_id", "status", "submitted_at"],
+              ],
+            }),
+            name: tab,
+          };
+        }
+        return {
+          getDataRange: () => ({
+            getValues: () => [
+              [
+                "request_id",
+                "requester_id",
+                "event_id",
+                "title",
+                "justification",
+                "needed_by",
+                "status",
+                "submitted_at",
+              ],
+              [
+                "R-100",
+                "U-001",
+                "E-001",
+                "Event",
+                "Just",
+                "2026-08-01",
+                "APPROVED",
+                "2026-07-01",
+              ],
+            ],
+          }),
+          name: tab,
+        };
+      });
+
+      const { data: result } = api_getMyClaims();
+      expect(result.budgetLines).toHaveLength(1);
+      expect(result.budgetLines[0].line_id).toBe("BRL-2");
+      expect(result.budgetLines[0].description).toBe("Approved line");
+      expect(result.budgetLines[0].remaining).toBe(50);
+      expect(result.budgetLines[0].overBudget).toBe(false);
     });
   });
 
@@ -1593,7 +1865,7 @@ describe("Api.js", () => {
       expect(result.ok).toBe(false);
       expect(result.error.code).toBe("VALIDATION_ERROR");
       expect(result.error.details.errors.length).toBeGreaterThanOrEqual(3);
-      var fields = result.error.details.errors.map((e) => e.field);
+      const fields = result.error.details.errors.map((e) => e.field);
       expect(fields).toContain("claimantId");
       expect(fields).toContain("amount");
       expect(fields).toContain("uuid");
@@ -1617,7 +1889,7 @@ describe("Api.js", () => {
         to: "SUBMITTED",
       });
 
-      var payload = {
+      const payload = {
         amount: 200,
         budgetLineId: "BL-1",
         claimantId: "MEMBER-001",
@@ -1631,8 +1903,8 @@ describe("Api.js", () => {
         uuid: "atomic-uuid-1",
       };
 
-      var { api_atomicSubmitClaim } = require("../Api.js");
-      var result = api_atomicSubmitClaim(payload);
+      const { api_atomicSubmitClaim } = require("../Api.js");
+      const result = api_atomicSubmitClaim(payload);
 
       expect(result.ok).toBe(true);
       expect(result.data.claim_id).toBe("CLAIM-ATOMIC");
@@ -1647,7 +1919,7 @@ describe("Api.js", () => {
       global.Ids.childId.mockReturnValueOnce("CLI-DRAFT-1");
       global.Config = { getNum: () => 14, getOptional: () => "" };
 
-      var usersSheet = {
+      const usersSheet = {
         getDataRange: () => ({
           getValues: () => [
             [],
@@ -1664,20 +1936,20 @@ describe("Api.js", () => {
           ],
         }),
       };
-      var defSheet = {
+      const defSheet = {
         getLastRow: () => 1,
         getMaxRows: () => 10,
         getRange: () => ({ getValues: () => [], setValues: jest.fn() }),
       };
 
-      var existingSheet = {
+      const existingSheet = {
         getRange: jest.fn(() => ({ setValue: jest.fn() })),
       };
       global.Engine._loadRow
         .mockReturnValueOnce({
           rowIndex: 2,
           values: (() => {
-            var values = [];
+            const values = [];
             values[global.COLS.BudgetRequestLines.line_status - 1] = "APPROVED";
             return values;
           })(),
@@ -1722,7 +1994,7 @@ describe("Api.js", () => {
         return defSheet;
       });
 
-      var payload = {
+      const payload = {
         amount: 250,
         budgetLineId: "BL-1",
         claimantId: "MEMBER-001",
@@ -1736,12 +2008,12 @@ describe("Api.js", () => {
         uuid: "atomic-draft-uuid",
       };
 
-      var { api_atomicSubmitClaim } = require("../Api.js");
-      var result = api_atomicSubmitClaim(payload);
+      const { api_atomicSubmitClaim } = require("../Api.js");
+      const result = api_atomicSubmitClaim(payload);
 
       if (!result.ok) {
         throw new Error(
-          "DRAFTUPD: " + result.error.code + " " + result.error.message
+          `DRAFTUPD: ${result.error.code} ${result.error.message}`
         );
       }
       expect(result.ok).toBe(true);
@@ -1765,7 +2037,7 @@ describe("Api.js", () => {
       global.Ids.childId.mockReturnValueOnce("CLI-RB-1");
       global.Config = { getNum: () => 14, getOptional: () => "" };
 
-      var usersSheet = {
+      const usersSheet = {
         getDataRange: () => ({
           getValues: () => [
             [],
@@ -1787,7 +2059,7 @@ describe("Api.js", () => {
           setValues: jest.fn(),
         }),
       };
-      var receiptSheet = {
+      const receiptSheet = {
         appendRow: jest.fn(),
         getDataRange: () => ({
           getValues: () => [
@@ -1801,7 +2073,7 @@ describe("Api.js", () => {
           setValues: jest.fn(),
         }),
       };
-      var claimsSheet = {
+      const claimsSheet = {
         appendRow: jest.fn(),
         deleteRow: jest.fn(),
         getLastRow: () => 1,
@@ -1812,7 +2084,7 @@ describe("Api.js", () => {
           setValues: jest.fn(),
         }),
       };
-      var cliSheet = {
+      const cliSheet = {
         appendRow: jest.fn(),
         deleteRow: jest.fn(),
         getMaxRows: () => 1000,
@@ -1855,7 +2127,7 @@ describe("Api.js", () => {
         { rowIndex: 2, sheet: { deleteRow: jest.fn() } },
       ]);
 
-      var payload = {
+      const payload = {
         amount: 100,
         budgetLineId: "BL-1",
         claimantId: "MEMBER-001",
@@ -1875,8 +2147,8 @@ describe("Api.js", () => {
         uuid: "rollback-uuid",
       };
 
-      var { api_atomicSubmitClaim } = require("../Api.js");
-      var result = api_atomicSubmitClaim(payload);
+      const { api_atomicSubmitClaim } = require("../Api.js");
+      const result = api_atomicSubmitClaim(payload);
 
       expect(result.ok).toBe(false);
       expect(result.error.code).toBe("ENGINE_ERROR");
@@ -1900,7 +2172,7 @@ describe("Api.js", () => {
         to: "SUBMITTED",
       });
 
-      var payload = {
+      const payload = {
         amount: 150,
         budgetLineId: "BL-1",
         claimantId: "MEMBER-001",
@@ -1925,8 +2197,8 @@ describe("Api.js", () => {
         uuid: "files-uuid",
       };
 
-      var { api_atomicSubmitClaim } = require("../Api.js");
-      var result = api_atomicSubmitClaim(payload);
+      const { api_atomicSubmitClaim } = require("../Api.js");
+      const result = api_atomicSubmitClaim(payload);
 
       expect(result.ok).toBe(true);
       expect(result.data.claim_id).toBe("CLAIM-FILES");
@@ -1941,7 +2213,7 @@ describe("Api.js", () => {
         getEmail: () => "test@example.com",
       });
 
-      var payload = {
+      const payload = {
         amount: 100,
         budgetLineId: "BL-1",
         claimantId: "MEMBER-001",
@@ -1961,8 +2233,8 @@ describe("Api.js", () => {
         uuid: "bad-file-uuid",
       };
 
-      var { api_atomicSubmitClaim } = require("../Api.js");
-      var result = api_atomicSubmitClaim(payload);
+      const { api_atomicSubmitClaim } = require("../Api.js");
+      const result = api_atomicSubmitClaim(payload);
 
       expect(result.ok).toBe(false);
       expect(result.error.code).toBe("VALIDATION_ERROR");
@@ -1976,12 +2248,12 @@ describe("Api.js", () => {
         getEmail: () => "test@example.com",
       });
 
-      var claimsSheet = {
+      const claimsSheet = {
         getDataRange: () => ({
           getValues: () => {
-            var header = [];
+            const header = [];
             header[14] = "processed_response_id";
-            var row = [];
+            const row = [];
             row[0] = "CLAIM-DONE";
             row[2] = "SUBMITTED";
             row[14] = "uuid-reused";
@@ -2023,7 +2295,7 @@ describe("Api.js", () => {
         };
       });
 
-      var payload = {
+      const payload = {
         amount: 100,
         budgetLineId: "BL-1",
         claimantId: "MEMBER-001",
@@ -2036,16 +2308,16 @@ describe("Api.js", () => {
         uuid: "uuid-reused",
       };
 
-      var { api_atomicSubmitClaim } = require("../Api.js");
+      const { api_atomicSubmitClaim } = require("../Api.js");
       global.Engine._loadRow.mockImplementation((entityType) => {
         if (entityType === "BudgetRequestLine") {
-          var values = [];
+          const values = [];
           values[global.COLS.BudgetRequestLines.line_status - 1] = "APPROVED";
           return { rowIndex: 2, values };
         }
         return null;
       });
-      var result = api_atomicSubmitClaim(payload);
+      const result = api_atomicSubmitClaim(payload);
 
       expect(result).toEqual(
         expect.objectContaining({
@@ -2355,6 +2627,284 @@ describe("Api.js", () => {
       );
       expect(result.ok).toBe(false);
       expect(result.error.message).toContain("5 MB limit");
+    });
+
+    // Issue #77: two concurrent uploads of the same bytes must be
+    // serialized by LockService. The first call creates exactly one
+    // Drive file; the second call sees the newly-written row in the
+    // hash scan and returns the existing receiptId without creating a
+    // second Drive file.
+    it("should serialize concurrent duplicate uploads and not create two Drive files", () => {
+      const appendedRows = [];
+      const createFile = jest.fn(() => ({ getId: () => "drive-file-123" }));
+      global.DriveApp.getFolderById.mockImplementation(() => ({
+        createFile,
+      }));
+      global.Ids.nextId
+        .mockReturnValueOnce("RECEIPT-001")
+        .mockReturnValueOnce("RECEIPT-002");
+
+      // Track writes through sheet.getRange(...).setValues (what
+      // _appendRow actually invokes). After the first upload the
+      // second upload's getDataRange sees the row that was written.
+      const storedRows = [
+        ["receipt_id", "drive_file_id", "sha256", "uploaded_by"],
+      ];
+      const receiptSheet = {
+        getDataRange: jest.fn(() => ({
+          getValues: () => storedRows.map((r) => r.slice()),
+        })),
+        getMaxRows: jest.fn(() => 100),
+        getRange: jest.fn(() => ({
+          getValues: jest.fn(() => [[]]),
+          setValues: jest.fn((values) => {
+            appendedRows.push(values[0]);
+            storedRows.push(values[0].slice());
+          }),
+        })),
+        insertRowAfter: jest.fn(),
+      };
+
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === "Users") {
+          return {
+            getDataRange: () => ({
+              getValues: () => [
+                [
+                  "user_id",
+                  "display_name",
+                  "role",
+                  "email",
+                  "active",
+                  "created_at",
+                ],
+                [
+                  "U-001",
+                  "Test User",
+                  "COMMITTEE",
+                  "test@example.com",
+                  true,
+                  "2026-01-01",
+                ],
+              ],
+            }),
+          };
+        }
+        if (tab === "Receipts") {
+          return receiptSheet;
+        }
+        return {
+          getMaxRows: jest.fn(() => 100),
+          getRange: jest.fn(() => ({
+            getValues: jest.fn(() => [[""]]),
+            setValue: jest.fn(),
+            setValues: jest.fn(),
+          })),
+        };
+      });
+
+      const { api_uploadReceipt } = require("../Api.js");
+
+      const first = api_uploadReceipt(
+        "race.png",
+        "image/png",
+        "base64data",
+        "Vendor Co",
+        "2026-07-15",
+        100.5
+      );
+
+      // Issue #77: must acquire a script lock exactly once per upload.
+      expect(global.LockService.getScriptLock).toHaveBeenCalledTimes(1);
+
+      const second = api_uploadReceipt(
+        "race.png",
+        "image/png",
+        "base64data",
+        "Vendor Co",
+        "2026-07-15",
+        100.5
+      );
+
+      // After the second call, the lock must have been acquired again
+      // and released once per upload.
+      expect(global.LockService.getScriptLock).toHaveBeenCalledTimes(2);
+
+      expect(first.ok).toBe(true);
+      expect(first.data.receiptId).toBe("RECEIPT-001");
+
+      // Second call hits the same-hash path for the same uploader and
+      // returns the existing receiptId — never creates a new file.
+      expect(second.ok).toBe(true);
+      expect(second.data.receiptId).toBe("RECEIPT-001");
+
+      // Only one Drive file was ever created across both uploads.
+      expect(createFile).toHaveBeenCalledTimes(1);
+
+      // Only one row was appended to the Receipts sheet.
+      expect(appendedRows).toHaveLength(1);
+      expect(appendedRows[0][0]).toBe("RECEIPT-001");
+
+      // Ids.nextId was only consumed once (the second upload short-
+      // circuits before it asks for an ID).
+      expect(global.Ids.nextId).toHaveBeenCalledTimes(1);
+    });
+
+    // Issue #77 cross-user variant: when two users upload the same
+    // bytes, the second upload must be rejected with DUPLICATE_RECEIPT
+    // without creating a second Drive file.
+    it("should return DUPLICATE_RECEIPT on cross-user race without creating a second Drive file", () => {
+      const appendedRows = [];
+      const createFile = jest.fn(() => ({ getId: () => "drive-file-456" }));
+      global.DriveApp.getFolderById.mockImplementation(() => ({
+        createFile,
+      }));
+      global.Ids.nextId.mockReturnValueOnce("RECEIPT-007");
+
+      const initialRows = [
+        ["receipt_id", "drive_file_id", "sha256", "uploaded_by"],
+      ];
+      const getDataRangeReceipts = jest.fn(() => ({
+        getValues: () => initialRows.slice(),
+      }));
+      const appendRow = jest.fn((values) => {
+        appendedRows.push(values);
+        initialRows.push([values[0], values[1], values[2], values[3]]);
+      });
+      const receiptSheet = {
+        appendRow,
+        getDataRange: getDataRangeReceipts,
+        getMaxRows: jest.fn(() => 100),
+        getRange: jest.fn(() => ({
+          getValues: jest.fn(() => [[""]]),
+          setValue: jest.fn(),
+          setValues: jest.fn((rows) => {
+            appendedRows.push(rows[0]);
+            initialRows.push([rows[0][0], rows[0][1], rows[0][2], rows[0][3]]);
+          }),
+        })),
+        insertRowAfter: jest.fn(),
+      };
+
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === "Users") {
+          return {
+            getDataRange: () => ({
+              getValues: () => [
+                [
+                  "user_id",
+                  "display_name",
+                  "role",
+                  "email",
+                  "active",
+                  "created_at",
+                ],
+                [
+                  "U-001",
+                  "Test User",
+                  "COMMITTEE",
+                  "test@example.com",
+                  true,
+                  "2026-01-01",
+                ],
+              ],
+            }),
+          };
+        }
+        if (tab === "Receipts") {
+          return receiptSheet;
+        }
+        return {
+          getMaxRows: jest.fn(() => 100),
+          getRange: jest.fn(() => ({
+            getValues: jest.fn(() => [[""]]),
+            setValue: jest.fn(),
+            setValues: jest.fn(),
+          })),
+        };
+      });
+
+      const { api_uploadReceipt } = require("../Api.js");
+
+      // First upload as U-001 — succeeds.
+      const first = api_uploadReceipt(
+        "race.png",
+        "image/png",
+        "base64data",
+        "",
+        "",
+        0
+      );
+      expect(first.ok).toBe(true);
+      expect(first.data.receiptId).toBe("RECEIPT-007");
+
+      // Now switch the active user to U-OTHER and try to upload the
+      // same bytes. The hash scan sees the row written by the first
+      // call and rejects with DUPLICATE_RECEIPT.
+      global.Session.getActiveUser.mockReturnValueOnce({
+        getEmail: jest.fn(() => "other@example.com"),
+      });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === "Users") {
+          return {
+            getDataRange: () => ({
+              getValues: () => [
+                [
+                  "user_id",
+                  "display_name",
+                  "role",
+                  "email",
+                  "active",
+                  "created_at",
+                ],
+                [
+                  "U-001",
+                  "Test User",
+                  "COMMITTEE",
+                  "test@example.com",
+                  true,
+                  "2026-01-01",
+                ],
+                [
+                  "U-OTHER",
+                  "Other",
+                  "COMMITTEE",
+                  "other@example.com",
+                  true,
+                  "2026-01-01",
+                ],
+              ],
+            }),
+          };
+        }
+        if (tab === "Receipts") {
+          return receiptSheet;
+        }
+        return {
+          getMaxRows: jest.fn(() => 100),
+          getRange: jest.fn(() => ({
+            getValues: jest.fn(() => [[""]]),
+            setValue: jest.fn(),
+            setValues: jest.fn(),
+          })),
+        };
+      });
+
+      const second = api_uploadReceipt(
+        "race.png",
+        "image/png",
+        "base64data",
+        "",
+        "",
+        0
+      );
+
+      expect(second.ok).toBe(false);
+      expect(second.error.code).toBe("DUPLICATE_RECEIPT");
+
+      // Only one Drive file was created across both attempts.
+      expect(createFile).toHaveBeenCalledTimes(1);
+      expect(appendedRows).toHaveLength(1);
     });
   });
 
@@ -2785,7 +3335,7 @@ describe("Api.js", () => {
       };
       global.Config = { getNum: () => 14 };
 
-      var claimsSheet = {
+      const claimsSheet = {
         getLastRow: () => 2,
         getRange: jest.fn(() => ({
           getValues: jest.fn(() => [["uuid-existing"]]),
@@ -2881,7 +3431,7 @@ describe("Api.js", () => {
         ],
       });
 
-      var cliSheet = {
+      const cliSheet = {
         appendRow: jest.fn(),
         getLastRow: () => 5,
         getMaxRows: () => 10,
@@ -4199,7 +4749,7 @@ describe("Api.js", () => {
       global.Ids.nextId.mockReturnValueOnce("AC-003");
       global.Audit._nowIso.mockReturnValueOnce("2026-07-22T12:00:00Z");
 
-      var financeSheet = {
+      const financeSheet = {
         appendRow: jest.fn(),
         getDataRange: jest.fn(() => ({
           getValues: () => [
@@ -4311,7 +4861,7 @@ describe("Api.js", () => {
       global.Session.getActiveUser.mockReturnValueOnce({
         getEmail: () => "treasurer@example.com",
       });
-      var sheetMock = { getRange: jest.fn(() => ({ setValue: jest.fn() })) };
+      const sheetMock = { getRange: jest.fn(() => ({ setValue: jest.fn() })) };
       global.Engine._loadRow.mockReturnValueOnce({
         rowIndex: 2,
         sheet: sheetMock,
@@ -4370,7 +4920,7 @@ describe("Api.js", () => {
       global.Session.getActiveUser.mockReturnValueOnce({
         getEmail: () => "treasurer@example.com",
       });
-      var sheetMock = { getRange: jest.fn(() => ({ setValue: jest.fn() })) };
+      const sheetMock = { getRange: jest.fn(() => ({ setValue: jest.fn() })) };
       global.Engine._loadRow.mockReturnValueOnce({
         rowIndex: 3,
         sheet: sheetMock,

@@ -154,9 +154,26 @@ var Migration = {
       var missing = requiredTabs.filter(
         (tabName) => !ss.getSheetByName(tabName)
       );
-      return missing.length
-        ? { ok: false, reason: "Missing required tabs: " + missing.join(", ") }
-        : { ok: true };
+      if (missing.length) {
+        return {
+          ok: false,
+          reason: "Missing required tabs: " + missing.join(", "),
+        };
+      }
+      if (
+        typeof SchemaMigration !== "undefined" &&
+        typeof SchemaMigration.healthCheck === "function"
+      ) {
+        var schemaHealth = SchemaMigration.healthCheck(ss);
+        if (!schemaHealth.ok) {
+          return {
+            ok: false,
+            reason:
+              "Schema health check failed: " + schemaHealth.errors.join("; "),
+          };
+        }
+      }
+      return { ok: true };
     } catch (e) {
       return { ok: false, reason: e.message };
     }
@@ -360,6 +377,17 @@ var Migration = {
    * actor does not re-archive or duplicate folders.
    */
   activateMigration(actorUserId) {
+    var lock = LockService.getScriptLock();
+    lock.waitLock(30_000);
+    try {
+      return Migration._activateMigrationLocked_(actorUserId);
+    } finally {
+      lock.releaseLock();
+    }
+  },
+
+  /** @private */
+  _activateMigrationLocked_(actorUserId) {
     var stage = Config.getOptional("MIGRATION_STAGE") || "";
     if (stage !== "VALIDATE" && stage !== "ACTIVATE") {
       return {
@@ -374,6 +402,41 @@ var Migration = {
       Config.getOptional("MIGRATION_TARGET_SPREADSHEET_ID") || "";
     if (!targetSpreadsheetId) {
       return { ok: false, reason: "No target spreadsheet" };
+    }
+
+    if (stage === "VALIDATE") {
+      try {
+        var targetLedger = SpreadsheetApp.openById(targetSpreadsheetId);
+        if (
+          typeof SchemaMigration !== "undefined" &&
+          typeof SchemaMigration.prepareAnnualLedger === "function"
+        ) {
+          var schemaPreparation =
+            SchemaMigration.prepareAnnualLedger(targetLedger);
+          if (!schemaPreparation.ok) {
+            return {
+              ok: false,
+              reason:
+                "Target schema preparation failed: " +
+                (schemaPreparation.error || schemaPreparation.status),
+            };
+          }
+          var schemaHealth = SchemaMigration.healthCheck(targetLedger);
+          if (!schemaHealth.ok) {
+            return {
+              ok: false,
+              reason:
+                "Target schema health check failed: " +
+                schemaHealth.errors.join("; "),
+            };
+          }
+        }
+      } catch (e) {
+        return {
+          ok: false,
+          reason: "Target schema preparation failed: " + e.message,
+        };
+      }
     }
 
     // If already activated (idempotent repeat), return success without
@@ -493,6 +556,26 @@ var Migration = {
         }
         oldFile.setViewersCanCopyContent(false);
       } catch (e) {}
+    }
+
+    var pendingManifestResult =
+      typeof SchemaMigration !== "undefined" &&
+      typeof SchemaMigration.completePendingManifest === "function"
+        ? SchemaMigration.completePendingManifest(
+            SpreadsheetApp.openById(targetSpreadsheetId)
+          )
+        : { ok: true };
+    if (!pendingManifestResult.ok) {
+      scriptProperties.setProperty("LEDGER_ID", oldSpreadsheetId);
+      Migration._setConfig("MIGRATION_STAGE", "VALIDATE");
+      Config.invalidate();
+      return {
+        ok: false,
+        reason:
+          "Schema migration manifest incomplete; previous ledger restored: " +
+          pendingManifestResult.error,
+        rolled_back: true,
+      };
     }
 
     Audit.append(actorUserId, "Migration", yearLabel, "ACTIVATE", {
@@ -1281,6 +1364,17 @@ var Migration = {
    * receive a new Claim.
    */
   setMemberSelections(actorUserId, memberIds) {
+    var lock = LockService.getScriptLock();
+    lock.waitLock(30_000);
+    try {
+      return Migration._setMemberSelectionsLocked_(actorUserId, memberIds);
+    } finally {
+      lock.releaseLock();
+    }
+  },
+
+  /** @private */
+  _setMemberSelectionsLocked_(actorUserId, memberIds) {
     var stage = Config.getOptional("MIGRATION_STAGE") || "";
     if (SELECTION_STAGES.indexOf(stage) < 0) {
       return {
