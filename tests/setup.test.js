@@ -1,5 +1,4 @@
 "use strict";
-const { jest, describe, beforeEach, it, expect } = globalThis;
 
 const fs = require("node:fs");
 const path = require("node:path");

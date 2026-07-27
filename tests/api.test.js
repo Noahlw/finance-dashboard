@@ -1,5 +1,5 @@
 "use strict";
-const { jest, describe, beforeEach, it, expect } = globalThis;
+
 global.Session = {
   getActiveUser: jest.fn(() => ({
     getEmail: jest.fn(() => "test@example.com"),
@@ -229,10 +229,15 @@ global.Ids = {
 global.Payouts = {
   markPayoutSent: jest.fn(() => ({ ok: true })),
   recordPayoutFailed: jest.fn(() => ({ ok: true })),
-  retryPayout: jest.fn(() => ({ newPayoutId: "PAYOUT-002", ok: true })),
+  retryPayout: jest.fn(() => ({
+    newPayoutId: "PAYOUT-002",
+    ok: true,
+  })),
 };
 global.Utilities = {
-  base64Decode: jest.fn(() => [116, 101, 115, 116, 32, 98, 121, 116, 101, 115]),
+  base64Decode: jest.fn(() => [
+    116, 101, 115, 116, 32, 98, 121, 116, 101, 115,
+  ]),
   computeDigest: jest.fn(() => [
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
     21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
@@ -254,7 +259,7 @@ global.LockService = {
     const lock = {
       releaseLock: jest.fn(),
       tryLock: jest.fn(() => true),
-      waitLock: jest.fn(),
+      waitLock: jest.fn(() => true),
     };
     return lock;
   }),
@@ -292,7 +297,6 @@ global.Engine.transition = jest.fn(
 );
 
 const { api_getMyClaims } = require("../Api.js");
-
 describe("Api.js", () => {
   const testUserEmail = "test@example.com";
   const testUserId = "U-001";

@@ -1,5 +1,4 @@
 "use strict";
-const { jest, describe, beforeEach, it, expect } = globalThis;
 
 const TREASURER_REGEX = /Treasurer/;
 const REASON_REGEX = /reason/;
