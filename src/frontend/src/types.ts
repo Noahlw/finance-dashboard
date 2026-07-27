@@ -41,8 +41,28 @@ export interface ReconciliationAccount {
   opening_balance: number;
 }
 
+export interface ReconciliationMovement {
+  account_id: string;
+  amount: number;
+  signed_amount?: number;
+  movement_id: string;
+  movement_type: string;
+  source_type: string;
+  source_id: string;
+  counterparty_account_id?: string;
+  posted_by: string;
+  posted_at: string;
+  reason: string;
+}
+
 export interface ReconciliationData {
   accounts: ReconciliationAccount[];
+  drilldown: {
+    adjustments: ReconciliationMovement[];
+    income: ReconciliationMovement[];
+    payouts: ReconciliationMovement[];
+    transfers: ReconciliationMovement[];
+  };
   incomplete_payouts: {
     amount: number;
     claim_id: string;
@@ -52,6 +72,13 @@ export interface ReconciliationData {
   }[];
   mismatches: ReconciliationAccount[];
   movement_count: number;
+}
+
+export interface ReconciliationCorrectionPayload {
+  accountId: string;
+  amount: number;
+  direction: "CREDIT" | "DEBIT";
+  reason: string;
 }
 
 export interface Claim {
@@ -199,6 +226,7 @@ export interface PendingBudgetRequest {
   needed_by: string;
   request_id: string;
   requester_id: string;
+  status: string;
   submitted_at: string;
   title: string;
   total_requested: number;
@@ -206,6 +234,7 @@ export interface PendingBudgetRequest {
 
 export interface BudgetDecisionPayload {
   action: "APPROVE" | "REDUCE" | "REJECT" | "REQUEST_INFO" | "CLOSE";
+  amount_override?: number;
   decision_note?: string;
 }
 
@@ -331,6 +360,8 @@ export interface ClaimQueueItem {
   created_by: string;
   event_id?: string;
   notes: string;
+  payout_handle?: string;
+  payout_method?: string;
   status: string;
   submitted_at: string;
   total_amount: number;

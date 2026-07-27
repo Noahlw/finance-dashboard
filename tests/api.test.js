@@ -1193,6 +1193,129 @@ describe("Api.js", () => {
       );
       expect(result.to).toBe("APPROVED");
     });
+
+    it("should forward amount_override on REDUCE", () => {
+      global.Session.getActiveUser.mockReturnValueOnce({
+        getEmail: () => "treasurer@example.com",
+      });
+      global.getSheet_.mockImplementationOnce((name) => {
+        if (name === global.TABS.USERS) {
+          return {
+            getDataRange: () => ({
+              getValues: () => [
+                [
+                  "user_id",
+                  "display_name",
+                  "role",
+                  "email",
+                  "active",
+                  "created_at",
+                ],
+                [
+                  "U-002",
+                  "Treasurer",
+                  "TREASURER",
+                  "treasurer@example.com",
+                  true,
+                  "2026-01-01",
+                ],
+              ],
+            }),
+          };
+        }
+        return {
+          getDataRange: jest.fn(() => ({ getValues: () => [[]] })),
+          name,
+        };
+      });
+      global.Engine.transition.mockReturnValueOnce({
+        from: "PENDING",
+        ok: true,
+        to: "PARTIALLY_APPROVED",
+      });
+      const { api_decisionBudgetRequest } = require("../Api.js");
+      const { data: result } = api_decisionBudgetRequest(
+        "BUDGET-26A-002",
+        "REDUCE",
+        {
+          action: "REDUCE",
+          amount_override: 250,
+          decision_note: "Trimmed to budget cap",
+        }
+      );
+      expect(result.to).toBe("PARTIALLY_APPROVED");
+      expect(global.Engine.transition).toHaveBeenCalledWith(
+        "BudgetRequest",
+        "BUDGET-26A-002",
+        "REDUCE",
+        "U-002",
+        expect.objectContaining({
+          amount_override: 250,
+          decision_note: "Trimmed to budget cap",
+        })
+      );
+    });
+
+    it("should close an approved request via CLOSE", () => {
+      global.Session.getActiveUser.mockReturnValueOnce({
+        getEmail: () => "treasurer@example.com",
+      });
+      global.getSheet_.mockImplementationOnce((name) => {
+        if (name === global.TABS.USERS) {
+          return {
+            getDataRange: () => ({
+              getValues: () => [
+                [
+                  "user_id",
+                  "display_name",
+                  "role",
+                  "email",
+                  "active",
+                  "created_at",
+                ],
+                [
+                  "U-002",
+                  "Treasurer",
+                  "TREASURER",
+                  "treasurer@example.com",
+                  true,
+                  "2026-01-01",
+                ],
+              ],
+            }),
+          };
+        }
+        return {
+          getDataRange: jest.fn(() => ({ getValues: () => [[]] })),
+          name,
+        };
+      });
+      global.Engine.transition.mockReturnValueOnce({
+        from: "APPROVED",
+        ok: true,
+        to: "CLOSED",
+      });
+      const { api_decisionBudgetRequest } = require("../Api.js");
+      const { data: result } = api_decisionBudgetRequest(
+        "BUDGET-26A-003",
+        "CLOSE",
+        {
+          action: "CLOSE",
+          decision_note: "Wrapped up for semester",
+        }
+      );
+      expect(result.to).toBe("CLOSED");
+      expect(global.Engine.transition).toHaveBeenCalledWith(
+        "BudgetRequest",
+        "BUDGET-26A-003",
+        "CLOSE",
+        "U-002",
+        expect.objectContaining({
+          action: "CLOSE",
+          decision_note: "Wrapped up for semester",
+        })
+      );
+    });
   });
 
   describe("authorization hardening", () => {
@@ -4795,14 +4918,21 @@ describe("Api.js", () => {
         to: "APPROVED_FOR_PAYOUT",
       });
       const { api_approvePayout } = require("../Api.js");
-      const { data: result } = api_approvePayout("CLAIM-001", "AC-001");
+      const { data: result } = api_approvePayout(
+        "CLAIM-001",
+        "AC-001",
+        "FPS-REF-123"
+      );
       expect(result.to).toBe("APPROVED_FOR_PAYOUT");
       expect(global.Engine.transition).toHaveBeenCalledWith(
         "ExpenseClaim",
         "CLAIM-001",
         "APPROVE_PAYOUT",
         "U-002",
-        { account_id: "AC-001" }
+        {
+          account_id: "AC-001",
+          txnReference: "FPS-REF-123",
+        }
       );
     });
   });
@@ -5963,6 +6093,77 @@ describe("Api.js", () => {
         150,
         "FPS",
         "FPS-REF-123",
+        "U-002"
+      );
+    });
+
+    it("should still reject empty txnReference for FPS/PAYME (#72)", () => {
+      global.Session.getActiveUser.mockReturnValueOnce({
+        getEmail: () => "treasurer@example.com",
+      });
+      global.Engine._loadRow.mockReturnValueOnce({
+        rowIndex: 2,
+        values: [
+          "PAYOUT-001",
+          "CLAIM-001",
+          "M-001",
+          150,
+          "FPS",
+          "",
+          "",
+          "QUEUED",
+          "",
+          "",
+          "AC-001",
+          "",
+          "",
+        ],
+      });
+      global.Payouts.markPayoutSent.mockReturnValueOnce({
+        ok: false,
+        reason: "FPS requires a transaction reference.",
+      });
+      global.getSheet_.mockImplementation((tab) => {
+        if (tab === "Users") {
+          return {
+            getDataRange: () => ({
+              getValues: () => [
+                [
+                  "user_id",
+                  "display_name",
+                  "role",
+                  "email",
+                  "active",
+                  "created_at",
+                ],
+                [
+                  "U-002",
+                  "Treasurer",
+                  "TREASURER",
+                  "treasurer@example.com",
+                  true,
+                  "2026-01-01",
+                ],
+              ],
+            }),
+          };
+        }
+        return { getDataRange: jest.fn(() => ({ getValues: () => [[]] })) };
+      });
+      const { api_markPayoutSent } = require("../Api.js");
+      const result = api_markPayoutSent("PAYOUT-001", {
+        method: "FPS",
+        txnReference: "",
+      });
+      expect(result.ok).toBe(false);
+      expect(result.error.message).toContain(
+        "FPS requires a transaction reference."
+      );
+      expect(global.Payouts.markPayoutSent).toHaveBeenCalledWith(
+        "PAYOUT-001",
+        150,
+        "FPS",
+        "",
         "U-002"
       );
     });

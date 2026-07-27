@@ -29,6 +29,7 @@ import type {
   MyClaimsResponse,
   PayoutQueueItem,
   PendingBudgetRequest,
+  ReconciliationCorrectionPayload,
   ReconciliationData,
   RecordIncomePayload,
   ReportData,
@@ -136,7 +137,8 @@ export const apiService = {
 
   approvePayoutWithAccount: (
     claimId: string,
-    accountId: string
+    accountId: string,
+    txnReference?: string
   ): Promise<TransitionResult> =>
     new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
@@ -160,7 +162,7 @@ export const apiService = {
           }
         })
         .withFailureHandler(reject)
-        .api_approvePayout(claimId, accountId);
+        .api_approvePayout(claimId, accountId, txnReference);
     }),
   atomicSubmitClaim: (
     payload: AtomicClaimPayload
@@ -971,6 +973,7 @@ export const apiService = {
               needed_by: "2026-09-01",
               request_id: "BUDGET-26A-002",
               requester_id: "U-002",
+              status: "PENDING",
               submitted_at: "2026-07-20",
               title: "Pending Mock",
               total_requested: 1000,
@@ -1029,15 +1032,19 @@ export const apiService = {
   getReconciliation: (): Promise<ReconciliationData> =>
     new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
-        setTimeout(
-          () =>
-            resolve({
-              accounts: [],
-              incomplete_payouts: [],
-              mismatches: [],
-              movement_count: 0,
-            }),
-          300
+        setTimeout(() =>
+          resolve({
+            accounts: [],
+            drilldown: {
+              adjustments: [],
+              income: [],
+              payouts: [],
+              transfers: [],
+            },
+            incomplete_payouts: [],
+            mismatches: [],
+            movement_count: 0,
+          })
         );
         return;
       }
@@ -1050,6 +1057,28 @@ export const apiService = {
           }
         })
         .api_getReconciliation();
+    }),
+  correctReconciliation: (
+    payload: ReconciliationCorrectionPayload
+  ): Promise<{ account_id: string; adjustment_id: string }> =>
+    new Promise((resolve, reject) => {
+      if (typeof google === "undefined" || !google.script) {
+        setTimeout(
+          () =>
+            resolve({
+              account_id: payload.accountId,
+              adjustment_id: "ADJ-MOCK",
+            }),
+          300
+        );
+        return;
+      }
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) resolve(result.data);
+          else reject(new Error(result.error.message));
+        })
+        .api_correctReconciliation(payload);
     }),
 
   // ─── Reports ───

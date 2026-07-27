@@ -2091,7 +2091,7 @@ function api_getClaimsQueue(filters) {
       continue;
     }
 
-    out.push({
+    var queuedItem = {
       claim_id: values[i][c.claim_id - 1],
       claimant_id: values[i][c.claimant_id - 1],
       created_by: values[i][c.created_by - 1],
@@ -2101,7 +2101,18 @@ function api_getClaimsQueue(filters) {
       submitted_at: values[i][c.submitted_at - 1],
       total_amount: values[i][c.total_amount - 1],
       verified_at: values[i][c.verified_at - 1],
-    });
+    };
+    // Surface the claimant's payout method/handle so the Treasurer's
+    // approve modal can show what the claimant asked for (#72).
+    var claimantVault = _findVaultByUserId(queuedItem.claimant_id);
+    if (claimantVault) {
+      var vc = COLS.Vault;
+      queuedItem.payout_handle =
+        claimantVault.values[vc.payout_handle - 1] || "";
+      queuedItem.payout_method =
+        claimantVault.values[vc.payout_method - 1] || "";
+    }
+    out.push(queuedItem);
   }
   return _ok(out);
 }
@@ -2679,9 +2690,9 @@ function api_getAdjustments(accountId) {
 
 /**
  * Approve a VERIFIED claim for payout (Treasurer only).
- * Optionally specify the Finance Account to deduct from.
+ * Optionally specify the Finance Account to deduct from and transaction reference.
  */
-function api_approvePayout(claimId, accountId) {
+function api_approvePayout(claimId, accountId, txnReference) {
   var operator;
   try {
     operator = _requireOperator();
@@ -2695,6 +2706,9 @@ function api_approvePayout(claimId, accountId) {
   var payload = {};
   if (accountId) {
     payload.account_id = accountId;
+  }
+  if (txnReference) {
+    payload.txnReference = txnReference;
   }
 
   var result = Engine.transition(

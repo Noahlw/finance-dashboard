@@ -4,7 +4,9 @@ import { apiService } from "./services/api";
 import type {
   ClaimQueueFilters,
   ClaimQueueItem,
+  FinanceAccount,
   Member,
+  SessionResponse,
   SessionRole,
 } from "./types";
 
@@ -32,6 +34,12 @@ export default function ReviewDashboard({
   );
   const [decisionNote, setDecisionNote] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState("");
+
+  // #72 — Finance accounts + payment-state for the approve-payout modal.
+  const [accounts, setAccounts] = useState<FinanceAccount[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState("");
+  const [selectedTxnReference, setSelectedTxnReference] = useState("");
 
   const isTreasurer = role === "TREASURER";
 
@@ -63,6 +71,26 @@ export default function ReviewDashboard({
   useEffect(() => {
     loadQueue();
   }, []);
+  useEffect(() => {
+    apiService.resolveSession().then((session: SessionResponse) => {
+      if (session.allowed) {
+        setCurrentUserId(session.user_id);
+      }
+    });
+  }, []);
+
+  // #72 — Treasurer picks a Finance Account when approving a claim for payout.
+  useEffect(() => {
+    apiService
+      .getAccounts()
+      .then(setAccounts)
+      .catch((err: Error) => setError(err.message));
+  }, []);
+  const isSelfReview =
+    !!currentUserId &&
+    !!selectedClaim &&
+    (currentUserId === selectedClaim.created_by ||
+      currentUserId === selectedClaim.claimant_id);
 
   const statuses = ["", "SUBMITTED", "NEEDS_INFO", "VERIFIED"];
 
@@ -97,11 +125,27 @@ export default function ReviewDashboard({
           await apiService.requestInfo(selectedClaim.claim_id, decisionNote);
           break;
         case "approve-payout":
-          await apiService.approvePayout(selectedClaim.claim_id);
+          if (!selectedAccountId) {
+            showNotice("Finance Account is required");
+            setActionLoading(false);
+            return;
+          }
+          if (requiresTxnReference && !selectedTxnReference.trim()) {
+            showNotice("Transaction reference is required for FPS/PAYME");
+            setActionLoading(false);
+            return;
+          }
+          await apiService.approvePayoutWithAccount(
+            selectedClaim.claim_id,
+            selectedAccountId,
+            requiresTxnReference ? selectedTxnReference.trim() : undefined
+          );
           break;
       }
       setSelectedClaim(null);
       setDecisionNote("");
+      setSelectedAccountId("");
+      setSelectedTxnReference("");
       loadQueue();
     } catch (err: any) {
       showNotice(err.message || "Action failed");
@@ -115,6 +159,22 @@ export default function ReviewDashboard({
 
   const getClaimantName = (claimantId: string) =>
     members.find((m) => m.user_id === claimantId)?.display_name || claimantId;
+
+  // #72 — derive the approve gating rules from the claimant's chosen method.
+  const selectedPayoutMethod = selectedClaim?.payout_method || "";
+  const requiresTxnReference =
+    selectedPayoutMethod === "FPS" || selectedPayoutMethod === "PAYME";
+  const approveDisabled =
+    !selectedAccountId ||
+    actionLoading ||
+    (requiresTxnReference && !selectedTxnReference.trim());
+
+  const openClaim = (c: ClaimQueueItem) => {
+    setSelectedClaim(c);
+    setDecisionNote("");
+    setSelectedAccountId("");
+    setSelectedTxnReference("");
+  };
 
   return (
     <div className="view-container">
@@ -298,10 +358,7 @@ export default function ReviewDashboard({
                     <td>
                       <button
                         className="primary-btn"
-                        onClick={() => {
-                          setSelectedClaim(c);
-                          setDecisionNote("");
-                        }}
+                        onClick={() => openClaim(c)}
                       >
                         {c.status === "SUBMITTED"
                           ? "Review"
@@ -394,6 +451,52 @@ export default function ReviewDashboard({
                 value={decisionNote}
               />
             </div>
+            {selectedClaim.status === "VERIFIED" && (
+              <div className="detail-grid" style={{ marginTop: "1rem" }}>
+                <div>
+                  <strong>Payout method:</strong>{" "}
+                  {selectedPayoutMethod || "Not set by claimant"}
+                </div>
+                <div>
+                  <strong>Payout handle:</strong>{" "}
+                  {selectedClaim.payout_handle || "-"}
+                </div>
+              </div>
+            )}
+            {selectedClaim.status === "VERIFIED" && isTreasurer && (
+              <>
+                <div className="form-group">
+                  <label htmlFor="approve-account">Finance Account *</label>
+                  <select
+                    id="approve-account"
+                    onChange={(e) => setSelectedAccountId(e.target.value)}
+                    value={selectedAccountId}
+                  >
+                    <option value="">Select an account...</option>
+                    {accounts
+                      .filter((a) => a.status === "ACTIVE")
+                      .map((a) => (
+                        <option key={a.account_id} value={a.account_id}>
+                          {a.name} (bal: HK$
+                          {Number(a.current_balance).toFixed(2)})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+                {requiresTxnReference && (
+                  <div className="form-group">
+                    <label htmlFor="approve-txn">Transaction reference *</label>
+                    <input
+                      id="approve-txn"
+                      onChange={(e) => setSelectedTxnReference(e.target.value)}
+                      placeholder="e.g. FPS reference or PayMe txn id"
+                      type="text"
+                      value={selectedTxnReference}
+                    />
+                  </div>
+                )}
+              </>
+            )}
             <div
               className="modal-actions decision-actions"
               style={{ justifyContent: "space-between" }}
@@ -404,6 +507,8 @@ export default function ReviewDashboard({
                   onClick={() => {
                     setSelectedClaim(null);
                     setDecisionNote("");
+                    setSelectedAccountId("");
+                    setSelectedTxnReference("");
                   }}
                   type="button"
                 >
@@ -413,14 +518,16 @@ export default function ReviewDashboard({
               <div style={{ display: "flex", gap: "0.5rem" }}>
                 {selectedClaim.status === "SUBMITTED" && (
                   <>
-                    <button
-                      className="primary-btn"
-                      disabled={actionLoading}
-                      onClick={() => handleAction("verify")}
-                      type="button"
-                    >
-                      {actionLoading ? "Processing..." : "Verify"}
-                    </button>
+                    {!isSelfReview && (
+                      <button
+                        className="primary-btn"
+                        disabled={actionLoading}
+                        onClick={() => handleAction("verify")}
+                        type="button"
+                      >
+                        {actionLoading ? "Processing..." : "Verify"}
+                      </button>
+                    )}
                     <button
                       className="warning-btn"
                       disabled={actionLoading}
@@ -449,7 +556,7 @@ export default function ReviewDashboard({
                     {isTreasurer && (
                       <button
                         className="primary-btn"
-                        disabled={actionLoading}
+                        disabled={approveDisabled}
                         onClick={() => handleAction("approve-payout")}
                         type="button"
                       >
