@@ -83,7 +83,7 @@ export default function ClaimsView({
   const [claimantId, setClaimantId] = useState("");
   const [expenseDate, setExpenseDate] = useState("");
   const [semester, setSemester] = useState("26A");
-  const [eventId, setEventId] = useState("");
+  const [eventId, setEventId] = useState<string | undefined>("");
   const [amount, setAmount] = useState("");
   const [notes, setNotes] = useState("");
   const [budgetLineId, setBudgetLineId] = useState("");
@@ -94,11 +94,11 @@ export default function ClaimsView({
   const [otherDetails, setOtherDetails] = useState("");
   const [qrFile, setQrFile] = useState<ClaimFilePayload>();
   const [draftId, setDraftId] = useState<string>();
+  const [editingClaimId, setEditingClaimId] = useState<string>();
   const [idempotencyKey, setIdempotencyKey] = useState("");
   const [correctionMessage, setCorrectionMessage] = useState("");
   const [skipReceipt, setSkipReceipt] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-
   const [events, setEvents] = useState<Event[]>([]);
   const [uploadedReceipts, setUploadedReceipts] = useState<UploadingReceipt[]>(
     []
@@ -163,6 +163,44 @@ export default function ClaimsView({
     setShowForm(true);
   };
 
+  const editSubmittedClaim = (claim: Claim) => {
+    setShowForm(false);
+    resetForm();
+    setDraftId(undefined);
+    setClaimantId(claim.claimant_id);
+    setAmount(String(claim.total_amount ?? ""));
+    setNotes(claim.notes || "");
+    setEventId(claim.event_id || "");
+    setExpenseDate("");
+    setSemester(claim.semester || "26A");
+    setIdempotencyKey(crypto.randomUUID());
+    setEditingClaimId(claim.claim_id);
+    setShowForm(true);
+  };
+
+  const submitEditClaim = async () => {
+    if (!editingClaimId) {
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await apiService.editClaim({
+        amount: Number(amount) || 0,
+        claimId: editingClaimId,
+        claimantId,
+        eventId: eventId || undefined,
+        notes,
+      });
+      setShowForm(false);
+      setEditingClaimId(undefined);
+      loadClaims();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const resumeDraft = (claimId: string) => {
     setShowForm(false);
     apiService
@@ -219,7 +257,6 @@ export default function ClaimsView({
       })
       .catch((err: Error) => setError(err.message));
   };
-
   const canProceed = () => {
     if (step === "member") {
       return !!claimantId;
@@ -883,21 +920,29 @@ export default function ClaimsView({
                 )}
                 {step === "review" ? (
                   <>
-                    <button
-                      className="secondary-btn"
-                      disabled={submitting}
-                      onClick={() => handleSave(false)}
-                      type="button"
-                    >
-                      Save Draft
-                    </button>
+                    {!editingClaimId && (
+                      <button
+                        className="secondary-btn"
+                        disabled={submitting}
+                        onClick={() => handleSave(false)}
+                        type="button"
+                      >
+                        Save Draft
+                      </button>
+                    )}
                     <button
                       className="primary-btn"
                       disabled={submitting}
-                      onClick={() => handleSave(true)}
+                      onClick={() =>
+                        editingClaimId ? submitEditClaim() : handleSave(true)
+                      }
                       type="button"
                     >
-                      {submitting ? "Submitting..." : "Submit Claim"}
+                      {submitting
+                        ? "Submitting..."
+                        : editingClaimId
+                          ? "Save Changes"
+                          : "Submit Claim"}
                     </button>
                   </>
                 ) : (
@@ -985,7 +1030,7 @@ export default function ClaimsView({
                         )}
                       </td>
                       <td>
-                        {isDraft && (
+                        {isDraft ? (
                           <button
                             className="primary-btn small-btn"
                             onClick={() => resumeDraft(c.claim_id)}
@@ -993,7 +1038,15 @@ export default function ClaimsView({
                           >
                             Resume
                           </button>
-                        )}
+                        ) : c.status === "SUBMITTED" ? (
+                          <button
+                            className="secondary-btn small-btn"
+                            onClick={() => editSubmittedClaim(c)}
+                            type="button"
+                          >
+                            Edit
+                          </button>
+                        ) : null}
                       </td>
                     </tr>
                   );

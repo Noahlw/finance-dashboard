@@ -6844,6 +6844,80 @@ describe("Api.js", () => {
         );
       });
 
+      it("should change the owner_user_id and audit it", () => {
+        var setValueCalls = [];
+        global.getSheet_.mockImplementation((tab) => {
+          if (tab === "Users") {
+            return {
+              getDataRange: () => ({
+                getValues: () => [
+                  [],
+                  [
+                    "U-001",
+                    "Test",
+                    "COMMITTEE",
+                    "test@example.com",
+                    true,
+                    "2026-01-01",
+                  ],
+                ],
+              }),
+            };
+          }
+          if (tab === "Events") {
+            return {
+              getDataRange: () => ({
+                getValues: () => [
+                  [],
+                  [
+                    "EVENT-001",
+                    "Old Name",
+                    "S1-2026",
+                    "U-001",
+                    "2026-07-01",
+                    "OPEN",
+                    "",
+                  ],
+                ],
+              }),
+              getRange: jest.fn((row, col) => {
+                setValueCalls.push({ col, row });
+                return {
+                  setValue: jest.fn(),
+                  getValues: jest.fn(() => [[]]),
+                };
+              }),
+            };
+          }
+          return {
+            getDataRange: jest.fn(() => ({ getValues: () => [[]] })),
+            getRange: jest.fn(() => ({
+              setValue: jest.fn(),
+              getValues: jest.fn(() => [[]]),
+            })),
+            name: tab,
+          };
+        });
+        const { api_editEvent } = require("../Api.js");
+        const { data: result } = api_editEvent({
+          event_id: "EVENT-001",
+          owner_user_id: "U-002",
+        });
+        expect(result.event_id).toBe("EVENT-001");
+        // owner_user_id is the 4th Events column
+        const ownerWrite = setValueCalls.find(
+          (c) => c.col === global.COLS.Events.owner_user_id
+        );
+        expect(ownerWrite).toBeDefined();
+        expect(global.Audit.append).toHaveBeenCalledWith(
+          "U-001",
+          "Event",
+          "EVENT-001",
+          "UPDATE",
+          { changed: { owner_user_id: "U-002" } }
+        );
+      });
+
       it("should reject editing a CLOSED event", () => {
         global.getSheet_.mockImplementation((tab) => {
           if (tab === "Users") {
@@ -6983,6 +7057,79 @@ describe("Api.js", () => {
           "EVENT-002",
           "CORRECT",
           { changed: { name: "Corrected Name" } }
+        );
+      });
+
+      it("should change owner_user_id on a CLOSED event (treasurer override)", () => {
+        var setValueCalls = [];
+        global.Session.getActiveUser.mockReturnValue({
+          getEmail: () => "treasurer@example.com",
+        });
+        global.getSheet_.mockImplementation((tab) => {
+          if (tab === "Users") {
+            return {
+              getDataRange: () => ({
+                getValues: () => [
+                  [],
+                  [
+                    "U-002",
+                    "Treasurer",
+                    "TREASURER",
+                    "treasurer@example.com",
+                    true,
+                    "2026-01-01",
+                  ],
+                ],
+              }),
+            };
+          }
+          if (tab === "Events") {
+            return {
+              getDataRange: () => ({
+                getValues: () => [
+                  [],
+                  [
+                    "EVENT-002",
+                    "Closed Event",
+                    "S1-2026",
+                    "U-001",
+                    "2026-07-01",
+                    "CLOSED",
+                    "2026-07-20",
+                  ],
+                ],
+              }),
+              getRange: jest.fn((row, col) => {
+                setValueCalls.push({ col, row });
+                return {
+                  setValue: jest.fn(),
+                  getValues: jest.fn(() => [[]]),
+                };
+              }),
+            };
+          }
+          return {
+            getDataRange: jest.fn(() => ({ getValues: () => [[]] })),
+            getRange: jest.fn(() => ({ setValue: jest.fn() })),
+            name: tab,
+          };
+        });
+        const { api_correctEvent } = require("../Api.js");
+        const { data: result } = api_correctEvent({
+          event_id: "EVENT-002",
+          owner_user_id: "U-099",
+        });
+        expect(result.event_id).toBe("EVENT-002");
+        const ownerWrite = setValueCalls.find(
+          (c) => c.col === global.COLS.Events.owner_user_id
+        );
+        expect(ownerWrite).toBeDefined();
+        expect(global.Audit.append).toHaveBeenCalledWith(
+          "U-002",
+          "Event",
+          "EVENT-002",
+          "CORRECT",
+          { changed: { owner_user_id: "U-099" } }
         );
       });
 
