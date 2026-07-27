@@ -89,18 +89,21 @@ export interface Event {
 
 export interface EventPayload {
   name: string;
+  owner_user_id: string;
   semester: string;
 }
 
 export interface EditEventPayload {
   event_id: string;
   name?: string;
+  owner_user_id?: string;
   semester?: string;
 }
 
 export interface CorrectEventPayload {
   event_id: string;
   name?: string;
+  owner_user_id?: string;
   semester?: string;
 }
 
@@ -304,6 +307,7 @@ export interface Claim {
 }
 
 export interface ClaimDraftResponse {
+  budget_line_id: string;
   claim_id: string;
   claimant_id: string;
   created_by: string;
@@ -314,6 +318,7 @@ export interface ClaimDraftResponse {
   notes: string;
   payout_handle?: string;
   payout_method?: string;
+  receipt_ids: string[];
   semester?: string;
   status: string;
   total_amount: number;

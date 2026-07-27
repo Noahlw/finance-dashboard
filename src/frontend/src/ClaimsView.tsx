@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { AccessibleDialog } from "./components/AccessibleDialog";
 import { EventPicker } from "./components/EventPicker";
 import { apiService } from "./services/api";
+import { loadEvents } from "./services/eventCache";
 import type {
   BudgetLine,
   Claim,
   ClaimDraftResponse,
   ClaimFilePayload,
+  Event,
   Member,
   PayoutMethod,
   UploadingReceipt,
@@ -46,6 +48,27 @@ function formatFileSize(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
+function receiptStatusLabel(receipt: UploadingReceipt): string {
+  if (receipt.status === "done") {
+    return receipt.receiptId ? "Saved" : "Uploaded";
+  }
+  if (receipt.status === "uploading") {
+    return "Uploading...";
+  }
+  if (receipt.status === "error") {
+    return "Failed";
+  }
+  return "Pending";
+}
+
+function formatEventLabel(eventId: string, events: Event[]): string {
+  const match = events.find((evt) => evt.event_id === eventId);
+  if (!match) {
+    return "";
+  }
+  return `${match.name} (${match.semester})`;
+}
+
 export default function ClaimsView({
   members = [],
   budgetLines = [],
@@ -76,17 +99,17 @@ export default function ClaimsView({
   const [skipReceipt, setSkipReceipt] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  const [events, setEvents] = useState<Event[]>([]);
   const [uploadedReceipts, setUploadedReceipts] = useState<UploadingReceipt[]>(
     []
   );
-  const [pendingVendor, setPendingVendor] = useState("");
-  const [pendingReceiptDate, setPendingReceiptDate] = useState("");
-  const [pendingReceiptTotal, setPendingReceiptTotal] = useState("");
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [pendingFileBase64, setPendingFileBase64] = useState("");
   const [pendingFileError, setPendingFileError] = useState("");
+  const [pendingVendor, setPendingVendor] = useState("");
+  const [pendingReceiptDate, setPendingReceiptDate] = useState("");
+  const [pendingReceiptTotal, setPendingReceiptTotal] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
-
   const resetForm = () => {
     setStep("member");
     setClaimantId("");
@@ -126,6 +149,12 @@ export default function ClaimsView({
 
   useEffect(() => {
     loadClaims();
+    loadEvents()
+      .then(setEvents)
+      .catch(() => {
+        // Review-step falls back to the raw event id when the list is
+        // unavailable; the EventPicker handles its own retries.
+      });
   }, []);
 
   const openNewClaim = () => {
@@ -511,15 +540,7 @@ export default function ClaimsView({
                           <span
                             className={`badge status-${r.status === "done" ? "approved" : r.status === "error" ? "rejected" : "pending"}`}
                           >
-                            {r.status === "done"
-                              ? r.receiptId
-                                ? "Saved"
-                                : "Uploaded"
-                              : r.status === "uploading"
-                                ? "Uploading..."
-                                : r.status === "error"
-                                  ? "Failed"
-                                  : "Pending"}
+                            {receiptStatusLabel(r)}
                           </span>
                           {r.receiptId && (
                             <span className="mono receipt-id-label">
@@ -744,7 +765,8 @@ export default function ClaimsView({
             </p>
             {eventId && (
               <p>
-                <strong>Event:</strong> {eventId}
+                <strong>Event:</strong>{" "}
+                {formatEventLabel(eventId, events) || eventId}
               </p>
             )}
             <p>

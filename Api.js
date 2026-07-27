@@ -77,7 +77,7 @@ function api_resolveSession() {
     return { allowed: false, reason: "inactive_user" };
   }
 
-  var views = ["review", "claims", "members", "budget-requests"];
+  var views = ["review", "claims", "members", "budget-requests", "events"];
   if (user.role === ROLES.TREASURER) {
     views.push("income", "payouts", "reports", "reconciliation");
   }
@@ -202,7 +202,16 @@ function api_getClaimDraft(claimId) {
     };
   });
 
+  var receiptIds = lineItems
+    .map(function (li) {
+      return li.receipt_id;
+    })
+    .filter(function (rid) {
+      return rid;
+    });
+  var budgetLineId = lineItems.length > 0 ? lineItems[0].budget_line_id : "";
   return _ok({
+    budget_line_id: budgetLineId,
     claim_id: row.values[c.claim_id - 1],
     claimant_id: row.values[c.claimant_id - 1],
     created_by: row.values[c.created_by - 1],
@@ -213,6 +222,7 @@ function api_getClaimDraft(claimId) {
     notes: row.values[c.notes - 1],
     payout_handle: row.values[c.payout_handle - 1],
     payout_method: row.values[c.payout_method - 1],
+    receipt_ids: receiptIds,
     semester: row.values[c.semester - 1],
     status: row.values[c.status - 1],
     total_amount: row.values[c.total_amount - 1],
@@ -3706,16 +3716,13 @@ function api_listEvents() {
     });
   }
   out.sort(function (a, b) {
-    if (a.status === b.status) {
-      return String(b.created_at).localeCompare(String(a.created_at));
-    }
-    return a.status === STATUS.Event.CLOSED ? 1 : -1;
+    return String(b.created_at).localeCompare(String(a.created_at));
   });
   return _ok(out);
 }
 
 /**
- * Create a new Event. Committee only. Owner defaults to the caller.
+ * Create a new Event. Committee only. owner_user_id is required.
  */
 function api_createEvent(payload) {
   var operator;
@@ -3729,8 +3736,12 @@ function api_createEvent(payload) {
   }
   var name = String((payload && payload.name) || "").trim();
   var semester = String((payload && payload.semester) || "").trim();
-  if (!name || !semester) {
-    return _err("INVALID_INPUT", "name and semester are required");
+  var ownerUserId = String((payload && payload.owner_user_id) || "").trim();
+  if (!name || !semester || !ownerUserId) {
+    return _err(
+      "INVALID_INPUT",
+      "name, semester and owner_user_id are required"
+    );
   }
 
   var lock = LockService.getScriptLock();
@@ -3746,14 +3757,14 @@ function api_createEvent(payload) {
       eventId,
       name,
       semester,
-      operator.userId,
+      ownerUserId,
       now,
       STATUS.Event.OPEN,
       "",
     ]);
     Audit.append(operator.userId, "Event", eventId, "CREATE", {
       name: name,
-      owner_user_id: operator.userId,
+      owner_user_id: ownerUserId,
       semester: semester,
     });
     return _ok({ event_id: eventId, status: STATUS.Event.OPEN });
@@ -3807,6 +3818,15 @@ function api_editEvent(payload) {
       row.sheet.getRange(row.rowIndex, c.semester).setValue(payload.semester);
       changed.semester = payload.semester;
     }
+    if (
+      payload.owner_user_id !== undefined &&
+      payload.owner_user_id !== row.values[c.owner_user_id - 1]
+    ) {
+      row.sheet
+        .getRange(row.rowIndex, c.owner_user_id)
+        .setValue(payload.owner_user_id);
+      changed.owner_user_id = payload.owner_user_id;
+    }
     Audit.append(operator.userId, "Event", eventId, "UPDATE", {
       changed: changed,
     });
@@ -3857,6 +3877,15 @@ function api_correctEvent(payload) {
     ) {
       row.sheet.getRange(row.rowIndex, c.semester).setValue(payload.semester);
       changed.semester = payload.semester;
+    }
+    if (
+      payload.owner_user_id !== undefined &&
+      payload.owner_user_id !== row.values[c.owner_user_id - 1]
+    ) {
+      row.sheet
+        .getRange(row.rowIndex, c.owner_user_id)
+        .setValue(payload.owner_user_id);
+      changed.owner_user_id = payload.owner_user_id;
     }
     Audit.append(operator.userId, "Event", eventId, "CORRECT", {
       changed: changed,

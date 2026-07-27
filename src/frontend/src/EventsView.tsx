@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { askForConfirmation, showNotice } from "./components/AccessibleDialog";
 import { apiService } from "./services/api";
 import type {
@@ -6,6 +6,7 @@ import type {
   EditEventPayload,
   Event,
   EventPayload,
+  Member,
   SessionRole,
 } from "./types";
 
@@ -23,11 +24,16 @@ type EventDialog =
   | { mode: "close"; event: Event };
 type EventDialogMode = EventDialog["mode"];
 
-const INITIAL_FORM = { name: "", semester: "SEM A" as Semester };
+const INITIAL_FORM = {
+  name: "",
+  owner_user_id: "",
+  semester: "SEM A" as Semester,
+};
 
 export default function EventsView({ role }: EventsViewProps) {
   const isTreasurer = role === "TREASURER";
   const [events, setEvents] = useState<Event[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState<EventDialog | null>(null);
@@ -35,10 +41,12 @@ export default function EventsView({ role }: EventsViewProps) {
   const [formSemester, setFormSemester] = useState<Semester>(
     INITIAL_FORM.semester
   );
+  const [formOwnerUserId, setFormOwnerUserId] = useState(
+    INITIAL_FORM.owner_user_id
+  );
   const [closeReason, setCloseReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
-
-  const load = () => {
+  const load = useCallback(() => {
     setLoading(true);
     apiService
       .getEvents()
@@ -50,11 +58,18 @@ export default function EventsView({ role }: EventsViewProps) {
         setError(err.message || "Failed to load events");
       })
       .finally(() => setLoading(false));
-  };
+  }, []);
 
   useEffect(() => {
     load();
-  }, []);
+    apiService
+      .getMembers()
+      .then((list) => setMembers(list))
+      .catch((err: Error) => {
+        // Non-fatal — owner select will simply be empty.
+        setError(err.message || "Failed to load members");
+      });
+  }, [load]);
 
   const sorted = useMemo(
     () =>
@@ -71,6 +86,7 @@ export default function EventsView({ role }: EventsViewProps) {
   const resetForm = () => {
     setFormName(INITIAL_FORM.name);
     setFormSemester(INITIAL_FORM.semester);
+    setFormOwnerUserId(INITIAL_FORM.owner_user_id);
     setCloseReason("");
   };
 
@@ -82,12 +98,14 @@ export default function EventsView({ role }: EventsViewProps) {
   const openEdit = (event: Event) => {
     setFormName(event.name);
     setFormSemester(event.semester as Semester);
+    setFormOwnerUserId(event.owner_user_id || "");
     setDialog({ mode: "edit", event });
   };
 
   const openCorrect = (event: Event) => {
     setFormName(event.name);
     setFormSemester(event.semester as Semester);
+    setFormOwnerUserId(event.owner_user_id || "");
     setDialog({ mode: "correct", event });
   };
 
@@ -106,14 +124,20 @@ export default function EventsView({ role }: EventsViewProps) {
 
   const submitCreate = async () => {
     const name = formName.trim();
+    const owner = formOwnerUserId.trim();
     if (!name) {
       showNotice("Event name is required.");
+      return;
+    }
+    if (!owner) {
+      showNotice("Owner is required.");
       return;
     }
     setSubmitting(true);
     try {
       await apiService.createEvent({
         name,
+        owner_user_id: owner,
         semester: formSemester,
       } satisfies EventPayload);
       setDialog(null);
@@ -131,8 +155,13 @@ export default function EventsView({ role }: EventsViewProps) {
       return;
     }
     const name = formName.trim();
+    const owner = formOwnerUserId.trim();
     if (!name) {
       showNotice("Event name is required.");
+      return;
+    }
+    if (!owner) {
+      showNotice("Owner is required.");
       return;
     }
     setSubmitting(true);
@@ -140,6 +169,7 @@ export default function EventsView({ role }: EventsViewProps) {
       await apiService.editEvent({
         event_id: dialog.event.event_id,
         name,
+        owner_user_id: owner,
         semester: formSemester,
       } satisfies EditEventPayload);
       setDialog(null);
@@ -157,6 +187,7 @@ export default function EventsView({ role }: EventsViewProps) {
       return;
     }
     const name = formName.trim();
+    const owner = formOwnerUserId.trim();
     if (!name) {
       showNotice("Event name is required.");
       return;
@@ -166,6 +197,7 @@ export default function EventsView({ role }: EventsViewProps) {
       await apiService.correctEvent({
         event_id: dialog.event.event_id,
         name,
+        owner_user_id: owner,
         semester: formSemester,
       } satisfies CorrectEventPayload);
       setDialog(null);
@@ -282,6 +314,22 @@ export default function EventsView({ role }: EventsViewProps) {
                     ))}
                   </select>
                 </div>
+                <div className="form-group">
+                  <label htmlFor="event-owner">Owner</label>
+                  <select
+                    id="event-owner"
+                    onChange={(e) => setFormOwnerUserId(e.target.value)}
+                    required
+                    value={formOwnerUserId}
+                  >
+                    <option value="">— Select owner —</option>
+                    {members.map((m) => (
+                      <option key={m.user_id} value={m.user_id}>
+                        {m.display_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </>
             )}
             {isClose && (
@@ -315,13 +363,7 @@ export default function EventsView({ role }: EventsViewProps) {
                 disabled={submitting}
                 type="submit"
               >
-                {submitting
-                  ? "Working..."
-                  : isClose
-                    ? "Close Event"
-                    : dialog.mode === "create"
-                      ? "Create Event"
-                      : "Save"}
+                {submitButtonLabel(submitting, isClose, dialog.mode)}
               </button>
             </div>
           </form>
@@ -461,4 +503,21 @@ function getErrorMessage(err: unknown, fallback: string): string {
     return err.message || fallback;
   }
   return fallback;
+}
+
+function submitButtonLabel(
+  submitting: boolean,
+  isClose: boolean,
+  mode: EventDialogMode
+): string {
+  if (submitting) {
+    return "Working...";
+  }
+  if (isClose) {
+    return "Close Event";
+  }
+  if (mode === "create") {
+    return "Create Event";
+  }
+  return "Save";
 }

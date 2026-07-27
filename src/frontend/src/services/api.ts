@@ -570,12 +570,14 @@ export const apiService = {
         setTimeout(
           () =>
             resolve({
+              budget_line_id: "",
               claim_id: claimId,
               claimant_id: "MEMBER-MOCK",
               created_by: "USER-MOCK",
               draft: true,
               line_items: [],
               notes: "",
+              receipt_ids: [],
               status: "DRAFT",
               total_amount: 0,
               uuid: "UUID-MOCK",

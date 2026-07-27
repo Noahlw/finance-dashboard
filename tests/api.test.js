@@ -561,6 +561,7 @@ describe("Api.js", () => {
         "claims",
         "members",
         "budget-requests",
+        "events",
       ]);
     });
 
@@ -607,6 +608,7 @@ describe("Api.js", () => {
         "claims",
         "members",
         "budget-requests",
+        "events",
         "income",
         "payouts",
         "reports",
@@ -6560,14 +6562,15 @@ describe("Api.js", () => {
         const { api_listEvents } = require("../Api.js");
         const { data: result } = api_listEvents();
         expect(result).toHaveLength(2);
-        expect(result[0].event_id).toBe("EVENT-001");
-        expect(result[0].status).toBe("OPEN");
-        expect(result[0].semester).toBe("S1-2026");
-        expect(result[0].name).toBe("Orientation");
-        expect(result[0].owner_user_id).toBe("U-001");
-        expect(result[1].event_id).toBe("EVENT-002");
-        expect(result[1].status).toBe("CLOSED");
-        expect(result[1].closed_at).toBe("2026-07-20");
+        // Newest first: EVENT-002 (2026-07-15) precedes EVENT-001 (2026-07-01).
+        expect(result[0].event_id).toBe("EVENT-002");
+        expect(result[0].status).toBe("CLOSED");
+        expect(result[0].closed_at).toBe("2026-07-20");
+        expect(result[1].event_id).toBe("EVENT-001");
+        expect(result[1].status).toBe("OPEN");
+        expect(result[1].semester).toBe("S1-2026");
+        expect(result[1].name).toBe("Orientation");
+        expect(result[1].owner_user_id).toBe("U-001");
       });
     });
 
@@ -6577,7 +6580,7 @@ describe("Api.js", () => {
         global.Audit.append = jest.fn(function () {
           auditArgs = arguments;
         });
-        var appendRowArg;
+        var capturedSetValues = [];
         global.getSheet_.mockImplementation((tab) => {
           if (tab === "Users") {
             return {
@@ -6598,17 +6601,20 @@ describe("Api.js", () => {
           }
           if (tab === "Events") {
             return {
-              appendRow: jest.fn(function () {
-                appendRowArg = arguments;
-              }),
+              appendRow: jest.fn(),
               getDataRange: jest.fn(() => ({ getValues: () => [[]] })),
               getLastRow: jest.fn(() => 1),
               getMaxRows: jest.fn(() => 100),
               getRange: jest.fn(() => ({
                 getValues: jest.fn(() => [[]]),
                 setValue: jest.fn(),
-                setValues: jest.fn(),
+                setValues: jest.fn(function (matrix) {
+                  if (Array.isArray(matrix) && Array.isArray(matrix[0])) {
+                    capturedSetValues.push(matrix[0]);
+                  }
+                }),
               })),
+              insertRowAfter: jest.fn(),
               name: tab,
             };
           }
@@ -6620,10 +6626,19 @@ describe("Api.js", () => {
         const { api_createEvent } = require("../Api.js");
         const { data: result } = api_createEvent({
           name: "Test Event",
+          owner_user_id: "U-001",
           semester: "S1-2026",
         });
         expect(result.event_id).toBe("EVENT-001");
         expect(result.status).toBe("OPEN");
+        // _appendRow writes via setValues; the row carrying the
+        // owner_user_id is the only row containing EVENT-001.
+        const eventRow = capturedSetValues.find(
+          (row) => Array.isArray(row) && row[0] === "EVENT-001"
+        );
+        expect(eventRow).toBeDefined();
+        expect(eventRow[3]).toBe("U-001");
+        expect(eventRow[5]).toBe("OPEN");
         expect(global.Audit.append).toHaveBeenCalledWith(
           "U-001",
           "Event",
@@ -6631,6 +6646,17 @@ describe("Api.js", () => {
           "CREATE",
           { name: "Test Event", owner_user_id: "U-001", semester: "S1-2026" }
         );
+      });
+
+      it("should reject empty owner_user_id", () => {
+        const { api_createEvent } = require("../Api.js");
+        const result = api_createEvent({
+          name: "Test",
+          owner_user_id: "",
+          semester: "S1-2026",
+        });
+        expect(result.ok).toBe(false);
+        expect(result.error.code).toBe("INVALID_INPUT");
       });
 
       it("should reject empty name", () => {

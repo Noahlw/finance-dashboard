@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Event } from "../types";
-import { apiService } from "../services/api";
+import { loadEvents } from "../services/eventCache";
 
 interface EventPickerProps {
   value: string | undefined;
@@ -9,32 +9,6 @@ interface EventPickerProps {
   label?: string;
   "aria-label"?: string;
   id?: string;
-}
-
-interface CacheEntry {
-  promise: Promise<Event[]>;
-  expiresAt: number;
-}
-
-// Per-session cache. The same picker instance, and any sibling pickers
-// mounted during the same session, share this entry until it expires.
-let cachedEvents: CacheEntry | null = null;
-const CACHE_TTL_MS = 60_000; // 60 seconds — same shelf life as other session reads.
-
-async function loadEvents(force = false): Promise<Event[]> {
-  if (!force && cachedEvents && cachedEvents.expiresAt > Date.now()) {
-    return cachedEvents.promise;
-  }
-  const promise = apiService.getEvents();
-  cachedEvents = {
-    expiresAt: Date.now() + CACHE_TTL_MS,
-    promise: promise.catch((err) => {
-      // Drop the cache on failure so a retry can run a fresh request.
-      cachedEvents = null;
-      throw err;
-    }),
-  };
-  return promise;
 }
 
 export function EventPicker({
