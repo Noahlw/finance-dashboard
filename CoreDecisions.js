@@ -149,7 +149,15 @@ var TRANSITIONS = {
 };
 
 /** Actions where the actor being the entity's own requester/claimant triggers D5 self-approval flagging. */
-var SELF_APPROVAL_ACTIONS = ["APPROVE", "REDUCE", "VERIFY", "APPROVE_PAYOUT"];
+var SELF_APPROVAL_ACTIONS = [
+  "APPROVE",
+  "REDUCE",
+  "VERIFY",
+  "APPROVE_PAYOUT",
+  "REQUEST_INFO",
+  "REJECT",
+  "CLOSE",
+];
 
 var CoreDecisions = {
   /**

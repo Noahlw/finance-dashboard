@@ -380,14 +380,14 @@ var Migration = {
     var lock = LockService.getScriptLock();
     lock.waitLock(30_000);
     try {
-      return Migration._activateMigrationLocked_(actorUserId);
+      return Migration._activateMigrationLocked_(actorUserId, lock);
     } finally {
       lock.releaseLock();
     }
   },
 
   /** @private */
-  _activateMigrationLocked_(actorUserId) {
+  _activateMigrationLocked_(actorUserId, lock) {
     var stage = Config.getOptional("MIGRATION_STAGE") || "";
     if (stage !== "VALIDATE" && stage !== "ACTIVATE") {
       return {
@@ -411,8 +411,10 @@ var Migration = {
           typeof SchemaMigration !== "undefined" &&
           typeof SchemaMigration.prepareAnnualLedger === "function"
         ) {
-          var schemaPreparation =
-            SchemaMigration.prepareAnnualLedger(targetLedger);
+          var schemaPreparation = SchemaMigration.prepareAnnualLedger(
+            targetLedger,
+            { lock: lock }
+          );
           if (!schemaPreparation.ok) {
             return {
               ok: false,
@@ -442,6 +444,22 @@ var Migration = {
     // If already activated (idempotent repeat), return success without
     // re-archiving or duplicating the audit event.
     if (stage === "ACTIVATE") {
+      if (
+        typeof SchemaMigration !== "undefined" &&
+        typeof SchemaMigration.healthCheck === "function"
+      ) {
+        var retryHealth = SchemaMigration.healthCheck(
+          SpreadsheetApp.openById(targetSpreadsheetId)
+        );
+        if (!retryHealth.ok) {
+          return {
+            ok: false,
+            reason:
+              "Target schema health check failed on retry: " +
+              retryHealth.errors.join("; "),
+          };
+        }
+      }
       return {
         new_spreadsheet_id: targetSpreadsheetId,
         ok: true,
@@ -496,10 +514,18 @@ var Migration = {
       scriptProperties.setProperty("LEDGER_ID", oldSpreadsheetId);
       Migration._setConfig("MIGRATION_STAGE", "VALIDATE");
       Config.invalidate();
-      Audit.append(actorUserId, "Migration", targetSpreadsheetId, "ROLLBACK", {
-        reason: health.reason,
-        restored_spreadsheet_id: oldSpreadsheetId,
-      });
+      Audit.append(
+        actorUserId,
+        "Migration",
+        targetSpreadsheetId,
+        "ROLLBACK",
+        {
+          reason: health.reason,
+          restored_spreadsheet_id: oldSpreadsheetId,
+        },
+        null,
+        lock
+      );
       return {
         ok: false,
         reason:
@@ -517,9 +543,13 @@ var Migration = {
       ["MIGRATION_SOURCE_SPREADSHEET_ID", oldSpreadsheetId],
       ["MIGRATION_ACTOR_USER_ID", actorUserId],
       ["MIGRATION_SELECTIONS", JSON.stringify(sourceSelections)],
-    ].forEach((entry) => {
-      Migration._setTargetConfig(targetSpreadsheetId, entry[0], entry[1]);
-    });
+    ].forEach(
+      (entry) => {
+        Migration._setTargetConfig(targetSpreadsheetId, entry[0], entry[1]);
+      },
+      null,
+      lock
+    );
     Config.invalidate();
 
     // Share the target with selected active operators.
@@ -578,10 +608,18 @@ var Migration = {
       };
     }
 
-    Audit.append(actorUserId, "Migration", yearLabel, "ACTIVATE", {
-      new_spreadsheet_id: targetSpreadsheetId,
-      old_spreadsheet_id: oldSpreadsheetId,
-    });
+    Audit.append(
+      actorUserId,
+      "Migration",
+      yearLabel,
+      "ACTIVATE",
+      {
+        new_spreadsheet_id: targetSpreadsheetId,
+        old_spreadsheet_id: oldSpreadsheetId,
+      },
+      null,
+      lock
+    );
 
     try {
       Discord.postTreasury(
@@ -1367,14 +1405,18 @@ var Migration = {
     var lock = LockService.getScriptLock();
     lock.waitLock(30_000);
     try {
-      return Migration._setMemberSelectionsLocked_(actorUserId, memberIds);
+      return Migration._setMemberSelectionsLocked_(
+        actorUserId,
+        memberIds,
+        lock
+      );
     } finally {
       lock.releaseLock();
     }
   },
 
   /** @private */
-  _setMemberSelectionsLocked_(actorUserId, memberIds) {
+  _setMemberSelectionsLocked_(actorUserId, memberIds, lock) {
     var stage = Config.getOptional("MIGRATION_STAGE") || "";
     if (SELECTION_STAGES.indexOf(stage) < 0) {
       return {
@@ -1398,7 +1440,9 @@ var Migration = {
       "Migration",
       Config.getOptional("MIGRATION_YEAR_LABEL") || "",
       "MEMBERS_SET",
-      { members: ids.length }
+      { members: ids.length },
+      null,
+      lock
     );
 
     return { ok: true, stage: "MEMBERS" };

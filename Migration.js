@@ -781,12 +781,15 @@ var SchemaMigration = {
       });
     }
 
-    var lock = SchemaMigration._lock();
+    var lock = settings.lock || SchemaMigration._lock();
+    var ownsLock = !settings.lock;
     var lockHeld = false;
     var movementResult;
     try {
-      lock.waitLock(MIGRATION_LOCK_TIMEOUT_MS);
-      lockHeld = true;
+      if (ownsLock) {
+        lock.waitLock(MIGRATION_LOCK_TIMEOUT_MS);
+        lockHeld = true;
+      }
 
       // A second read closes the preflight-to-lock race. If another execution
       // changed the version, make no write and force the owner to rerun.
@@ -803,6 +806,13 @@ var SchemaMigration = {
       var currentVersion = sourceVersion;
       var completedMigrations = [];
       var latestRunId = "";
+
+      if (
+        currentVersion === targetVersion &&
+        SchemaMigration.readSchemaVersion(ledger) !== targetVersion
+      ) {
+        SchemaMigration.setConfigValue(ledger, "SCHEMA_VERSION", targetVersion);
+      }
 
       while (currentVersion < targetVersion) {
         var migration = migrations[currentVersion + 1];
@@ -897,7 +907,7 @@ var SchemaMigration = {
         status: "FAILED",
       };
     } finally {
-      if (lockHeld) {
+      if (ownsLock && lockHeld) {
         lock.releaseLock();
       }
     }
@@ -1251,31 +1261,42 @@ function Migrate_run(options) {
 /** Owner-visible explicit rollback helper for the most recent failed run. */
 function Migrate_rollback(options) {
   var settings = options || {};
-  var ledger = settings.ledger || getLedger_();
-  var journal = SchemaMigration.ensureJournal(ledger);
-  var records = SchemaMigration.readJournal(journal);
-  var latest = records
-    .filter(
-      (record) =>
-        record.record_type === "STEP" &&
-        ["PENDING", "FAILED", "DONE"].indexOf(String(record.status)) >= 0
-    )
-    .pop();
-  if (!latest) {
-    return { ok: true, restoredSteps: 0, status: "NOTHING_TO_ROLL_BACK" };
+  var lock = settings.lock || LockService.getScriptLock();
+  var ownsLock = !settings.lock;
+  if (ownsLock) {
+    lock.waitLock(30_000);
   }
-  var migration = (settings.migrations || MIGRATIONS)[
-    Number(latest.to_version)
-  ];
-  return SchemaMigration.rollback({
-    derivedRegistry: settings.derivedRegistry || DERIVED_REGISTRY,
-    journal,
-    ledger,
-    originalStoredVersion: String(latest.from_version),
-    runId: latest.run_id,
-    sourceVersion: Number(latest.from_version),
-    migration,
-  });
+  try {
+    var ledger = settings.ledger || getLedger_();
+    var journal = SchemaMigration.ensureJournal(ledger);
+    var records = SchemaMigration.readJournal(journal);
+    var latest = records
+      .filter(
+        (record) =>
+          record.record_type === "STEP" &&
+          ["PENDING", "FAILED", "DONE"].indexOf(String(record.status)) >= 0
+      )
+      .pop();
+    if (!latest) {
+      return { ok: true, restoredSteps: 0, status: "NOTHING_TO_ROLL_BACK" };
+    }
+    var migration = (settings.migrations || MIGRATIONS)[
+      Number(latest.to_version)
+    ];
+    return SchemaMigration.rollback({
+      derivedRegistry: settings.derivedRegistry || DERIVED_REGISTRY,
+      journal,
+      ledger,
+      originalStoredVersion: String(latest.from_version),
+      runId: latest.run_id,
+      sourceVersion: Number(latest.from_version),
+      migration,
+    });
+  } finally {
+    if (ownsLock) {
+      lock.releaseLock();
+    }
+  }
 }
 
 if (typeof module !== "undefined") {

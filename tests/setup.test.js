@@ -578,7 +578,8 @@ describe("Annual Migration schema activation gate", () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(SCHEMA_REGEX);
     expect(global.SchemaMigration.prepareAnnualLedger).toHaveBeenCalledWith(
-      target
+      target,
+      expect.anything()
     );
   });
 });

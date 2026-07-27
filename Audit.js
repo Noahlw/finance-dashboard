@@ -59,9 +59,20 @@ var Audit = {
    *        entity/action/key calls return the original row atomically
    * @return {{seq:number, rowHash:string}}
    */
-  append(actorUserId, entityType, entityId, action, detailObj, idempotencyKey) {
-    var lock = LockService.getScriptLock();
-    lock.waitLock(30_000);
+  append(
+    actorUserId,
+    entityType,
+    entityId,
+    action,
+    detailObj,
+    idempotencyKey,
+    optLock
+  ) {
+    var lock = optLock || LockService.getScriptLock();
+    var ownsLock = !optLock;
+    if (ownsLock) {
+      lock.waitLock(30_000);
+    }
     try {
       var sheet = getSheet_(TABS.AUDIT_LOG);
       var lastRow = sheet.getLastRow();
@@ -136,7 +147,9 @@ var Audit = {
       SpreadsheetApp.flush(); // Crucial for rapid consecutive appends so getLastRow() isn't stale
       return { rowHash, seq };
     } finally {
-      lock.releaseLock();
+      if (ownsLock) {
+        lock.releaseLock();
+      }
     }
   },
 

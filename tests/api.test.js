@@ -1,5 +1,4 @@
 "use strict";
-
 global.Session = {
   getActiveUser: jest.fn(() => ({
     getEmail: jest.fn(() => "test@example.com"),
@@ -235,9 +234,7 @@ global.Payouts = {
   })),
 };
 global.Utilities = {
-  base64Decode: jest.fn(() => [
-    116, 101, 115, 116, 32, 98, 121, 116, 101, 115,
-  ]),
+  base64Decode: jest.fn(() => [116, 101, 115, 116, 32, 98, 121, 116, 101, 115]),
   computeDigest: jest.fn(() => [
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
     21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
@@ -295,8 +292,144 @@ global.Engine.transition = jest.fn(
     to: "PENDING",
   })
 );
+describe("additional authorization scenarios", () => {
+  it("should deny api_saveBudgetRequestDraft for an active operator modifying another user's draft", () => {
+    global.Session.getActiveUser.mockReturnValueOnce({
+      getEmail: () => "attacker@example.com",
+    });
+    global.getSheet_.mockImplementationOnce((name) => {
+      if (name === "Users") {
+        return {
+          getDataRange: () => ({
+            getValues: () => [
+              [
+                "user_id",
+                "display_name",
+                "role",
+                "email",
+                "active",
+                "created_at",
+              ],
+              [
+                "U-ATTACKER",
+                "Attacker",
+                "COMMITTEE",
+                "attacker@example.com",
+                true,
+                "2026-01-01",
+              ],
+            ],
+          }),
+        };
+      }
+      return {
+        appendRow: jest.fn(),
+        getDataRange: jest.fn(() => ({ getValues: jest.fn(() => [[]]) })),
+        getLastRow: jest.fn(() => 1),
+        getMaxRows: jest.fn(() => 100),
+        getRange: jest.fn(() => ({
+          getValues: () => [[]],
+          setValue: jest.fn(),
+          setValues: jest.fn(),
+        })),
+      };
+    });
+    const api = require("../Api.js");
+    global.Engine._loadRow.mockReturnValueOnce({
+      values: [
+        "BUDGET-999",
+        "U-VICTIM",
+        "DRAFT",
+        "Victim Title",
+        100,
+        100,
+        "2026-01-01",
+      ],
+    });
+    const result = api.api_saveBudgetRequestDraft({
+      request_id: "BUDGET-999",
+      title: "Hacked Title",
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error.code).toBe("AUTH_DENIED");
+  });
 
+  it("should deny api_getPendingBudgetRequests for an inactive Treasurer user", () => {
+    global.Session.getActiveUser.mockReturnValueOnce({
+      getEmail: () => "inactive@example.com",
+    });
+    global.getSheet_.mockImplementationOnce((name) => {
+      if (name === "Users") {
+        return {
+          getDataRange: () => ({
+            getValues: () => [
+              [
+                "user_id",
+                "display_name",
+                "role",
+                "email",
+                "active",
+                "created_at",
+              ],
+              [
+                "U-INACTIVE",
+                "Inactive",
+                "TREASURER",
+                "inactive@example.com",
+                false,
+                "2026-01-01",
+              ],
+            ],
+          }),
+        };
+      }
+      return { getDataRange: () => ({ getValues: () => [[]] }) };
+    });
+    const api = require("../Api.js");
+    const result = api.api_getPendingBudgetRequests();
+    expect(result.ok).toBe(false);
+    expect(result.error.code).toBe("AUTH_DENIED");
+  });
+
+  it("should deny api_uploadReceipt for a Member role user", () => {
+    global.Session.getActiveUser.mockReturnValueOnce({
+      getEmail: () => "member@example.com",
+    });
+    global.getSheet_.mockImplementationOnce((name) => {
+      if (name === "Users") {
+        return {
+          getDataRange: () => ({
+            getValues: () => [
+              [
+                "user_id",
+                "display_name",
+                "role",
+                "email",
+                "active",
+                "created_at",
+              ],
+              [
+                "U-MEMBER",
+                "Member User",
+                "MEMBER",
+                "member@example.com",
+                true,
+                "2026-01-01",
+              ],
+            ],
+          }),
+        };
+      }
+      return { getDataRange: () => ({ getValues: () => [[]] }) };
+    });
+    const api = require("../Api.js");
+    const result = api.api_uploadReceipt("file.png", "image/png", "bytes");
+    expect(result.ok).toBe(false);
+    expect(result.error.code).toBe("AUTH_DENIED");
+  });
+});
 const { api_getMyClaims } = require("../Api.js");
+global.getSheet_ = jest.fn();
 describe("Api.js", () => {
   const testUserEmail = "test@example.com";
   const testUserId = "U-001";
@@ -727,6 +860,7 @@ describe("Api.js", () => {
     it("should throw when editing non-draft request", () => {
       global.Engine._loadRow.mockReturnValueOnce({
         rowIndex: 3,
+        status: "APPROVED",
         values: [
           "BUDGET-26A-001",
           "U-001",
