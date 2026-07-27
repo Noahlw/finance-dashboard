@@ -10,6 +10,7 @@ import PayoutsView from "./PayoutsView";
 import ReconciliationView from "./ReconciliationView";
 import ReportsView from "./ReportsView";
 import ReviewDashboard from "./ReviewDashboard";
+import EventsView from "./EventsView";
 import { apiService } from "./services/api";
 import type {
   BudgetLine,
@@ -27,6 +28,7 @@ const VIEW_LABELS: Record<WorkspaceView, string> = {
   payouts: "Payouts",
   reports: "Reports",
   review: "Review",
+  events: "Events",
 };
 
 function SessionLoading() {
@@ -139,6 +141,8 @@ function WorkspaceShell({ session }: { session: SessionInfo }) {
     switch (activeView) {
       case "claims":
         return <ClaimsView budgetLines={budgetLines} members={members} />;
+      case "events":
+        return <EventsView role={session.role} />;
       case "members":
         return <MembersView />;
       case "budget-requests":
@@ -257,6 +261,8 @@ function getViewIcon(view: WorkspaceView): string {
       return "\u{270F}\u{FE0F}";
     case "claims":
       return "\u{1F4B0}";
+    case "events":
+      return "\u{1F389}";
     case "members":
       return "\u{1F465}";
     case "budget-requests":

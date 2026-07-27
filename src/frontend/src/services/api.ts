@@ -8,11 +8,18 @@ import type {
   BudgetRequest,
   BudgetRequestDraftPayload,
   ClaimDraftPayload,
+  ClaimDraftResponse,
   ClaimPayload,
   ClaimQueueFilters,
   ClaimQueueItem,
+  CloseEventPayload,
+  CloseEventResult,
+  CorrectEventPayload,
   DashboardSummary,
   EditClaimPayload,
+  EditEventPayload,
+  Event,
+  EventPayload,
   FinanceAccount,
   IncomeItem,
   Member,
@@ -201,6 +208,32 @@ export const apiService = {
         .api_cancelMigration();
     }),
 
+  closeEvent: (payload: CloseEventPayload): Promise<CloseEventResult> =>
+    new Promise((resolve, reject) => {
+      if (typeof google === "undefined" || !google.script) {
+        setTimeout(
+          () =>
+            resolve({
+              closed_at: new Date().toISOString(),
+              event_id: payload.event_id,
+              status: "CLOSED",
+            }),
+          300
+        );
+        return;
+      }
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
+        })
+        .withFailureHandler(reject)
+        .api_closeEvent(payload);
+    }),
+
   closeSemester: (): Promise<{
     ok: boolean;
     closed: string;
@@ -252,6 +285,24 @@ export const apiService = {
         .api_confirmIncome(incomeId, payload);
     }),
 
+  correctEvent: (payload: CorrectEventPayload): Promise<{ event_id: string }> =>
+    new Promise((resolve, reject) => {
+      if (typeof google === "undefined" || !google.script) {
+        setTimeout(() => resolve({ event_id: payload.event_id }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
+        })
+        .withFailureHandler(reject)
+        .api_correctEvent(payload);
+    }),
+
   correctSemester: (
     entityType: string,
     entityId: string,
@@ -274,6 +325,29 @@ export const apiService = {
           }
         })
         .api_correctSemester(entityType, entityId, newSemester);
+    }),
+
+  createEvent: (
+    payload: EventPayload
+  ): Promise<{ event_id: string; status: "OPEN" }> =>
+    new Promise((resolve, reject) => {
+      if (typeof google === "undefined" || !google.script) {
+        setTimeout(
+          () => resolve({ event_id: "EVENT-MOCK", status: "OPEN" }),
+          300
+        );
+        return;
+      }
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
+        })
+        .withFailureHandler(reject)
+        .api_createEvent(payload);
     }),
 
   deactivateAccount: (accountId: string): Promise<{ success: boolean }> =>
@@ -382,6 +456,24 @@ export const apiService = {
         .api_editClaim(payload);
     }),
 
+  editEvent: (payload: EditEventPayload): Promise<{ event_id: string }> =>
+    new Promise((resolve, reject) => {
+      if (typeof google === "undefined" || !google.script) {
+        setTimeout(() => resolve({ event_id: payload.event_id }), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
+        })
+        .withFailureHandler(reject)
+        .api_editEvent(payload);
+    }),
+
   executeMigration: (): Promise<{ ok: boolean; stage: string }> =>
     new Promise((resolve, reject) => {
       if (typeof google === "undefined" || !google.script) {
@@ -470,6 +562,38 @@ export const apiService = {
           }
         })
         .api_getAdjustments();
+    }),
+
+  getClaimDraft: (claimId: string): Promise<ClaimDraftResponse> =>
+    new Promise((resolve, reject) => {
+      if (typeof google === "undefined" || !google.script) {
+        setTimeout(
+          () =>
+            resolve({
+              claim_id: claimId,
+              claimant_id: "MEMBER-MOCK",
+              created_by: "USER-MOCK",
+              draft: true,
+              line_items: [],
+              notes: "",
+              status: "DRAFT",
+              total_amount: 0,
+              uuid: "UUID-MOCK",
+            }),
+          300
+        );
+        return;
+      }
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
+        })
+        .withFailureHandler(reject)
+        .api_getClaimDraft(claimId);
     }),
 
   getClaimsQueue: (filters?: ClaimQueueFilters): Promise<ClaimQueueItem[]> =>
@@ -582,6 +706,23 @@ export const apiService = {
           }
         })
         .api_getDashboardSummary();
+    }),
+
+  getEvents: (): Promise<Event[]> =>
+    new Promise((resolve, reject) => {
+      if (typeof google === "undefined" || !google.script) {
+        setTimeout(() => resolve([]), 300);
+        return;
+      }
+      google.script.run
+        .withSuccessHandler((result: any) => {
+          if (result.ok) {
+            resolve(result.data);
+          } else {
+            reject(new Error(result.error.message));
+          }
+        })
+        .api_listEvents();
     }),
 
   getMembers: (): Promise<Member[]> =>

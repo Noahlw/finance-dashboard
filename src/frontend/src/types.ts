@@ -4,6 +4,7 @@ export type WorkspaceView =
   | "members"
   | "budget-requests"
   | "income"
+  | "events"
   | "payouts"
   | "reports";
 export type SessionRole =
@@ -75,6 +76,45 @@ export interface BudgetLine {
   request_id: string;
 }
 
+// Event types (issue #73, ADR 0073)
+export interface Event {
+  closed_at?: string;
+  created_at: string;
+  event_id: string;
+  name: string;
+  owner_user_id: string;
+  semester: string;
+  status: "OPEN" | "CLOSED";
+}
+
+export interface EventPayload {
+  name: string;
+  semester: string;
+}
+
+export interface EditEventPayload {
+  event_id: string;
+  name?: string;
+  semester?: string;
+}
+
+export interface CorrectEventPayload {
+  event_id: string;
+  name?: string;
+  semester?: string;
+}
+
+export interface CloseEventPayload {
+  event_id: string;
+  reason: string;
+}
+
+export interface CloseEventResult {
+  closed_at: string;
+  event_id: string;
+  status: "CLOSED";
+}
+
 export interface MyClaimsResponse {
   budgetLines: BudgetLine[];
   claims: Claim[];
@@ -101,6 +141,7 @@ export interface EditClaimPayload {
   budgetLineId?: string;
   claimantId: string;
   claimId: string;
+  eventId?: string;
   expenseDate?: string;
   notes: string;
   payoutHandle?: string;
@@ -236,16 +277,47 @@ export interface AtomicClaimPayload extends ClaimDraftPayload {
   receipts?: ClaimFilePayload[];
 }
 
+export interface ClaimDraftLineItem {
+  amount: number;
+  budget_line_id: string;
+  claim_line_id: string;
+  description: string;
+  missing_receipt_flag: boolean;
+  receipt_id: string;
+}
+
 export interface Claim {
   claim_id: string;
   claimant_id: string;
+  draft?: boolean;
+  event_id?: string;
+  expense_date?: string;
   missingReceipt?: boolean;
   notes: string;
+  payout_handle?: string;
   payout_method?: string;
   receiptIds?: string[];
+  semester?: string;
   status: string;
   submitted_at: string;
   total_amount: number;
+}
+
+export interface ClaimDraftResponse {
+  claim_id: string;
+  claimant_id: string;
+  created_by: string;
+  draft: boolean;
+  event_id?: string;
+  expense_date?: string;
+  line_items: ClaimDraftLineItem[];
+  notes: string;
+  payout_handle?: string;
+  payout_method?: string;
+  semester?: string;
+  status: string;
+  total_amount: number;
+  uuid: string;
 }
 
 export interface ClaimQueueItem {

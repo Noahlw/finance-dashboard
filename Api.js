@@ -144,6 +144,7 @@ function api_getMyClaims() {
     claims: claimsRows.map((r) => ({
       claim_id: r.values[c.claim_id - 1],
       claimant_id: r.values[c.claimant_id - 1],
+      draft: r.values[c.status - 1] === STATUS.ExpenseClaim.DRAFT,
       notes: r.values[c.notes - 1],
       status: r.values[c.status - 1],
       submitted_at: r.values[c.submitted_at - 1],
@@ -155,6 +156,67 @@ function api_getMyClaims() {
       submitted_at: r.values[COLS.BudgetRequests.submitted_at - 1],
       title: r.values[COLS.BudgetRequests.title - 1],
     })),
+  });
+}
+
+/**
+ * Load a single DRAFT ExpenseClaim with the heavy fields needed to
+ * resume the form (event_id, expense_date, semester, payout_method,
+ * payout_handle, line_items, uuid). Only the original creator may
+ * resume a draft.
+ */
+function api_getClaimDraft(claimId) {
+  var operator;
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
+
+  var row = Engine._loadRow("ExpenseClaim", claimId);
+  if (!row) {
+    return _err("NOT_FOUND", "Claim not found");
+  }
+  var c = COLS.ExpenseClaims;
+  if (row.values[c.status - 1] !== STATUS.ExpenseClaim.DRAFT) {
+    return _err("ILLEGAL_STATE", "Only DRAFT claims can be resumed");
+  }
+  if (row.values[c.created_by - 1] !== operator.userId) {
+    return _err("UNAUTHORIZED", "Unauthorized");
+  }
+
+  var cliRows = Engine._findRowsByColumn(
+    getSheet_(TABS.CLAIM_LINE_ITEMS),
+    COLS.ClaimLineItems.claim_id,
+    claimId
+  );
+  var cliC = COLS.ClaimLineItems;
+  var lineItems = cliRows.map(function (cli) {
+    return {
+      amount: cli.values[cliC.amount - 1],
+      budget_line_id: cli.values[cliC.budget_line_id - 1],
+      claim_line_id: cli.values[cliC.claim_line_id - 1],
+      description: cli.values[cliC.description - 1],
+      missing_receipt_flag: cli.values[cliC.missing_receipt_flag - 1],
+      receipt_id: cli.values[cliC.receipt_id - 1],
+    };
+  });
+
+  return _ok({
+    claim_id: row.values[c.claim_id - 1],
+    claimant_id: row.values[c.claimant_id - 1],
+    created_by: row.values[c.created_by - 1],
+    draft: true,
+    event_id: row.values[c.event_id - 1],
+    expense_date: row.values[c.expense_date - 1],
+    line_items: lineItems,
+    notes: row.values[c.notes - 1],
+    payout_handle: row.values[c.payout_handle - 1],
+    payout_method: row.values[c.payout_method - 1],
+    semester: row.values[c.semester - 1],
+    status: row.values[c.status - 1],
+    total_amount: row.values[c.total_amount - 1],
+    uuid: row.values[c.processed_response_id - 1],
   });
 }
 
@@ -588,11 +650,18 @@ function api_editClaim(payload) {
   if (rowIndex === -1) {
     return _err("NOT_FOUND", "Claim not found");
   }
-
   // Update total amount and notes
   var total = Number(payload.amount);
   sheet.getRange(rowIndex, c.total_amount).setValue(total);
   sheet.getRange(rowIndex, c.notes).setValue(payload.notes);
+
+  // Optional event re-link (Issue #67, ADR 0180). Audit detail
+  // includes the new event_id only when the payload supplied one.
+  var updateDetail = { amount: total };
+  if (payload.eventId !== undefined) {
+    sheet.getRange(rowIndex, c.event_id).setValue(payload.eventId);
+    updateDetail.event_id = payload.eventId;
+  }
 
   // We should also update the line item. Assuming 1-to-1 for this simplified frontend.
   var cliSheet = getSheet_(TABS.CLAIM_LINE_ITEMS);
@@ -606,9 +675,13 @@ function api_editClaim(payload) {
     }
   }
 
-  Audit.append(user.userId, "ExpenseClaim", payload.claimId, "UPDATE", {
-    amount: total,
-  });
+  Audit.append(
+    user.userId,
+    "ExpenseClaim",
+    payload.claimId,
+    "UPDATE",
+    updateDetail
+  );
   return _ok({ success: true });
 }
 
@@ -3583,6 +3656,271 @@ function api_setEventSelections(eventIds) {
   return _ok(result);
 }
 
+// ---------------------------------------------------------------------------
+// Event CRUD (Issue #73, ADR 0073)
+// ---------------------------------------------------------------------------
+/**
+ * Find an Events row by event_id directly (without depending on
+ * Engine._loadRow, which does not yet know about the Event entity).
+ */
+function _loadEventRow(eventId) {
+  var sheet = getSheet_(TABS.EVENTS);
+  var values = sheet.getDataRange().getValues();
+  var c = COLS.Events;
+  for (var i = 1; i < values.length; i++) {
+    if (values[i][c.event_id - 1] === eventId) {
+      return { rowIndex: i + 1, sheet: sheet, values: values[i] };
+    }
+  }
+  return null;
+}
+
+/**
+ * List all Events. Any authenticated operator may read. Ordered with
+ * most recent created_at first; closed events sorted after open ones.
+ */
+function api_listEvents() {
+  try {
+    _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
+
+  var sheet = getSheet_(TABS.EVENTS);
+  var values = sheet.getDataRange().getValues();
+  var c = COLS.Events;
+  var out = [];
+  for (var i = 1; i < values.length; i++) {
+    var row = values[i];
+    if (!row[c.event_id - 1]) {
+      continue;
+    }
+    out.push({
+      closed_at: row[c.closed_at - 1] || "",
+      created_at: row[c.created_at - 1] || "",
+      event_id: row[c.event_id - 1],
+      name: row[c.name - 1],
+      owner_user_id: row[c.owner_user_id - 1],
+      semester: row[c.semester - 1],
+      status: row[c.status - 1] || STATUS.Event.OPEN,
+    });
+  }
+  out.sort(function (a, b) {
+    if (a.status === b.status) {
+      return String(b.created_at).localeCompare(String(a.created_at));
+    }
+    return a.status === STATUS.Event.CLOSED ? 1 : -1;
+  });
+  return _ok(out);
+}
+
+/**
+ * Create a new Event. Committee only. Owner defaults to the caller.
+ */
+function api_createEvent(payload) {
+  var operator;
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
+  if (operator.role !== ROLES.COMMITTEE) {
+    return _err("UNAUTHORIZED", "Unauthorized: Committee only");
+  }
+  var name = String((payload && payload.name) || "").trim();
+  var semester = String((payload && payload.semester) || "").trim();
+  if (!name || !semester) {
+    return _err("INVALID_INPUT", "name and semester are required");
+  }
+
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30_000);
+  } catch (e) {
+    return _err("SYSTEM_BUSY", "Could not acquire script lock. Please retry.");
+  }
+  try {
+    var eventId = Ids.nextId("Event", lock);
+    var now = new Date();
+    _appendRow(getSheet_(TABS.EVENTS), [
+      eventId,
+      name,
+      semester,
+      operator.userId,
+      now,
+      STATUS.Event.OPEN,
+      "",
+    ]);
+    Audit.append(operator.userId, "Event", eventId, "CREATE", {
+      name: name,
+      owner_user_id: operator.userId,
+      semester: semester,
+    });
+    return _ok({ event_id: eventId, status: STATUS.Event.OPEN });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Edit an OPEN Event. Committee only.
+ */
+function api_editEvent(payload) {
+  var operator;
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
+  if (operator.role !== ROLES.COMMITTEE) {
+    return _err("UNAUTHORIZED", "Unauthorized: Committee only");
+  }
+  var eventId = payload && payload.event_id;
+  if (!eventId) {
+    return _err("INVALID_INPUT", "event_id is required");
+  }
+
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30_000);
+  } catch (e) {
+    return _err("SYSTEM_BUSY", "Could not acquire script lock. Please retry.");
+  }
+  try {
+    var row = _loadEventRow(eventId);
+    if (!row) {
+      return _err("NOT_FOUND", "Event not found");
+    }
+    var c = COLS.Events;
+    if (row.values[c.status - 1] === STATUS.Event.CLOSED) {
+      return _err("ILLEGAL_STATE", "Cannot edit a CLOSED event");
+    }
+    var changed = {};
+    if (payload.name !== undefined && payload.name !== row.values[c.name - 1]) {
+      row.sheet.getRange(row.rowIndex, c.name).setValue(payload.name);
+      changed.name = payload.name;
+    }
+    if (
+      payload.semester !== undefined &&
+      payload.semester !== row.values[c.semester - 1]
+    ) {
+      row.sheet.getRange(row.rowIndex, c.semester).setValue(payload.semester);
+      changed.semester = payload.semester;
+    }
+    Audit.append(operator.userId, "Event", eventId, "UPDATE", {
+      changed: changed,
+    });
+    return _ok({ event_id: eventId });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Treasurer-only correction. Editable in OPEN and CLOSED states.
+ */
+function api_correctEvent(payload) {
+  var operator;
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
+  if (operator.role !== ROLES.TREASURER) {
+    return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
+  }
+  var eventId = payload && payload.event_id;
+  if (!eventId) {
+    return _err("INVALID_INPUT", "event_id is required");
+  }
+
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30_000);
+  } catch (e) {
+    return _err("SYSTEM_BUSY", "Could not acquire script lock. Please retry.");
+  }
+  try {
+    var row = _loadEventRow(eventId);
+    if (!row) {
+      return _err("NOT_FOUND", "Event not found");
+    }
+    var c = COLS.Events;
+    var changed = {};
+    if (payload.name !== undefined && payload.name !== row.values[c.name - 1]) {
+      row.sheet.getRange(row.rowIndex, c.name).setValue(payload.name);
+      changed.name = payload.name;
+    }
+    if (
+      payload.semester !== undefined &&
+      payload.semester !== row.values[c.semester - 1]
+    ) {
+      row.sheet.getRange(row.rowIndex, c.semester).setValue(payload.semester);
+      changed.semester = payload.semester;
+    }
+    Audit.append(operator.userId, "Event", eventId, "CORRECT", {
+      changed: changed,
+    });
+    return _ok({ event_id: eventId });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Close an Event. Treasurer only. Idempotent — closing a CLOSED event
+ * returns ILLEGAL_STATE.
+ */
+function api_closeEvent(payload) {
+  var operator;
+  try {
+    operator = _requireOperator();
+  } catch (e) {
+    return _err("UNAUTHORIZED", e.message);
+  }
+  if (operator.role !== ROLES.TREASURER) {
+    return _err("UNAUTHORIZED", "Unauthorized: Treasurer only");
+  }
+  var eventId = payload && payload.event_id;
+  if (!eventId) {
+    return _err("INVALID_INPUT", "event_id is required");
+  }
+  var reason = String((payload && payload.reason) || "").trim();
+  if (!reason) {
+    return _err("INVALID_INPUT", "reason is required");
+  }
+
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30_000);
+  } catch (e) {
+    return _err("SYSTEM_BUSY", "Could not acquire script lock. Please retry.");
+  }
+  try {
+    var row = _loadEventRow(eventId);
+    if (!row) {
+      return _err("NOT_FOUND", "Event not found");
+    }
+    var c = COLS.Events;
+    if (row.values[c.status - 1] === STATUS.Event.CLOSED) {
+      return _err("ILLEGAL_STATE", "Event is already CLOSED");
+    }
+    var now = new Date();
+    row.sheet.getRange(row.rowIndex, c.status).setValue(STATUS.Event.CLOSED);
+    row.sheet.getRange(row.rowIndex, c.closed_at).setValue(now);
+    Audit.append(operator.userId, "Event", eventId, "CLOSE", {
+      reason: reason,
+    });
+    return _ok({
+      closed_at: now,
+      event_id: eventId,
+      status: STATUS.Event.CLOSED,
+    });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 /**
  * Save category selections (per-entity step).
  * Treasurer only.
@@ -3842,8 +4180,11 @@ if (typeof module !== "undefined") {
     api_atomicSubmitClaim,
     api_attachReceipts,
     api_cancelMigration,
+    api_closeEvent,
     api_closeSemester,
     api_confirmIncome,
+    api_createEvent,
+    api_correctEvent,
     api_correctReconciliation,
     api_correctSemester,
     api_deactivateAccount,
@@ -3851,10 +4192,12 @@ if (typeof module !== "undefined") {
     api_deleteOrphanedReceipt,
     api_discardBudgetRequest,
     api_editClaim,
+    api_editEvent,
     api_executeMigration,
     api_exportCsv,
     api_getAccounts,
     api_getAdjustments,
+    api_getClaimDraft,
     api_getClaimsQueue,
     api_getDashboardSummary,
     api_getFailedNotifications,
@@ -3871,6 +4214,7 @@ if (typeof module !== "undefined") {
     api_getReportsData,
     api_getSemesterStatus,
     api_getTransfers,
+    api_listEvents,
     api_markPayoutSent,
     api_reactivateMember,
     api_recordAdjustment,
