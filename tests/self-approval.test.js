@@ -50,4 +50,11 @@ describe("committee-operated Claim self-approval", () => {
     ).toEqual({ ok: true, reason: null });
     expect(CoreDecisions.isSelfApproval(true, "VERIFY")).toBe(true);
   });
+
+  it("flags only self-actions for information, rejection, and closure", () => {
+    for (const action of ["REQUEST_INFO", "REJECT", "CLOSE"]) {
+      expect(CoreDecisions.isSelfApproval(true, action)).toBe(true);
+      expect(CoreDecisions.isSelfApproval(false, action)).toBe(false);
+    }
+  });
 });

@@ -379,11 +379,34 @@ var Migration = {
   activateMigration(actorUserId) {
     var lock = LockService.getScriptLock();
     lock.waitLock(30_000);
+    var result;
     try {
-      return Migration._activateMigrationLocked_(actorUserId, lock);
+      result = Migration._activateMigrationLocked_(actorUserId, lock);
     } finally {
       lock.releaseLock();
     }
+    if (
+      result &&
+      result.pendingManifest &&
+      result.ok &&
+      result.new_spreadsheet_id &&
+      typeof SchemaMigration !== "undefined" &&
+      typeof SchemaMigration.completePendingManifest === "function"
+    ) {
+      var manifestResult = SchemaMigration.completePendingManifest(
+        SpreadsheetApp.openById(result.new_spreadsheet_id)
+      );
+      if (!manifestResult.ok) {
+        return {
+          error: manifestResult.error,
+          ok: false,
+          reason:
+            "Schema migration manifest incomplete: " + manifestResult.error,
+          status: "MANIFEST_INCOMPLETE",
+        };
+      }
+    }
+    return result;
   },
 
   /** @private */
@@ -463,6 +486,7 @@ var Migration = {
       return {
         new_spreadsheet_id: targetSpreadsheetId,
         ok: true,
+        pendingManifest: true,
         stage: "ACTIVATE",
       };
     }
@@ -588,26 +612,6 @@ var Migration = {
       } catch (e) {}
     }
 
-    var pendingManifestResult =
-      typeof SchemaMigration !== "undefined" &&
-      typeof SchemaMigration.completePendingManifest === "function"
-        ? SchemaMigration.completePendingManifest(
-            SpreadsheetApp.openById(targetSpreadsheetId)
-          )
-        : { ok: true };
-    if (!pendingManifestResult.ok) {
-      scriptProperties.setProperty("LEDGER_ID", oldSpreadsheetId);
-      Migration._setConfig("MIGRATION_STAGE", "VALIDATE");
-      Config.invalidate();
-      return {
-        ok: false,
-        reason:
-          "Schema migration manifest incomplete; previous ledger restored: " +
-          pendingManifestResult.error,
-        rolled_back: true,
-      };
-    }
-
     Audit.append(
       actorUserId,
       "Migration",
@@ -620,7 +624,6 @@ var Migration = {
       null,
       lock
     );
-
     try {
       Discord.postTreasury(
         "🎉 Annual Migration activated! New file: **" +
@@ -632,6 +635,7 @@ var Migration = {
     return {
       new_spreadsheet_id: targetSpreadsheetId,
       ok: true,
+      pendingManifest: true,
       stage: "ACTIVATE",
     };
   },
