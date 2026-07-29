@@ -154,9 +154,26 @@ var Migration = {
       var missing = requiredTabs.filter(
         (tabName) => !ss.getSheetByName(tabName)
       );
-      return missing.length
-        ? { ok: false, reason: "Missing required tabs: " + missing.join(", ") }
-        : { ok: true };
+      if (missing.length) {
+        return {
+          ok: false,
+          reason: "Missing required tabs: " + missing.join(", "),
+        };
+      }
+      if (
+        typeof SchemaMigration !== "undefined" &&
+        typeof SchemaMigration.healthCheck === "function"
+      ) {
+        var schemaHealth = SchemaMigration.healthCheck(ss);
+        if (!schemaHealth.ok) {
+          return {
+            ok: false,
+            reason:
+              "Schema health check failed: " + schemaHealth.errors.join("; "),
+          };
+        }
+      }
+      return { ok: true };
     } catch (e) {
       return { ok: false, reason: e.message };
     }
@@ -360,6 +377,40 @@ var Migration = {
    * actor does not re-archive or duplicate folders.
    */
   activateMigration(actorUserId) {
+    var lock = LockService.getScriptLock();
+    lock.waitLock(30_000);
+    var result;
+    try {
+      result = Migration._activateMigrationLocked_(actorUserId, lock);
+    } finally {
+      lock.releaseLock();
+    }
+    if (
+      result &&
+      result.pendingManifest &&
+      result.ok &&
+      result.new_spreadsheet_id &&
+      typeof SchemaMigration !== "undefined" &&
+      typeof SchemaMigration.completePendingManifest === "function"
+    ) {
+      var manifestResult = SchemaMigration.completePendingManifest(
+        SpreadsheetApp.openById(result.new_spreadsheet_id)
+      );
+      if (!manifestResult.ok) {
+        return {
+          error: manifestResult.error,
+          ok: false,
+          reason:
+            "Schema migration manifest incomplete: " + manifestResult.error,
+          status: "MANIFEST_INCOMPLETE",
+        };
+      }
+    }
+    return result;
+  },
+
+  /** @private */
+  _activateMigrationLocked_(actorUserId, lock) {
     var stage = Config.getOptional("MIGRATION_STAGE") || "";
     if (stage !== "VALIDATE" && stage !== "ACTIVATE") {
       return {
@@ -376,12 +427,66 @@ var Migration = {
       return { ok: false, reason: "No target spreadsheet" };
     }
 
+    if (stage === "VALIDATE") {
+      try {
+        var targetLedger = SpreadsheetApp.openById(targetSpreadsheetId);
+        if (
+          typeof SchemaMigration !== "undefined" &&
+          typeof SchemaMigration.prepareAnnualLedger === "function"
+        ) {
+          var schemaPreparation = SchemaMigration.prepareAnnualLedger(
+            targetLedger,
+            { lock: lock }
+          );
+          if (!schemaPreparation.ok) {
+            return {
+              ok: false,
+              reason:
+                "Target schema preparation failed: " +
+                (schemaPreparation.error || schemaPreparation.status),
+            };
+          }
+          var schemaHealth = SchemaMigration.healthCheck(targetLedger);
+          if (!schemaHealth.ok) {
+            return {
+              ok: false,
+              reason:
+                "Target schema health check failed: " +
+                schemaHealth.errors.join("; "),
+            };
+          }
+        }
+      } catch (e) {
+        return {
+          ok: false,
+          reason: "Target schema preparation failed: " + e.message,
+        };
+      }
+    }
+
     // If already activated (idempotent repeat), return success without
     // re-archiving or duplicating the audit event.
     if (stage === "ACTIVATE") {
+      if (
+        typeof SchemaMigration !== "undefined" &&
+        typeof SchemaMigration.healthCheck === "function"
+      ) {
+        var retryHealth = SchemaMigration.healthCheck(
+          SpreadsheetApp.openById(targetSpreadsheetId)
+        );
+        if (!retryHealth.ok) {
+          return {
+            ok: false,
+            reason:
+              "Target schema health check failed on retry: " +
+              retryHealth.errors.join("; "),
+          };
+        }
+      }
       return {
         new_spreadsheet_id: targetSpreadsheetId,
         ok: true,
+        pendingManifest: true,
         stage: "ACTIVATE",
       };
     }
@@ -433,10 +538,18 @@ var Migration = {
       scriptProperties.setProperty("LEDGER_ID", oldSpreadsheetId);
       Migration._setConfig("MIGRATION_STAGE", "VALIDATE");
       Config.invalidate();
-      Audit.append(actorUserId, "Migration", targetSpreadsheetId, "ROLLBACK", {
-        reason: health.reason,
-        restored_spreadsheet_id: oldSpreadsheetId,
-      });
+      Audit.append(
+        actorUserId,
+        "Migration",
+        targetSpreadsheetId,
+        "ROLLBACK",
+        {
+          reason: health.reason,
+          restored_spreadsheet_id: oldSpreadsheetId,
+        },
+        null,
+        lock
+      );
       return {
         ok: false,
         reason:
@@ -454,9 +567,13 @@ var Migration = {
       ["MIGRATION_SOURCE_SPREADSHEET_ID", oldSpreadsheetId],
       ["MIGRATION_ACTOR_USER_ID", actorUserId],
       ["MIGRATION_SELECTIONS", JSON.stringify(sourceSelections)],
-    ].forEach((entry) => {
-      Migration._setTargetConfig(targetSpreadsheetId, entry[0], entry[1]);
-    });
+    ].forEach(
+      (entry) => {
+        Migration._setTargetConfig(targetSpreadsheetId, entry[0], entry[1]);
+      },
+      null,
+      lock
+    );
     Config.invalidate();
 
     // Share the target with selected active operators.
@@ -495,11 +612,18 @@ var Migration = {
       } catch (e) {}
     }
 
-    Audit.append(actorUserId, "Migration", yearLabel, "ACTIVATE", {
-      new_spreadsheet_id: targetSpreadsheetId,
-      old_spreadsheet_id: oldSpreadsheetId,
-    });
-
+    Audit.append(
+      actorUserId,
+      "Migration",
+      yearLabel,
+      "ACTIVATE",
+      {
+        new_spreadsheet_id: targetSpreadsheetId,
+        old_spreadsheet_id: oldSpreadsheetId,
+      },
+      null,
+      lock
+    );
     try {
       Discord.postTreasury(
         "🎉 Annual Migration activated! New file: **" +
@@ -511,6 +635,7 @@ var Migration = {
     return {
       new_spreadsheet_id: targetSpreadsheetId,
       ok: true,
+      pendingManifest: true,
       stage: "ACTIVATE",
     };
   },
@@ -1281,6 +1406,21 @@ var Migration = {
    * receive a new Claim.
    */
   setMemberSelections(actorUserId, memberIds) {
+    var lock = LockService.getScriptLock();
+    lock.waitLock(30_000);
+    try {
+      return Migration._setMemberSelectionsLocked_(
+        actorUserId,
+        memberIds,
+        lock
+      );
+    } finally {
+      lock.releaseLock();
+    }
+  },
+
+  /** @private */
+  _setMemberSelectionsLocked_(actorUserId, memberIds, lock) {
     var stage = Config.getOptional("MIGRATION_STAGE") || "";
     if (SELECTION_STAGES.indexOf(stage) < 0) {
       return {
@@ -1304,7 +1444,9 @@ var Migration = {
       "Migration",
       Config.getOptional("MIGRATION_YEAR_LABEL") || "",
       "MEMBERS_SET",
-      { members: ids.length }
+      { members: ids.length },
+      null,
+      lock
     );
 
     return { ok: true, stage: "MEMBERS" };

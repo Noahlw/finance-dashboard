@@ -55,15 +55,64 @@ var Audit = {
    * @param {string} entityId e.g. 'CLAIM-26A-014'
    * @param {string} action e.g. 'CREATE'|'TRANSITION'|'FIELD_SET'|'LOCK'|'SNAPSHOT'|'TRANSITION_DENIED'|'NOTIFY_FAIL'
    * @param {Object} detailObj JSON-serializable detail, e.g. {from:'SUBMITTED', to:'VERIFIED'}
+   * @param {?string=} idempotencyKey optional key stored in detail; matching
+   *        entity/action/key calls return the original row atomically
    * @return {{seq:number, rowHash:string}}
    */
-  append(actorUserId, entityType, entityId, action, detailObj) {
-    var lock = LockService.getScriptLock();
-    lock.waitLock(30_000);
+  append(
+    actorUserId,
+    entityType,
+    entityId,
+    action,
+    detailObj,
+    idempotencyKey,
+    optLock
+  ) {
+    var lock = optLock || LockService.getScriptLock();
+    var ownsLock = !optLock;
+    if (ownsLock) {
+      lock.waitLock(30_000);
+    }
     try {
       var sheet = getSheet_(TABS.AUDIT_LOG);
       var lastRow = sheet.getLastRow();
       var numCols = Object.keys(COLS.AuditLog).length;
+      var detailObject = Object.assign({}, detailObj || {});
+      if (idempotencyKey) {
+        detailObject.idempotencyKey = idempotencyKey;
+        if (lastRow > 1) {
+          var existingRows = sheet
+            .getRange(2, 1, lastRow - 1, numCols)
+            .getValues();
+          for (
+            var existingIndex = 0;
+            existingIndex < existingRows.length;
+            existingIndex++
+          ) {
+            var existing = existingRows[existingIndex];
+            if (
+              existing[COLS.AuditLog.entity_type - 1] !== entityType ||
+              existing[COLS.AuditLog.entity_id - 1] !== entityId ||
+              existing[COLS.AuditLog.action - 1] !== action
+            ) {
+              continue;
+            }
+            try {
+              var existingDetail = JSON.parse(
+                String(existing[COLS.AuditLog.detail - 1] || "{}")
+              );
+              if (existingDetail.idempotencyKey === idempotencyKey) {
+                return {
+                  rowHash: String(existing[COLS.AuditLog.row_hash - 1]),
+                  seq: Number(existing[COLS.AuditLog.seq - 1]),
+                };
+              }
+            } catch (e) {
+              // A malformed historical detail row cannot satisfy the key.
+            }
+          }
+        }
+      }
       var prevHash = "GENESIS";
       var seq = 1;
       if (lastRow > 1) {
@@ -73,7 +122,7 @@ var Audit = {
         prevHash = String(lastValues[COLS.AuditLog.row_hash - 1]);
       }
       var ts = Audit._nowIso();
-      var detail = JSON.stringify(detailObj || {});
+      var detail = JSON.stringify(detailObject);
       var rowHash = Audit._hashRow(
         seq,
         ts,
@@ -98,7 +147,9 @@ var Audit = {
       SpreadsheetApp.flush(); // Crucial for rapid consecutive appends so getLastRow() isn't stale
       return { rowHash, seq };
     } finally {
-      lock.releaseLock();
+      if (ownsLock) {
+        lock.releaseLock();
+      }
     }
   },
 

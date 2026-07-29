@@ -33,7 +33,9 @@ export default function BudgetRequestsView({ role }: BudgetRequestsViewProps) {
   const [pendingDetail, setPendingDetail] =
     useState<PendingBudgetRequest | null>(null);
   const [decisionNote, setDecisionNote] = useState("");
-
+  const [reduceFormOpen, setReduceFormOpen] = useState(false);
+  const [reduceAmount, setReduceAmount] = useState("");
+  const [reduceError, setReduceError] = useState("");
   const isTreasurer = role === "TREASURER";
 
   const loadMyRequests = () => {
@@ -159,21 +161,76 @@ export default function BudgetRequestsView({ role }: BudgetRequestsViewProps) {
     }
   };
 
-  const handleDecision = async (action: string) => {
+  const handleDecision = async (
+    action: string,
+    extra?: Record<string, unknown>
+  ) => {
     if (!pendingDetail) {
       return;
     }
     try {
       await apiService.decisionBudgetRequest(pendingDetail.request_id, action, {
-        action: action as any,
+        action: action as
+          | "APPROVE"
+          | "REDUCE"
+          | "REJECT"
+          | "REQUEST_INFO"
+          | "CLOSE",
         decision_note: decisionNote,
+        ...(extra || {}),
       });
       setPendingDetail(null);
       setDecisionNote("");
+      setReduceFormOpen(false);
+      setReduceAmount("");
+      setReduceError("");
       loadPending();
-    } catch (err: any) {
-      showNotice(err.message || "Failed to process decision");
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to process decision";
+      showNotice(message);
     }
+  };
+
+  const handleClose = async () => {
+    const confirmed = await askForConfirmation(
+      "Close this budget request? It cannot be re-opened."
+    );
+    if (confirmed) {
+      handleDecision("CLOSE");
+    }
+  };
+
+  const openReduceForm = () => {
+    setReduceFormOpen(true);
+    setReduceAmount("");
+    setReduceError("");
+  };
+
+  const cancelReduceForm = () => {
+    setReduceFormOpen(false);
+    setReduceAmount("");
+    setReduceError("");
+  };
+
+  const submitReduce = () => {
+    if (!pendingDetail) {
+      return;
+    }
+    const value = Number(reduceAmount);
+    if (
+      !reduceAmount ||
+      Number.isNaN(value) ||
+      value <= 0 ||
+      value >= pendingDetail.total_requested
+    ) {
+      setReduceError(
+        `Amount override must be greater than 0 and less than $${pendingDetail.total_requested.toFixed(2)}.`
+      );
+      return;
+    }
+    setReduceError("");
+    handleDecision("REDUCE", { amount_override: value });
   };
 
   const canEdit = (s: string) => s === "DRAFT" || s === "NEEDS_INFO";
@@ -490,17 +547,56 @@ export default function BudgetRequestsView({ role }: BudgetRequestsViewProps) {
                 value={decisionNote}
               />
             </div>
+            {pendingDetail.status === "PENDING" && reduceFormOpen && (
+              <div className="form-group reduce-form">
+                <label htmlFor="reduce-amount">Reduced Total Amount</label>
+                <input
+                  id="reduce-amount"
+                  min="0.01"
+                  onChange={(e) => {
+                    setReduceAmount(e.target.value);
+                    if (reduceError) {
+                      setReduceError("");
+                    }
+                  }}
+                  placeholder={`Less than $${pendingDetail.total_requested.toFixed(2)}`}
+                  step="0.01"
+                  type="number"
+                  value={reduceAmount}
+                />
+                <small className="muted-text">
+                  Current requested total: $
+                  {pendingDetail.total_requested.toFixed(2)}
+                </small>
+                {reduceError && (
+                  <small className="alert error inline-error">
+                    {reduceError}
+                  </small>
+                )}
+              </div>
+            )}
             <div className="modal-actions decision-actions">
               <button
                 className="secondary-btn"
                 onClick={() => {
                   setPendingDetail(null);
                   setDecisionNote("");
+                  cancelReduceForm();
                 }}
                 type="button"
               >
                 Back
               </button>
+              {(pendingDetail.status === "APPROVED" ||
+                pendingDetail.status === "PARTIALLY_APPROVED") && (
+                <button
+                  className="secondary-btn"
+                  onClick={handleClose}
+                  type="button"
+                >
+                  Close
+                </button>
+              )}
               <button
                 className="primary-btn"
                 onClick={() => handleDecision("APPROVE")}
@@ -508,6 +604,33 @@ export default function BudgetRequestsView({ role }: BudgetRequestsViewProps) {
               >
                 Approve
               </button>
+              {pendingDetail.status === "PENDING" &&
+                (reduceFormOpen ? (
+                  <>
+                    <button
+                      className="secondary-btn"
+                      onClick={cancelReduceForm}
+                      type="button"
+                    >
+                      Cancel Reduce
+                    </button>
+                    <button
+                      className="warning-btn"
+                      onClick={submitReduce}
+                      type="button"
+                    >
+                      Confirm Reduce
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    className="warning-btn"
+                    onClick={openReduceForm}
+                    type="button"
+                  >
+                    Reduce
+                  </button>
+                ))}
               <button
                 className="warning-btn"
                 onClick={() => handleDecision("REQUEST_INFO")}

@@ -22,7 +22,6 @@
     "fix": "ultracite fix",
     "prepare": "lefthook install"
   },
-
   "type": "commonjs",
   "version": "1.0.0",
   "description": "",

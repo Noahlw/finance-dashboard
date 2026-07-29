@@ -18,10 +18,12 @@
  */
 function setupAll() {
   var ledger = SpreadsheetApp.getActive();
-  PropertiesService.getScriptProperties().setProperty(
-    "LEDGER_ID",
-    ledger.getId()
-  );
+  Setup_reconcileLedgerId(ledger);
+
+  var headerPreflight = Setup_preflightHeaders(ledger, COLS);
+  if (!headerPreflight.ok) {
+    throw Setup_headerPreflightError(headerPreflight.diagnostics);
+  }
 
   var createdTabs = Setup_ensureAllTabsExist(ledger);
   Setup_installArrayFormulas(ledger);
@@ -97,6 +99,151 @@ function setupAll() {
 }
 
 /**
+ * Abort before setup writes if this bound container is not the active ledger.
+ * The first setup records the active ledger; subsequent runs only accept it.
+ * @param {Spreadsheet} ledger
+ */
+function Setup_reconcileLedgerId(ledger) {
+  var properties = PropertiesService.getScriptProperties();
+  var storedLedgerId = properties.getProperty("LEDGER_ID");
+  var activeLedgerId = ledger.getId();
+  if (storedLedgerId && storedLedgerId !== activeLedgerId) {
+    throw new Error(
+      "LEDGER_ID_MISMATCH: active spreadsheet " +
+        activeLedgerId +
+        " does not match configured ledger " +
+        storedLedgerId
+    );
+  }
+  if (!storedLedgerId) {
+    properties.setProperty("LEDGER_ID", activeLedgerId);
+  }
+}
+
+/**
+ * @param {Object<string,number>} columns
+ * @return {string[]} header labels ordered by their 1-indexed numeric column
+ */
+function Setup_getCanonicalHeaders(columns) {
+  return Object.keys(columns).sort((left, right) => {
+    return Number(columns[left]) - Number(columns[right]);
+  });
+}
+
+/** @param {number} index1Based @return {string} */
+function Setup_columnLetter(index1Based) {
+  var value = index1Based;
+  var label = "";
+  while (value > 0) {
+    value -= 1;
+    label = String.fromCharCode(65 + (value % 26)) + label;
+    value = Math.floor(value / 26);
+  }
+  return label;
+}
+
+/**
+ * Read-only, whole-ledger header validation. Missing tabs are intentionally
+ * exempt; Setup_ensureAllTabsExist initializes them only after this pass.
+ * @param {Spreadsheet} ledger
+ * @param {Object<string,Object<string,number>>} columnsByTab
+ * @return {{ok:boolean, diagnostics:Object[]}}
+ */
+function Setup_preflightHeaders(ledger, columnsByTab) {
+  var diagnostics = [];
+  Object.keys(columnsByTab).forEach((tabName) => {
+    if (typeof TABS !== "undefined" && tabName === TABS.VAULT) {
+      return;
+    }
+    var sheet = ledger.getSheetByName(tabName);
+    if (!sheet) {
+      return;
+    }
+    var lastRow = sheet.getLastRow();
+    var lastColumn = sheet.getLastColumn();
+    if (lastRow === 0 || lastColumn === 0) {
+      return;
+    }
+    var sheetValues = sheet.getRange(1, 1, lastRow, lastColumn).getValues();
+    var hasContent = false;
+    for (var valueRow = 0; valueRow < sheetValues.length; valueRow++) {
+      for (
+        var valueColumn = 0;
+        valueColumn < sheetValues[valueRow].length;
+        valueColumn++
+      ) {
+        if (String(sheetValues[valueRow][valueColumn] || "").trim()) {
+          hasContent = true;
+          break;
+        }
+      }
+      if (hasContent) {
+        break;
+      }
+    }
+    if (!hasContent) {
+      return;
+    }
+    var expectedHeaders = Setup_getCanonicalHeaders(columnsByTab[tabName]);
+    var readWidth = Math.max(sheet.getLastColumn(), expectedHeaders.length);
+    var headers = readWidth
+      ? sheet.getRange(1, 1, 1, readWidth).getValues()[0]
+      : [];
+    var seen = {};
+    headers.forEach((rawHeader) => {
+      var header = String(rawHeader || "").trim();
+      if (header) {
+        seen[header] = (seen[header] || 0) + 1;
+      }
+    });
+
+    for (var index = 0; index < readWidth; index++) {
+      var found = String(headers[index] || "").trim();
+      var expected = expectedHeaders[index] || "";
+      var base = {
+        column: Setup_columnLetter(index + 1),
+        expected,
+        found,
+        tab: tabName,
+      };
+      if (found && !Object.hasOwn(columnsByTab[tabName], found)) {
+        diagnostics.push(Object.assign({ classification: "UNKNOWN" }, base));
+      }
+      if (found && seen[found] > 1) {
+        diagnostics.push(Object.assign({ classification: "DUPLICATE" }, base));
+      }
+      if (found !== expected) {
+        diagnostics.push(
+          Object.assign({ classification: "MISMATCHED_POSITION" }, base)
+        );
+      }
+    }
+    expectedHeaders.forEach((expectedHeader, index) => {
+      if (!seen[expectedHeader]) {
+        diagnostics.push({
+          classification: "MISSING",
+          column: Setup_columnLetter(index + 1),
+          expected: expectedHeader,
+          found: "",
+          tab: tabName,
+        });
+      }
+    });
+  });
+  return { diagnostics, ok: diagnostics.length === 0 };
+}
+
+/** @param {Object[]} diagnostics @return {Error} */
+function Setup_headerPreflightError(diagnostics) {
+  var error = new Error(
+    "HEADER_PREFLIGHT_FAILED: " + JSON.stringify(diagnostics)
+  );
+  error.code = "HEADER_PREFLIGHT_FAILED";
+  error.diagnostics = diagnostics;
+  return error;
+}
+
+/**
  * Create any CF-Ledger tabs that don't exist yet, with header rows from COLS.
  * @param {Spreadsheet} ledger
  * @return {string[]} names of tabs that were newly created
@@ -131,11 +278,14 @@ function Setup_ensureAllTabsExist(ledger) {
     if (!sheet) {
       sheet = ledger.insertSheet(name);
       created.push(name);
+      var headers = Setup_getCanonicalHeaders(COLS[name]);
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+      sheet.setFrozenRows(1);
+    } else if (sheet.getLastRow() === 0 || sheet.getLastColumn() === 0) {
+      var blankHeaders = Setup_getCanonicalHeaders(COLS[name]);
+      sheet.getRange(1, 1, 1, blankHeaders.length).setValues([blankHeaders]);
+      sheet.setFrozenRows(1);
     }
-
-    var headers = Object.keys(COLS[name]);
-    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
-    sheet.setFrozenRows(1);
   }
   return created;
 }
@@ -298,7 +448,10 @@ function Setup_applyDropdown(ledger, tabName, col1Indexed, values) {
     .requireValueInList(values, true)
     .setAllowInvalid(false)
     .build();
-  sheet.getRange(2, col1Indexed, 999, 1).setDataValidation(rule);
+  var rowCount = Math.max(0, sheet.getMaxRows() - 1);
+  if (rowCount > 0) {
+    sheet.getRange(2, col1Indexed, rowCount, 1).setDataValidation(rule);
+  }
 }
 
 /**
@@ -313,7 +466,10 @@ function Setup_applyCheckbox(ledger, tabName, col1Indexed) {
     return;
   }
   var rule = SpreadsheetApp.newDataValidation().requireCheckbox().build();
-  sheet.getRange(2, col1Indexed, 999, 1).setDataValidation(rule);
+  var rowCount = Math.max(0, sheet.getMaxRows() - 1);
+  if (rowCount > 0) {
+    sheet.getRange(2, col1Indexed, rowCount, 1).setDataValidation(rule);
+  }
 }
 
 /**
@@ -386,7 +542,12 @@ function Setup_protectApprovalsIntentOnly(sheet) {
   var firstIntentCol = c.action;
   var lastIntentCol = c.intent_actor_email;
   var numCols = lastIntentCol - firstIntentCol + 1;
-  var unprotected = sheet.getRange(2, firstIntentCol, 999, numCols);
+  var unprotected = sheet.getRange(
+    2,
+    firstIntentCol,
+    Math.max(1, sheet.getMaxRows() - 1),
+    numCols
+  );
   protection.setUnprotectedRanges([unprotected]);
 }
 
@@ -925,5 +1086,11 @@ function resetAllData() {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { resetAllData, setupAll };
+  module.exports = {
+    resetAllData,
+    setupAll,
+    Setup_getCanonicalHeaders,
+    Setup_preflightHeaders,
+    Setup_reconcileLedgerId,
+  };
 }

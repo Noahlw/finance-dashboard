@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { askForConfirmation, showNotice } from "./components/AccessibleDialog";
+import { EventPicker } from "./components/EventPicker";
 import { apiService } from "./services/api";
 import type {
   AccountAdjustment,
@@ -458,7 +459,7 @@ function RecordIncomeForm({
   const [categoryId, setCategoryId] = useState("");
   const [amount, setAmount] = useState("");
   const [sourceRef, setSourceRef] = useState("");
-  const [eventId, setEventId] = useState("");
+  const [eventId, setEventId] = useState<string | undefined>("");
   const [notes, setNotes] = useState("");
   const [accountId, setAccountId] = useState(
     accounts.length > 0 ? accounts[0].account_id : ""
@@ -472,12 +473,13 @@ function RecordIncomeForm({
     }
     setSaving(true);
     try {
+      const trimmedEventId = (eventId ?? "").trim();
       await apiService.recordIncome({
         accountId: accountId || undefined,
         amount: Number.parseFloat(amount),
         categoryId: categoryId.trim(),
         date,
-        eventId: eventId.trim() || undefined,
+        eventId: trimmedEventId || undefined,
         notes: notes.trim() || undefined,
         sourceRef: sourceRef.trim() || undefined,
       });
@@ -535,11 +537,12 @@ function RecordIncomeForm({
           />
         </div>
         <div className="form-group" style={{ marginBottom: 0 }}>
-          <label>Event ID (optional)</label>
-          <input
-            onChange={(e) => setEventId(e.target.value)}
-            placeholder="e.g. EVT-001"
-            type="text"
+          <EventPicker
+            aria-label="Event for this income record"
+            disabled={saving}
+            id="income-event-picker"
+            label="Event (optional)"
+            onChange={setEventId}
             value={eventId}
           />
         </div>

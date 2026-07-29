@@ -127,11 +127,13 @@ var COLS = Object.freeze({
   Config: Object.freeze({ key: 1, value: 2 }),
   Counters: Object.freeze({ entity: 1, last_n: 2 }),
   Events: Object.freeze({
+    closed_at: 7,
     created_at: 5,
     event_id: 1,
     name: 2,
     owner_user_id: 4,
     semester: 3,
+    status: 6,
   }),
   ExpenseClaims: Object.freeze({
     approved_at: 6,
@@ -278,6 +280,10 @@ var STATUS = Object.freeze({
     PENDING: "PENDING",
     REDUCED: "REDUCED",
     REJECTED: "REJECTED",
+  }),
+  Event: Object.freeze({
+    CLOSED: "CLOSED",
+    OPEN: "OPEN",
   }),
   ExpenseClaim: Object.freeze({
     APPROVED_FOR_PAYOUT: "APPROVED_FOR_PAYOUT",

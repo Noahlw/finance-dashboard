@@ -1,7 +1,18 @@
 "use strict";
+
+const TREASURER_REGEX = /Treasurer/;
+const REASON_REGEX = /reason/;
+const VALIDATE_REGEX = /VALIDATE/;
+const MIGRATION_START_REGEX = /Start a migration first/;
 global.getSheet_ = jest.fn();
 global.getVaultSheet_ = jest.fn();
 global.Audit = { _nowIso: () => "2026-07-22T00:00:00Z", append: jest.fn() };
+global.LockService = {
+  getScriptLock: jest.fn(() => ({
+    releaseLock: jest.fn(),
+    waitLock: jest.fn(),
+  })),
+};
 global.DriveApp = {
   getFileById: jest.fn(() => ({
     getId: () => "FILE-OLD",
@@ -21,7 +32,7 @@ global.DriveApp = {
         addFile: jest.fn(),
         getId: () => "FOLDER-X",
       })),
-      getId: () => "FOLDER-" + name,
+      getId: () => `FOLDER-${name}`,
     })),
     getId: () => "PARENT-FOLDER",
   })),
@@ -127,7 +138,9 @@ global.STATUS = {
 const configStore = {};
 
 function resetConfig() {
-  Object.keys(configStore).forEach((k) => delete configStore[k]);
+  for (const k of Object.keys(configStore)) {
+    delete configStore[k];
+  }
 }
 
 global.Setup_setConfigValue_ = jest.fn((key, value) => {
@@ -143,7 +156,9 @@ global.Setup_setConfigValue_ = jest.fn((key, value) => {
 global.Config = {
   getNum: () => 14,
   getOptional: (key) => configStore[key] || "",
-  invalidate: () => {},
+  invalidate: () => {
+    /* no-op */
+  },
 };
 
 // Users sheet with operators and members for preview.
@@ -228,7 +243,7 @@ global.getSheet_.mockImplementation((tab) => {
       }),
       deleteRow: jest.fn((rowIndex) => {
         const row = configData[rowIndex - 1];
-        if (row && row[0]) {
+        if (row?.[0]) {
           delete configStore[row[0]];
         }
         configData.splice(rowIndex - 1, 1);
@@ -276,9 +291,9 @@ describe("Annual Migration: 8-stage resumable flow", () => {
     expect(result.stage).toBe("MEMBERS");
     expect(result.folder_id).toBeTruthy();
     expect(result.spreadsheet_id).toBeTruthy();
-    expect(configStore["MIGRATION_STAGE"]).toBe("MEMBERS");
-    expect(configStore["MIGRATION_TARGET_SPREADSHEET_ID"]).toBeTruthy();
-    expect(configStore["MIGRATION_TARGET_FOLDER_ID"]).toBeTruthy();
+    expect(configStore.MIGRATION_STAGE).toBe("MEMBERS");
+    expect(configStore.MIGRATION_TARGET_SPREADSHEET_ID).toBeTruthy();
+    expect(configStore.MIGRATION_TARGET_FOLDER_ID).toBeTruthy();
   });
 
   it("startMigration is idempotent: a second call resumes instead of duplicating", () => {
@@ -294,7 +309,7 @@ describe("Annual Migration: 8-stage resumable flow", () => {
     const result = Migration.setMemberSelections("U-001", ["M-001", "M-002"]);
     expect(result.ok).toBe(true);
     expect(result.stage).toBe("MEMBERS");
-    const selections = JSON.parse(configStore["MIGRATION_SELECTIONS"]);
+    const selections = JSON.parse(configStore.MIGRATION_SELECTIONS);
     expect(selections.member_ids).toEqual(["M-001", "M-002"]);
   });
 
@@ -308,7 +323,7 @@ describe("Annual Migration: 8-stage resumable flow", () => {
     });
     expect(result.ok).toBe(true);
     expect(result.stage).toBe("ACCOUNTS");
-    const selections = JSON.parse(configStore["MIGRATION_SELECTIONS"]);
+    const selections = JSON.parse(configStore.MIGRATION_SELECTIONS);
     expect(selections.member_ids).toEqual(["M-001"]);
     expect(selections.account_ids).toEqual(["AC-1"]);
     expect(selections.account_balances["AC-1"]).toBe(9500);
@@ -327,7 +342,7 @@ describe("Annual Migration: 8-stage resumable flow", () => {
     const result = Migration.setEventSelections("U-001", ["EVT-1"]);
     expect(result.ok).toBe(true);
     expect(result.stage).toBe("EVENTS");
-    const selections = JSON.parse(configStore["MIGRATION_SELECTIONS"]);
+    const selections = JSON.parse(configStore.MIGRATION_SELECTIONS);
     expect(selections.event_ids).toEqual(["EVT-1"]);
     expect(selections.member_ids).toEqual(["M-001"]);
   });
@@ -345,7 +360,7 @@ describe("Annual Migration: 8-stage resumable flow", () => {
     const result = Migration.setCategorySelections("U-001", ["CAT-1"]);
     expect(result.ok).toBe(true);
     expect(result.stage).toBe("CATEGORIES");
-    const selections = JSON.parse(configStore["MIGRATION_SELECTIONS"]);
+    const selections = JSON.parse(configStore.MIGRATION_SELECTIONS);
     expect(selections.category_ids).toEqual(["CAT-1"]);
   });
 
@@ -364,7 +379,7 @@ describe("Annual Migration: 8-stage resumable flow", () => {
     const result = Migration.setUserSelections("U-001", ["U-002"]);
     expect(result.ok).toBe(true);
     expect(result.stage).toBe("USERS");
-    const selections = JSON.parse(configStore["MIGRATION_SELECTIONS"]);
+    const selections = JSON.parse(configStore.MIGRATION_SELECTIONS);
     expect(selections.user_ids).toEqual(["U-002"]);
   });
 
@@ -383,7 +398,7 @@ describe("Annual Migration: 8-stage resumable flow", () => {
     const result = Migration.validateMigration("U-001");
     expect(result.ok).toBe(true);
     expect(result.stage).toBe("VALIDATE");
-    expect(configStore["MIGRATION_STAGE"]).toBe("VALIDATE");
+    expect(configStore.MIGRATION_STAGE).toBe("VALIDATE");
   });
 
   it("validateMigration fails when no Treasurer is selected", () => {
@@ -400,7 +415,7 @@ describe("Annual Migration: 8-stage resumable flow", () => {
     Migration.setUserSelections("U-001", ["U-002"]);
     const result = Migration.validateMigration("U-001");
     expect(result.ok).toBe(false);
-    expect(result.errors.join(" ")).toMatch(/Treasurer/);
+    expect(result.errors.join(" ")).toMatch(TREASURER_REGEX);
   });
 
   it("validateMigration fails when an account has a changed balance without a reason", () => {
@@ -416,7 +431,7 @@ describe("Annual Migration: 8-stage resumable flow", () => {
     Migration.setUserSelections("U-001", ["U-001"]);
     const result = Migration.validateMigration("U-001");
     expect(result.ok).toBe(false);
-    expect(result.errors.join(" ")).toMatch(/reason/);
+    expect(result.errors.join(" ")).toMatch(REASON_REGEX);
   });
 
   it("activateMigration blocks until VALIDATE succeeds", () => {
@@ -434,7 +449,7 @@ describe("Annual Migration: 8-stage resumable flow", () => {
     // Skip VALIDATE
     const result = Migration.activateMigration("U-001");
     expect(result.ok).toBe(false);
-    expect(result.reason).toMatch(/VALIDATE/);
+    expect(result.reason).toMatch(VALIDATE_REGEX);
   });
 
   it("activateMigration is idempotent: a repeat call returns ok without re-archiving", () => {
@@ -461,7 +476,7 @@ describe("Annual Migration: 8-stage resumable flow", () => {
   it("setMemberSelections before startMigration returns ok:false", () => {
     const result = Migration.setMemberSelections("U-001", ["M-001"]);
     expect(result.ok).toBe(false);
-    expect(result.reason).toMatch(/Start a migration first/);
+    expect(result.reason).toMatch(MIGRATION_START_REGEX);
   });
 
   it("member selection is independently updatable after advancing to ACCOUNTS", () => {
@@ -474,7 +489,7 @@ describe("Annual Migration: 8-stage resumable flow", () => {
       confirmedAccountIds: ["AC-1"],
     });
     Migration.setMemberSelections("U-001", ["M-001", "M-002"]);
-    const selections = JSON.parse(configStore["MIGRATION_SELECTIONS"]);
+    const selections = JSON.parse(configStore.MIGRATION_SELECTIONS);
     expect(selections.member_ids).toEqual(["M-001", "M-002"]);
     expect(selections.account_ids).toEqual(["AC-1"]);
   });
@@ -483,8 +498,196 @@ describe("Annual Migration: 8-stage resumable flow", () => {
     Migration.startMigration("U-001");
     Migration.setMemberSelections("U-001", ["M-001"]);
     Migration.cancelMigration("U-001");
-    expect(configStore["MIGRATION_STAGE"]).toBeUndefined();
-    expect(configStore["MIGRATION_SELECTIONS"]).toBeUndefined();
-    expect(configStore["MIGRATION_TARGET_SPREADSHEET_ID"]).toBeUndefined();
+    expect(configStore.MIGRATION_STAGE).toBeUndefined();
+    expect(configStore.MIGRATION_SELECTIONS).toBeUndefined();
+    expect(configStore.MIGRATION_TARGET_SPREADSHEET_ID).toBeUndefined();
   });
+});
+
+describe("SchemaMigration schema inference", () => {
+  it("uses the earliest matching version for an unversioned canonical ledger", () => {
+    const { SchemaMigration } = require("../Migration.js");
+    const ledger = {};
+    const headers = { Config: ["key", "value"] };
+    const schemaRegistry = {
+      0: { headers },
+      1: { headers },
+    };
+    const preflight = jest
+      .spyOn(SchemaMigration, "preflightHeaders")
+      .mockReturnValue({ diagnostics: [], ok: true });
+
+    expect(
+      SchemaMigration.inferSchemaVersion(ledger, schemaRegistry, 1)
+    ).toEqual({
+      diagnostics: [],
+      ok: true,
+      version: 0,
+    });
+    expect(preflight).toHaveBeenCalledWith(ledger, headers);
+
+    preflight.mockRestore();
+  });
+
+  const MIGRATION_LOG_HEADERS = [
+    "record_type",
+    "run_id",
+    "migration_id",
+    "from_version",
+    "to_version",
+    "step_id",
+    "step_type",
+    "status",
+    "tab",
+    "row",
+    "column",
+    "num_rows",
+    "num_columns",
+    "pre_step_values",
+    "expected_fingerprint",
+    "error",
+    "updated_at",
+  ];
+  it("runs derived initialization before persisting a fresh target version", () => {
+    const { SchemaMigration } = require("../Migration.js");
+    const journalRows = [];
+    const journal = {
+      appendRow: jest.fn((row) => journalRows.push(row)),
+      getLastRow: jest.fn(() => journalRows.length + 1),
+      getDataRange: jest.fn(() => ({
+        getValues: () => [MIGRATION_LOG_HEADERS, ...journalRows],
+      })),
+      getRange: jest.fn(() => ({ setValue: jest.fn() })),
+    };
+    const ledger = {
+      getSheetByName: jest.fn((name) =>
+        name === "MigrationLog"
+          ? journal
+          : {
+              getLastRow: () => 1,
+              getLastColumn: () => 2,
+              getDataRange: () => ({ getValues: () => [["key", "value"]] }),
+              getRange: () => ({ setValues: jest.fn(), setValue: jest.fn() }),
+              appendRow: jest.fn(),
+            }
+      ),
+      insertSheet: jest.fn(() => journal),
+    };
+    const lock = { waitLock: jest.fn(), releaseLock: jest.fn() };
+    const derivedApply = jest.fn();
+    const derivedVerify = jest.fn(() => ({ errors: [], ok: true }));
+    const configValues = {};
+    const migrations = {
+      1: {
+        fromVersion: 0,
+        toVersion: 1,
+        id: "TEST-0-1",
+        steps: [{ id: "derived", type: "DERIVED_REAPPLY" }],
+      },
+    };
+    const schemaRegistry = {
+      0: { headers: { Config: ["key", "value"] } },
+      1: { headers: { Config: ["key", "value"] } },
+    };
+    const derivedRegistry = {
+      0: { apply: derivedApply, verify: derivedVerify },
+      1: { apply: derivedApply, verify: derivedVerify },
+    };
+    jest
+      .spyOn(SchemaMigration, "readSchemaVersion")
+      .mockImplementation(() => null);
+    jest
+      .spyOn(SchemaMigration, "preflightHeaders")
+      .mockReturnValue({ diagnostics: [], fingerprints: {}, ok: true });
+    jest.spyOn(SchemaMigration, "initializeMissingTabs").mockReturnValue([]);
+    jest.spyOn(SchemaMigration, "ensureJournal").mockReturnValue(journal);
+    jest.spyOn(SchemaMigration, "readJournal").mockReturnValue([]);
+    const setConfigSpy = jest
+      .spyOn(SchemaMigration, "setConfigValue")
+      .mockImplementation((_ledger, key, value) => {
+        configValues[key] = String(value);
+      });
+    jest.spyOn(SchemaMigration, "_buildManifest").mockReturnValue({});
+
+    const result = SchemaMigration.run({
+      ledger,
+      lock,
+      migrations,
+      schemaRegistry,
+      derivedRegistry,
+      skipManifest: true,
+      skipOwnerCheck: true,
+      targetVersion: 1,
+    });
+
+    expect(result).toMatchObject({ ok: true, status: "SUCCESS" });
+    expect(derivedApply).toHaveBeenCalledTimes(1);
+    expect(configValues.SCHEMA_VERSION).toBe("1");
+    expect(derivedApply.mock.invocationCallOrder[0]).toBeDefined();
+    expect(setConfigSpy.mock.invocationCallOrder.at(-1)).toBeDefined();
+    expect(derivedApply.mock.invocationCallOrder[0]).toBeLessThan(
+      setConfigSpy.mock.invocationCallOrder.at(-1)
+    );
+    expect(lock.releaseLock).not.toHaveBeenCalled();
+  });
+});
+
+describe("Annual Migration schema lock handoff", () => {
+  it("passes the activation lock into annual schema preparation", () => {
+    const { SchemaMigration } = require("../Migration.js");
+    const lock = { waitLock: jest.fn(), releaseLock: jest.fn() };
+    const run = jest.spyOn(SchemaMigration, "run").mockReturnValue({
+      ok: true,
+      status: "MANIFEST_DEFERRED",
+    });
+    const ledger = {};
+
+    const result = SchemaMigration.prepareAnnualLedger(ledger, { lock });
+
+    expect(result.ok).toBe(true);
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({ deferManifest: true, ledger, lock })
+    );
+    expect(lock.waitLock).not.toHaveBeenCalled();
+    run.mockRestore();
+  });
+});
+
+it("retries a failed pending manifest on an ACTIVATE retry", () => {
+  const originalStage = configStore.MIGRATION_STAGE;
+  const originalTarget = configStore.MIGRATION_TARGET_SPREADSHEET_ID;
+  const originalSchemaMigration = global.SchemaMigration;
+  configStore.MIGRATION_STAGE = "ACTIVATE";
+  configStore.MIGRATION_TARGET_SPREADSHEET_ID = "TARGET-1";
+  const { Migration } = require("../AnnualMigration.js");
+  const { SchemaMigration } = require("../Migration.js");
+  global.SchemaMigration = SchemaMigration;
+  const health = jest
+    .spyOn(SchemaMigration, "healthCheck")
+    .mockReturnValue({ errors: [], ok: true });
+  const complete = jest
+    .spyOn(SchemaMigration, "completePendingManifest")
+    .mockReturnValueOnce({ error: "temporary", ok: false })
+    .mockReturnValueOnce({ ok: true });
+  SpreadsheetApp.openById.mockReturnValue({});
+
+  try {
+    const first = Migration.activateMigration("U-001");
+    const second = Migration.activateMigration("U-001");
+
+    expect(first.status).toBe("MANIFEST_INCOMPLETE");
+    expect(second).toMatchObject({ ok: true, stage: "ACTIVATE" });
+    expect(complete).toHaveBeenCalledTimes(2);
+    expect(health).toHaveBeenCalled();
+  } finally {
+    health.mockRestore();
+    complete.mockRestore();
+    if (originalStage === undefined) delete configStore.MIGRATION_STAGE;
+    else configStore.MIGRATION_STAGE = originalStage;
+    if (originalTarget === undefined)
+      delete configStore.MIGRATION_TARGET_SPREADSHEET_ID;
+    else configStore.MIGRATION_TARGET_SPREADSHEET_ID = originalTarget;
+    if (originalSchemaMigration === undefined) delete global.SchemaMigration;
+    else global.SchemaMigration = originalSchemaMigration;
+  }
 });

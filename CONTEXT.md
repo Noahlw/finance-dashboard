@@ -41,8 +41,16 @@ This glossary defines the canonical language for the committee-operated CF finan
 | **Semester** | One of exactly three periods in an annual spreadsheet: `SEM A`, `SEM B`, or `SUMMER`. Each period is reportable and lockable. |
 | **Semester Close** | The Treasurer-controlled action that removes private Drafts, blocks unresolved work, rolls balances forward, and locks the closed period. |
 | **Annual Migration** | The resumable Treasurer workflow that creates the next annual spreadsheet, carries forward selected reference data and balances, validates it, and explicitly activates it. |
+| **Schema Migration** | An owner-only, versioned operation that physically restructures an *existing* ledger's column layout in place — journaled, rollback-capable, canonicalized against `COLS`'s numeric index. Distinct from Annual Migration: it never creates a new spreadsheet, and it is not expected to run in the initial go-live window. |
 | **Locked** | A finance record or closed period that ordinary workflows may no longer edit; corrections require an audited correction path. |
 | **Needs Info** | A review status requiring more information from the human member through the Committee's manual WhatsApp follow-up. It may trigger a best-effort Discord notice to a configured role. |
+
+## Development and Verification
+
+| Term | Meaning |
+|------|---------|
+| **Pre-merge Gate** | The automated verification process triggered on a Pull Request targeting the default branch that must pass all code quality, test suite, and build checks before merging. |
+| **Premerge Pass** | The aggregate required status check that confirms all underlying parallel verification jobs (linting, testing, building) succeeded cleanly. |
 
 ## Avoid
 

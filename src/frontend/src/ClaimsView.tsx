@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { AccessibleDialog } from "./components/AccessibleDialog";
+import { EventPicker } from "./components/EventPicker";
 import { apiService } from "./services/api";
+import { loadEvents } from "./services/eventCache";
 import type {
   BudgetLine,
   Claim,
+  ClaimDraftResponse,
   ClaimFilePayload,
+  Event,
   Member,
   PayoutMethod,
   UploadingReceipt,
@@ -26,6 +30,14 @@ const ALLOWED_TYPES = [
   "application/pdf",
 ];
 
+interface PayoutHandlePayload {
+  account?: string;
+  details?: string;
+  method?: "FPS" | "PAYME" | "OTHER";
+  phone?: string;
+  qrDriveFileId?: string;
+}
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) {
     return bytes + " B";
@@ -34,6 +46,27 @@ function formatFileSize(bytes: number): string {
     return (bytes / 1024).toFixed(1) + " KB";
   }
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+function receiptStatusLabel(receipt: UploadingReceipt): string {
+  if (receipt.status === "done") {
+    return receipt.receiptId ? "Saved" : "Uploaded";
+  }
+  if (receipt.status === "uploading") {
+    return "Uploading...";
+  }
+  if (receipt.status === "error") {
+    return "Failed";
+  }
+  return "Pending";
+}
+
+function formatEventLabel(eventId: string, events: Event[]): string {
+  const match = events.find((evt) => evt.event_id === eventId);
+  if (!match) {
+    return "";
+  }
+  return `${match.name} (${match.semester})`;
 }
 
 export default function ClaimsView({
@@ -50,7 +83,7 @@ export default function ClaimsView({
   const [claimantId, setClaimantId] = useState("");
   const [expenseDate, setExpenseDate] = useState("");
   const [semester, setSemester] = useState("26A");
-  const [eventId, setEventId] = useState("");
+  const [eventId, setEventId] = useState<string | undefined>("");
   const [amount, setAmount] = useState("");
   const [notes, setNotes] = useState("");
   const [budgetLineId, setBudgetLineId] = useState("");
@@ -61,22 +94,22 @@ export default function ClaimsView({
   const [otherDetails, setOtherDetails] = useState("");
   const [qrFile, setQrFile] = useState<ClaimFilePayload>();
   const [draftId, setDraftId] = useState<string>();
+  const [editingClaimId, setEditingClaimId] = useState<string>();
   const [idempotencyKey, setIdempotencyKey] = useState("");
   const [correctionMessage, setCorrectionMessage] = useState("");
   const [skipReceipt, setSkipReceipt] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-
+  const [events, setEvents] = useState<Event[]>([]);
   const [uploadedReceipts, setUploadedReceipts] = useState<UploadingReceipt[]>(
     []
   );
-  const [pendingVendor, setPendingVendor] = useState("");
-  const [pendingReceiptDate, setPendingReceiptDate] = useState("");
-  const [pendingReceiptTotal, setPendingReceiptTotal] = useState("");
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [pendingFileBase64, setPendingFileBase64] = useState("");
   const [pendingFileError, setPendingFileError] = useState("");
+  const [pendingVendor, setPendingVendor] = useState("");
+  const [pendingReceiptDate, setPendingReceiptDate] = useState("");
+  const [pendingReceiptTotal, setPendingReceiptTotal] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
-
   const resetForm = () => {
     setStep("member");
     setClaimantId("");
@@ -116,6 +149,12 @@ export default function ClaimsView({
 
   useEffect(() => {
     loadClaims();
+    loadEvents()
+      .then(setEvents)
+      .catch(() => {
+        // Review-step falls back to the raw event id when the list is
+        // unavailable; the EventPicker handles its own retries.
+      });
   }, []);
 
   const openNewClaim = () => {
@@ -124,6 +163,100 @@ export default function ClaimsView({
     setShowForm(true);
   };
 
+  const editSubmittedClaim = (claim: Claim) => {
+    setShowForm(false);
+    resetForm();
+    setDraftId(undefined);
+    setClaimantId(claim.claimant_id);
+    setAmount(String(claim.total_amount ?? ""));
+    setNotes(claim.notes || "");
+    setEventId(claim.event_id || "");
+    setExpenseDate("");
+    setSemester(claim.semester || "26A");
+    setIdempotencyKey(crypto.randomUUID());
+    setEditingClaimId(claim.claim_id);
+    setShowForm(true);
+  };
+
+  const submitEditClaim = async () => {
+    if (!editingClaimId) {
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await apiService.editClaim({
+        amount: Number(amount) || 0,
+        claimId: editingClaimId,
+        claimantId,
+        eventId: eventId || undefined,
+        notes,
+      });
+      setShowForm(false);
+      setEditingClaimId(undefined);
+      loadClaims();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const resumeDraft = (claimId: string) => {
+    setShowForm(false);
+    apiService
+      .getClaimDraft(claimId)
+      .then((draft: ClaimDraftResponse) => {
+        resetForm();
+        setDraftId(draft.claim_id);
+        setClaimantId(draft.claimant_id || "");
+        setExpenseDate(draft.expense_date || "");
+        setSemester(draft.semester || "26A");
+        setEventId(draft.event_id || "");
+        setAmount(String(draft.total_amount ?? ""));
+        setNotes(draft.notes || "");
+        const firstLine = draft.line_items?.[0];
+        setBudgetLineId(firstLine?.budget_line_id || "");
+        if (
+          draft.payout_method === "FPS" ||
+          draft.payout_method === "PAYME" ||
+          draft.payout_method === "OTHER"
+        ) {
+          setPayoutMethod(draft.payout_method);
+        }
+        if (draft.payout_handle) {
+          try {
+            const parsed = JSON.parse(
+              draft.payout_handle
+            ) as PayoutHandlePayload;
+            setFpsPhone(parsed.method === "FPS" ? parsed.phone || "" : "");
+            setFpsAccount(parsed.method === "FPS" ? parsed.account || "" : "");
+            setPaymePhone(parsed.method === "PAYME" ? parsed.phone || "" : "");
+            setOtherDetails(
+              parsed.method === "OTHER" ? parsed.details || "" : ""
+            );
+          } catch {
+            // Legacy or malformed payout_handle — leave payout fields blank.
+          }
+        }
+        setIdempotencyKey(draft.uuid || crypto.randomUUID());
+        const hydratedReceipts: UploadingReceipt[] = (draft.line_items ?? [])
+          .map((line) => line.receipt_id)
+          .filter((rid): rid is string => Boolean(rid))
+          .map((receiptId: string) => ({
+            base64Data: "",
+            fileName: "(saved receipt)",
+            mimeType: "",
+            receiptDate: "",
+            receiptId,
+            receiptTotal: 0,
+            status: "done",
+            vendor: "",
+          }));
+        setUploadedReceipts(hydratedReceipts);
+        setShowForm(true);
+      })
+      .catch((err: Error) => setError(err.message));
+  };
   const canProceed = () => {
     if (step === "member") {
       return !!claimantId;
@@ -232,7 +365,7 @@ export default function ClaimsView({
         budgetLineId,
         claimantId,
         claimId: draftId,
-        eventId,
+        eventId: eventId || undefined,
         expenseDate,
         fpsAccount,
         fpsPhone,
@@ -362,12 +495,35 @@ export default function ClaimsView({
                 value={budgetLineId}
               >
                 <option value="">None / pay from general fund</option>
-                {budgetLines.map((bl) => (
-                  <option key={bl.line_id} value={bl.line_id}>
-                    {bl.description} - HK${bl.remaining.toFixed(2)} remaining
-                  </option>
-                ))}
+                {budgetLines.map((bl) => {
+                  const over = (bl as BudgetLine & { overBudget?: boolean })
+                    .overBudget;
+                  return (
+                    <option key={bl.line_id} value={bl.line_id}>
+                      {bl.description} - HK${bl.remaining.toFixed(2)} remaining
+                      {over ? " — OVER BUDGET" : ""}
+                    </option>
+                  );
+                })}
               </select>
+              {budgetLineId &&
+                (() => {
+                  const selected = budgetLines.find(
+                    (bl) => bl.line_id === budgetLineId
+                  ) as (BudgetLine & { overBudget?: boolean }) | undefined;
+                  if (selected?.overBudget) {
+                    return (
+                      <div className="alert warning" role="alert">
+                        <strong>Over-budget warning:</strong> This Budget Line
+                        is over budget (HK$
+                        {selected.remaining.toFixed(2)} remaining). You can
+                        still select it, but the claim will be flagged for
+                        Treasurer review.
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
             </div>
           </>
         );
@@ -402,7 +558,7 @@ export default function ClaimsView({
                     {uploadedReceipts.map((r, i) => (
                       <div
                         className={`receipt-item receipt-${r.status}`}
-                        key={i}
+                        key={r.receiptId || i}
                       >
                         <div className="receipt-info">
                           <span className="receipt-filename">{r.fileName}</span>
@@ -421,13 +577,7 @@ export default function ClaimsView({
                           <span
                             className={`badge status-${r.status === "done" ? "approved" : r.status === "error" ? "rejected" : "pending"}`}
                           >
-                            {r.status === "done"
-                              ? "Uploaded"
-                              : r.status === "uploading"
-                                ? "Uploading..."
-                                : r.status === "error"
-                                  ? "Failed"
-                                  : "Pending"}
+                            {receiptStatusLabel(r)}
                           </span>
                           {r.receiptId && (
                             <span className="mono receipt-id-label">
@@ -650,6 +800,12 @@ export default function ClaimsView({
             <p>
               <strong>Note:</strong> {notes}
             </p>
+            {eventId && (
+              <p>
+                <strong>Event:</strong>{" "}
+                {formatEventLabel(eventId, events) || eventId}
+              </p>
+            )}
             <p>
               <strong>Payment:</strong> {payoutMethod}
               {payoutMethod === "FPS" && fpsPhone
@@ -745,6 +901,13 @@ export default function ClaimsView({
                 ))}
               </div>
               {renderStep()}
+              <EventPicker
+                aria-label="Event"
+                id="claim-event-picker"
+                label="Event (optional)"
+                onChange={(value) => setEventId(value ?? "")}
+                value={eventId}
+              />
               <div className="modal-actions">
                 {step !== "member" && (
                   <button
@@ -757,21 +920,29 @@ export default function ClaimsView({
                 )}
                 {step === "review" ? (
                   <>
-                    <button
-                      className="secondary-btn"
-                      disabled={submitting}
-                      onClick={() => handleSave(false)}
-                      type="button"
-                    >
-                      Save Draft
-                    </button>
+                    {!editingClaimId && (
+                      <button
+                        className="secondary-btn"
+                        disabled={submitting}
+                        onClick={() => handleSave(false)}
+                        type="button"
+                      >
+                        Save Draft
+                      </button>
+                    )}
                     <button
                       className="primary-btn"
                       disabled={submitting}
-                      onClick={() => handleSave(true)}
+                      onClick={() =>
+                        editingClaimId ? submitEditClaim() : handleSave(true)
+                      }
                       type="button"
                     >
-                      {submitting ? "Submitting..." : "Submit Claim"}
+                      {submitting
+                        ? "Submitting..."
+                        : editingClaimId
+                          ? "Save Changes"
+                          : "Submit Claim"}
                     </button>
                   </>
                 ) : (
@@ -818,45 +989,68 @@ export default function ClaimsView({
                   <th>Status</th>
                   <th>Submitted</th>
                   <th>Receipts</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {claims.map((c) => (
-                  <tr key={c.claim_id}>
-                    <td className="mono">{c.claim_id}</td>
-                    <td>
-                      {members.find((m) => m.user_id === c.claimant_id)
-                        ?.display_name || c.claimant_id}
-                    </td>
-                    <td className="amount">
-                      ${Number(c.total_amount).toFixed(2)}
-                    </td>
-                    <td>
-                      <span
-                        className={`badge status-${c.status.toLowerCase()}`}
-                      >
-                        {c.status}
-                      </span>
-                    </td>
-                    <td>
-                      {c.submitted_at
-                        ? new Date(c.submitted_at).toLocaleDateString()
-                        : "-"}
-                    </td>
-                    <td>
-                      {c.missingReceipt ? (
-                        <span className="badge status-rejected">Missing</span>
-                      ) : c.receiptIds?.length ? (
-                        <span className="badge status-approved">
-                          {c.receiptIds.length} file
-                          {c.receiptIds.length > 1 ? "s" : ""}
+                {claims.map((c) => {
+                  const isDraft = c.status === "DRAFT" || c.draft === true;
+                  return (
+                    <tr key={c.claim_id}>
+                      <td className="mono">{c.claim_id}</td>
+                      <td>
+                        {members.find((m) => m.user_id === c.claimant_id)
+                          ?.display_name || c.claimant_id}
+                      </td>
+                      <td className="amount">
+                        ${Number(c.total_amount).toFixed(2)}
+                      </td>
+                      <td>
+                        <span
+                          className={`badge status-${c.status.toLowerCase()}`}
+                        >
+                          {c.status}
                         </span>
-                      ) : (
-                        <span className="muted-text">-</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td>
+                        {c.submitted_at
+                          ? new Date(c.submitted_at).toLocaleDateString()
+                          : "-"}
+                      </td>
+                      <td>
+                        {c.missingReceipt ? (
+                          <span className="badge status-rejected">Missing</span>
+                        ) : c.receiptIds?.length ? (
+                          <span className="badge status-approved">
+                            {c.receiptIds.length} file
+                            {c.receiptIds.length > 1 ? "s" : ""}
+                          </span>
+                        ) : (
+                          <span className="muted-text">-</span>
+                        )}
+                      </td>
+                      <td>
+                        {isDraft ? (
+                          <button
+                            className="primary-btn small-btn"
+                            onClick={() => resumeDraft(c.claim_id)}
+                            type="button"
+                          >
+                            Resume
+                          </button>
+                        ) : c.status === "SUBMITTED" ? (
+                          <button
+                            className="secondary-btn small-btn"
+                            onClick={() => editSubmittedClaim(c)}
+                            type="button"
+                          >
+                            Edit
+                          </button>
+                        ) : null}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
