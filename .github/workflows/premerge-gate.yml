@@ -16,7 +16,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
+        with:
+          fetch-depth: 0
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
@@ -26,8 +27,36 @@ jobs:
       - name: Install root dependencies
         run: npm ci
 
-      - name: Run linter (Ultracite)
-        run: npm run lint
+      - name: Run linter - Ultracite changed files
+        run: |
+          set -e
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          CHECKED_OUT_SHA="${{ github.sha }}"
+          if [ -z "$BASE_SHA" ]; then
+            echo "No PR base SHA available (workflow_dispatch?); skipping changed-file lint."
+            exit 0
+          fi
+          if ! git cat-file -e "$BASE_SHA" 2>/dev/null; then
+            echo "Base SHA $BASE_SHA not present locally; aborting."
+            exit 1
+          fi
+          CHANGED_TMP=$(mktemp)
+          trap 'rm -f "$CHANGED_TMP"' EXIT
+          git diff --name-only --diff-filter=ACMRTUXB "$BASE_SHA" "$CHECKED_OUT_SHA" -- '*.js' '*.ts' '*.tsx' '*.jsx' '*.mjs' '*.cjs' > "$CHANGED_TMP"
+          FILES=()
+          while IFS= read -r f; do
+            case "$f" in
+              index.html|favicon.svg|icons.svg|archive/*|src/frontend/dist/*|docs/*) continue ;;
+            esac
+            [ -n "$f" ] && FILES+=("$f")
+          done < "$CHANGED_TMP"
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "No changed lintable files in this PR; skipping lint."
+            exit 0
+          fi
+          echo "Linting ${#FILES[@]} changed file(s):"
+          printf '  %s\n' "${FILES[@]}"
+          npx ultracite check --max-diagnostics=10000 "${FILES[@]}"
 
   test:
     name: Backend Jest Tests

@@ -150,6 +150,7 @@ var Engine = {
       sheet.getRange(row.rowIndex, c.approved_at).setValue(now);
       sheet.getRange(row.rowIndex, c.approved_by).setValue(actorUserId);
       var payoutAccountId = payload && payload.account_id;
+      var payoutTxnReference = payload && payload.txnReference;
     } else if (action === "REJECT" || action === "REQUEST_INFO") {
       Engine._appendNote(
         sheet,
@@ -183,7 +184,11 @@ var Engine = {
       sheet.getRange(row.rowIndex, c.self_approved).setValue(true);
     }
     if (action === "APPROVE_PAYOUT") {
-      Payouts.onClaimApprovedForPayout(claimId, payoutAccountId);
+      Payouts.onClaimApprovedForPayout(
+        claimId,
+        payoutAccountId,
+        payoutTxnReference
+      );
     }
     if (action === "LOCK" && effectDetail) {
       effectDetail.lockedHash = Engine._computeLockedRowHash(

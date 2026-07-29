@@ -503,3 +503,191 @@ describe("Annual Migration: 8-stage resumable flow", () => {
     expect(configStore.MIGRATION_TARGET_SPREADSHEET_ID).toBeUndefined();
   });
 });
+
+describe("SchemaMigration schema inference", () => {
+  it("uses the earliest matching version for an unversioned canonical ledger", () => {
+    const { SchemaMigration } = require("../Migration.js");
+    const ledger = {};
+    const headers = { Config: ["key", "value"] };
+    const schemaRegistry = {
+      0: { headers },
+      1: { headers },
+    };
+    const preflight = jest
+      .spyOn(SchemaMigration, "preflightHeaders")
+      .mockReturnValue({ diagnostics: [], ok: true });
+
+    expect(
+      SchemaMigration.inferSchemaVersion(ledger, schemaRegistry, 1)
+    ).toEqual({
+      diagnostics: [],
+      ok: true,
+      version: 0,
+    });
+    expect(preflight).toHaveBeenCalledWith(ledger, headers);
+
+    preflight.mockRestore();
+  });
+
+  const MIGRATION_LOG_HEADERS = [
+    "record_type",
+    "run_id",
+    "migration_id",
+    "from_version",
+    "to_version",
+    "step_id",
+    "step_type",
+    "status",
+    "tab",
+    "row",
+    "column",
+    "num_rows",
+    "num_columns",
+    "pre_step_values",
+    "expected_fingerprint",
+    "error",
+    "updated_at",
+  ];
+  it("runs derived initialization before persisting a fresh target version", () => {
+    const { SchemaMigration } = require("../Migration.js");
+    const journalRows = [];
+    const journal = {
+      appendRow: jest.fn((row) => journalRows.push(row)),
+      getLastRow: jest.fn(() => journalRows.length + 1),
+      getDataRange: jest.fn(() => ({
+        getValues: () => [MIGRATION_LOG_HEADERS, ...journalRows],
+      })),
+      getRange: jest.fn(() => ({ setValue: jest.fn() })),
+    };
+    const ledger = {
+      getSheetByName: jest.fn((name) =>
+        name === "MigrationLog"
+          ? journal
+          : {
+              getLastRow: () => 1,
+              getLastColumn: () => 2,
+              getDataRange: () => ({ getValues: () => [["key", "value"]] }),
+              getRange: () => ({ setValues: jest.fn(), setValue: jest.fn() }),
+              appendRow: jest.fn(),
+            }
+      ),
+      insertSheet: jest.fn(() => journal),
+    };
+    const lock = { waitLock: jest.fn(), releaseLock: jest.fn() };
+    const derivedApply = jest.fn();
+    const derivedVerify = jest.fn(() => ({ errors: [], ok: true }));
+    const configValues = {};
+    const migrations = {
+      1: {
+        fromVersion: 0,
+        toVersion: 1,
+        id: "TEST-0-1",
+        steps: [{ id: "derived", type: "DERIVED_REAPPLY" }],
+      },
+    };
+    const schemaRegistry = {
+      0: { headers: { Config: ["key", "value"] } },
+      1: { headers: { Config: ["key", "value"] } },
+    };
+    const derivedRegistry = {
+      0: { apply: derivedApply, verify: derivedVerify },
+      1: { apply: derivedApply, verify: derivedVerify },
+    };
+    jest
+      .spyOn(SchemaMigration, "readSchemaVersion")
+      .mockImplementation(() => null);
+    jest
+      .spyOn(SchemaMigration, "preflightHeaders")
+      .mockReturnValue({ diagnostics: [], fingerprints: {}, ok: true });
+    jest.spyOn(SchemaMigration, "initializeMissingTabs").mockReturnValue([]);
+    jest.spyOn(SchemaMigration, "ensureJournal").mockReturnValue(journal);
+    jest.spyOn(SchemaMigration, "readJournal").mockReturnValue([]);
+    const setConfigSpy = jest
+      .spyOn(SchemaMigration, "setConfigValue")
+      .mockImplementation((_ledger, key, value) => {
+        configValues[key] = String(value);
+      });
+    jest.spyOn(SchemaMigration, "_buildManifest").mockReturnValue({});
+
+    const result = SchemaMigration.run({
+      ledger,
+      lock,
+      migrations,
+      schemaRegistry,
+      derivedRegistry,
+      skipManifest: true,
+      skipOwnerCheck: true,
+      targetVersion: 1,
+    });
+
+    expect(result).toMatchObject({ ok: true, status: "SUCCESS" });
+    expect(derivedApply).toHaveBeenCalledTimes(1);
+    expect(configValues.SCHEMA_VERSION).toBe("1");
+    expect(derivedApply.mock.invocationCallOrder[0]).toBeDefined();
+    expect(setConfigSpy.mock.invocationCallOrder.at(-1)).toBeDefined();
+    expect(derivedApply.mock.invocationCallOrder[0]).toBeLessThan(
+      setConfigSpy.mock.invocationCallOrder.at(-1)
+    );
+    expect(lock.releaseLock).not.toHaveBeenCalled();
+  });
+});
+
+describe("Annual Migration schema lock handoff", () => {
+  it("passes the activation lock into annual schema preparation", () => {
+    const { SchemaMigration } = require("../Migration.js");
+    const lock = { waitLock: jest.fn(), releaseLock: jest.fn() };
+    const run = jest.spyOn(SchemaMigration, "run").mockReturnValue({
+      ok: true,
+      status: "MANIFEST_DEFERRED",
+    });
+    const ledger = {};
+
+    const result = SchemaMigration.prepareAnnualLedger(ledger, { lock });
+
+    expect(result.ok).toBe(true);
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({ deferManifest: true, ledger, lock })
+    );
+    expect(lock.waitLock).not.toHaveBeenCalled();
+    run.mockRestore();
+  });
+});
+
+it("retries a failed pending manifest on an ACTIVATE retry", () => {
+  const originalStage = configStore.MIGRATION_STAGE;
+  const originalTarget = configStore.MIGRATION_TARGET_SPREADSHEET_ID;
+  const originalSchemaMigration = global.SchemaMigration;
+  configStore.MIGRATION_STAGE = "ACTIVATE";
+  configStore.MIGRATION_TARGET_SPREADSHEET_ID = "TARGET-1";
+  const { Migration } = require("../AnnualMigration.js");
+  const { SchemaMigration } = require("../Migration.js");
+  global.SchemaMigration = SchemaMigration;
+  const health = jest
+    .spyOn(SchemaMigration, "healthCheck")
+    .mockReturnValue({ errors: [], ok: true });
+  const complete = jest
+    .spyOn(SchemaMigration, "completePendingManifest")
+    .mockReturnValueOnce({ error: "temporary", ok: false })
+    .mockReturnValueOnce({ ok: true });
+  SpreadsheetApp.openById.mockReturnValue({});
+
+  try {
+    const first = Migration.activateMigration("U-001");
+    const second = Migration.activateMigration("U-001");
+
+    expect(first.status).toBe("MANIFEST_INCOMPLETE");
+    expect(second).toMatchObject({ ok: true, stage: "ACTIVATE" });
+    expect(complete).toHaveBeenCalledTimes(2);
+    expect(health).toHaveBeenCalled();
+  } finally {
+    health.mockRestore();
+    complete.mockRestore();
+    if (originalStage === undefined) delete configStore.MIGRATION_STAGE;
+    else configStore.MIGRATION_STAGE = originalStage;
+    if (originalTarget === undefined)
+      delete configStore.MIGRATION_TARGET_SPREADSHEET_ID;
+    else configStore.MIGRATION_TARGET_SPREADSHEET_ID = originalTarget;
+    if (originalSchemaMigration === undefined) delete global.SchemaMigration;
+    else global.SchemaMigration = originalSchemaMigration;
+  }
+});

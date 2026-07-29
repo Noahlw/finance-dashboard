@@ -934,8 +934,8 @@ var SchemaMigration = {
 
   /**
    * Match an unversioned ledger to exactly one registered live header shape.
-   * Duplicate layout aliases resolve to the highest matching version because
-   * there is no physical data move owed between identical shapes.
+   * Duplicate layout aliases resolve to the earliest matching version so a
+   * fresh canonical ledger still executes derived initialization steps.
    * @param {Spreadsheet} ledger
    * @param {Object} schemaRegistry
    * @param {number} targetVersion
@@ -944,18 +944,12 @@ var SchemaMigration = {
   inferSchemaVersion(ledger, schemaRegistry, targetVersion) {
     var matches = [];
     var diagnostics = [];
-    var seenShapes = {};
     Object.keys(schemaRegistry)
       .map(Number)
       .filter((version) => version <= targetVersion)
-      .sort((left, right) => right - left)
+      .sort((left, right) => left - right)
       .forEach((version) => {
         var headers = SchemaMigration._resolveHeaders(schemaRegistry[version]);
-        var shape = JSON.stringify(headers);
-        if (seenShapes[shape]) {
-          return;
-        }
-        seenShapes[shape] = true;
         var result = SchemaMigration.preflightHeaders(ledger, headers);
         if (result.ok) {
           matches.push(version);
@@ -963,20 +957,11 @@ var SchemaMigration = {
           diagnostics = result.diagnostics;
         }
       });
-    if (matches.length === 1) {
+    if (matches.length) {
       return { diagnostics: [], ok: true, version: matches[0] };
     }
     return {
-      diagnostics:
-        matches.length > 1
-          ? [
-              {
-                classification: "AMBIGUOUS_SCHEMA_VERSION",
-                found: matches.join(","),
-                tab: "Config",
-              },
-            ]
-          : diagnostics,
+      diagnostics,
       ok: false,
     };
   },
@@ -1194,12 +1179,15 @@ var SchemaMigration = {
    * Annual Migration pre-activation hook. It deliberately defers the manifest
    * because LEDGER_ID still points at the prior annual ledger.
    * @param {Spreadsheet} ledger
+   * @param {Object=} options
    * @return {Object}
    */
-  prepareAnnualLedger(ledger) {
+  prepareAnnualLedger(ledger, options) {
+    var settings = options || {};
     return SchemaMigration.run({
       deferManifest: true,
       ledger,
+      lock: settings.lock,
       skipOwnerCheck: true,
       targetVersion: CURRENT_SCHEMA_VERSION,
     });

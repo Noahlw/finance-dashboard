@@ -4,6 +4,7 @@ export type WorkspaceView =
   | "members"
   | "budget-requests"
   | "income"
+  | "events"
   | "payouts"
   | "reports";
 export type SessionRole =
@@ -40,8 +41,28 @@ export interface ReconciliationAccount {
   opening_balance: number;
 }
 
+export interface ReconciliationMovement {
+  account_id: string;
+  amount: number;
+  signed_amount?: number;
+  movement_id: string;
+  movement_type: string;
+  source_type: string;
+  source_id: string;
+  counterparty_account_id?: string;
+  posted_by: string;
+  posted_at: string;
+  reason: string;
+}
+
 export interface ReconciliationData {
   accounts: ReconciliationAccount[];
+  drilldown: {
+    adjustments: ReconciliationMovement[];
+    income: ReconciliationMovement[];
+    payouts: ReconciliationMovement[];
+    transfers: ReconciliationMovement[];
+  };
   incomplete_payouts: {
     amount: number;
     claim_id: string;
@@ -51,6 +72,13 @@ export interface ReconciliationData {
   }[];
   mismatches: ReconciliationAccount[];
   movement_count: number;
+}
+
+export interface ReconciliationCorrectionPayload {
+  accountId: string;
+  amount: number;
+  direction: "CREDIT" | "DEBIT";
+  reason: string;
 }
 
 export interface Claim {
@@ -73,6 +101,48 @@ export interface BudgetLine {
   line_id: string;
   remaining: number;
   request_id: string;
+}
+
+// Event types (issue #73, ADR 0073)
+export interface Event {
+  closed_at?: string;
+  created_at: string;
+  event_id: string;
+  name: string;
+  owner_user_id: string;
+  semester: string;
+  status: "OPEN" | "CLOSED";
+}
+
+export interface EventPayload {
+  name: string;
+  owner_user_id: string;
+  semester: string;
+}
+
+export interface EditEventPayload {
+  event_id: string;
+  name?: string;
+  owner_user_id?: string;
+  semester?: string;
+}
+
+export interface CorrectEventPayload {
+  event_id: string;
+  name?: string;
+  owner_user_id?: string;
+  semester?: string;
+}
+
+export interface CloseEventPayload {
+  event_id: string;
+  reason: string;
+}
+
+export interface CloseEventResult {
+  closed_at: string;
+  event_id: string;
+  status: "CLOSED";
 }
 
 export interface MyClaimsResponse {
@@ -101,6 +171,7 @@ export interface EditClaimPayload {
   budgetLineId?: string;
   claimantId: string;
   claimId: string;
+  eventId?: string;
   expenseDate?: string;
   notes: string;
   payoutHandle?: string;
@@ -155,6 +226,7 @@ export interface PendingBudgetRequest {
   needed_by: string;
   request_id: string;
   requester_id: string;
+  status: string;
   submitted_at: string;
   title: string;
   total_requested: number;
@@ -162,6 +234,7 @@ export interface PendingBudgetRequest {
 
 export interface BudgetDecisionPayload {
   action: "APPROVE" | "REDUCE" | "REJECT" | "REQUEST_INFO" | "CLOSE";
+  amount_override?: number;
   decision_note?: string;
 }
 
@@ -236,16 +309,49 @@ export interface AtomicClaimPayload extends ClaimDraftPayload {
   receipts?: ClaimFilePayload[];
 }
 
+export interface ClaimDraftLineItem {
+  amount: number;
+  budget_line_id: string;
+  claim_line_id: string;
+  description: string;
+  missing_receipt_flag: boolean;
+  receipt_id: string;
+}
+
 export interface Claim {
   claim_id: string;
   claimant_id: string;
+  draft?: boolean;
+  event_id?: string;
+  expense_date?: string;
   missingReceipt?: boolean;
   notes: string;
+  payout_handle?: string;
   payout_method?: string;
   receiptIds?: string[];
+  semester?: string;
   status: string;
   submitted_at: string;
   total_amount: number;
+}
+
+export interface ClaimDraftResponse {
+  budget_line_id: string;
+  claim_id: string;
+  claimant_id: string;
+  created_by: string;
+  draft: boolean;
+  event_id?: string;
+  expense_date?: string;
+  line_items: ClaimDraftLineItem[];
+  notes: string;
+  payout_handle?: string;
+  payout_method?: string;
+  receipt_ids: string[];
+  semester?: string;
+  status: string;
+  total_amount: number;
+  uuid: string;
 }
 
 export interface ClaimQueueItem {
@@ -254,6 +360,8 @@ export interface ClaimQueueItem {
   created_by: string;
   event_id?: string;
   notes: string;
+  payout_handle?: string;
+  payout_method?: string;
   status: string;
   submitted_at: string;
   total_amount: number;

@@ -292,11 +292,14 @@ var Payouts = {
   /**
    * Called by Engine when a claim reaches APPROVED_FOR_PAYOUT. Creates
    * exactly one Payout row (payee = claimant, amount = claim total).
-   * Partial payment creates additional payout rows later.
+   * Partial payment creates additional payout rows later. The claimant's
+   * payout_method is copied from the Vault; an optional txnReference may
+   * be supplied at approval time (#72).
    * @param {string} claimId
    * @param {string} accountId optional Finance Account to deduct from
+   * @param {string=} txnReference optional transaction reference to seed on the row
    */
-  onClaimApprovedForPayout(claimId, accountId) {
+  onClaimApprovedForPayout(claimId, accountId, txnReference) {
     var claimRow = Engine._loadRow("ExpenseClaim", claimId);
     if (!claimRow) {
       return;
@@ -308,6 +311,19 @@ var Payouts = {
     // Note: balance deduction happens at markPayoutSent, not here.
     // The reserved_payouts column tracks display-only reservation.
 
+    // Pull the claimant's payout method/handle from Vault so the Treasurer
+    // doesn't have to re-enter them at mark-sent time (#72).
+    var vaultRow = _findVaultByUserId(payeeUserId);
+    var payoutMethod = "";
+    if (vaultRow) {
+      var v = COLS.Vault;
+      payoutMethod = String(vaultRow.values[v.payout_method - 1] || "");
+    }
+    var payoutTxnReference =
+      txnReference && String(txnReference).trim()
+        ? String(txnReference).trim()
+        : "";
+
     var payoutId = Ids.nextId("Payout");
     var pc = COLS.Payouts;
     var row = [];
@@ -315,8 +331,8 @@ var Payouts = {
     row[pc.claim_id - 1] = claimId;
     row[pc.payee_user_id - 1] = payeeUserId;
     row[pc.amount - 1] = amount;
-    row[pc.method - 1] = "";
-    row[pc.txn_reference - 1] = "";
+    row[pc.method - 1] = payoutMethod;
+    row[pc.txn_reference - 1] = payoutTxnReference;
     row[pc.paid_by - 1] = "";
     row[pc.status - 1] = STATUS.Payout.QUEUED;
     row[pc.account_id - 1] = accountId || "";
@@ -326,7 +342,9 @@ var Payouts = {
       accountId: accountId || null,
       amount,
       claimId,
+      method: payoutMethod || null,
       payeeUserId,
+      txnReference: payoutTxnReference || null,
     });
     Discord.postTreasury(
       "**" +
@@ -338,6 +356,10 @@ var Payouts = {
         " for claim " +
         claimId +
         (accountId ? " (account: " + accountId + ")" : "") +
+        (payoutMethod ? " (method: " + payoutMethod + ")" : "") +
+        (payoutTxnReference
+          ? " (txn_reference: " + payoutTxnReference + ")"
+          : "") +
         "."
     );
   },
